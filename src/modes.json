@@ -1,0 +1,39 @@
+{
+  "_comment": "播出模式定義。每個模式的來源、長度上限、shorts 池與掃描頻率都在這裡；換頻道或改參數只改這個檔。max_seconds=0 表示播全長。範例用 @YourChannel，請換成你自己的頻道 handle。",
+  "news": {
+    "label": "新聞模式",
+    "video_source": "https://www.youtube.com/@YourChannel/videos",
+    "video_limit": 30,
+    "max_seconds": 0,
+    "shorts_url": "https://www.youtube.com/@YourChannel/shorts",
+    "shorts_count": 15,
+    "shorts_seconds": 90,
+    "refresh_seconds": 300,
+    "note": "切換下一支時重新掃描；有新片就從清單頭開始播。shorts 取最新 15 支。",
+    "shorts_passes": 0
+  },
+  "promotion": {
+    "label": "推廣模式",
+    "video_source": "https://www.youtube.com/@YourChannel/videos",
+    "video_limit": 30,
+    "max_seconds": 450,
+    "shorts_url": "https://www.youtube.com/@YourChannel/shorts",
+    "shorts_count": 50,
+    "shorts_seconds": 90,
+    "refresh_seconds": 1800,
+    "note": "目的在推廣其它影片。每支最多播 450 秒（不必播完），shorts 取最新 50 支。",
+    "shorts_passes": 0
+  },
+  "test": {
+    "label": "測試模式",
+    "video_source": "https://www.youtube.com/@YourChannel/videos",
+    "video_limit": 3,
+    "max_seconds": 180,
+    "shorts_url": "https://www.youtube.com/@YourChannel/shorts",
+    "shorts_count": 6,
+    "shorts_seconds": 90,
+    "refresh_seconds": 0,
+    "note": "3 支 × 180 秒、shorts 6 支。不自動重新掃描。",
+    "shorts_passes": 0
+  }
+}

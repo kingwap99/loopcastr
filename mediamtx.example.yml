@@ -1,0 +1,62 @@
+#############################################################
+# ytpl — 本機媒體樞紐（MediaMTX）設定範例
+#
+# install.sh 會在 mediamtx.yml 不存在時複製這份過去；
+# 實際調整請改 mediamtx.yml，不要把站台資訊寫回範例檔。
+#
+# 資料流：
+#   playout.sh   → rtmp://127.0.0.1:1935/live/main
+#   yt_publish.sh ← rtmp://127.0.0.1:1935/live/main → YouTube ingest
+#############################################################
+
+logLevel: info
+
+# 來源偶爾會停滯（實測 googlevideo 會 reset 連線）。預設 10s 讀取逾時會比
+# 推流端的看門狗先開槍、把整條路徑拆掉；調高讓換手由推流端主導。
+readTimeout: 30s
+
+# 觀測用 API：healthcheck.py、loopwatch.py、relay.py --observe 都讀這支。
+api: yes
+apiAddress: 127.0.0.1:9997
+
+# 發布端（playout.sh / relay.py 推進來）。
+# 注意：`:1935` 代表聽「所有網路介面」。只有本機要連就改成 127.0.0.1:1935；
+# 要讓另一台機器拉訊號才需要開到區網，而且建議加上認證（見下方 paths）。
+rtmp: yes
+rtmpAddress: :1935
+
+# HLS 預設關閉：實測沒人使用時，每條路徑仍會白做一次 remux（約 +1.1% CPU／路徑）。
+# 需要瀏覽器預覽時再開，並把位址綁在 127.0.0.1。
+hls: no
+# hlsAddress: 127.0.0.1:8888
+
+# 用不到的協定明確關掉，少開連接埠。
+rtsp: no
+srt: no
+webrtc: no
+moq: no
+
+# 路徑白名單：只接受清單上列出的路徑。
+# 這是刻意的安全預設。若寫成 `all_others:`（MediaMTX 的預設值），
+# 任何人都可以推到任意路徑名稱。
+paths:
+  live/main:
+
+    # 開到區網或多人共用時，至少設一組發布／讀取認證：
+    #
+    # publishUser: publisher
+    # publishPass: <CHANGE_ME>
+    # readUser: viewer
+    # readPass: <CHANGE_ME>
+    #
+    # 設了之後，playout.sh 的 SRC 與 yt_publish.sh 的 DEST 都要帶認證：
+    #   rtmp://publisher:<CHANGE_ME>@127.0.0.1:1935/live/main
+
+  # 要恢復「任何路徑都接受」的舊行為時，把上面那段換成：
+  # all_others:
+#
+# 換了路徑名稱時，這三個地方要一起改：
+#   playout.sh     的 DEST / PATH_NAME
+#   yt_publish.sh  的 SRC
+#   launchd/com.ytpl.publish.plist 的 SRC
+

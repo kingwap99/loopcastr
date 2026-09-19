@@ -1,0 +1,681 @@
+#!/usr/bin/env python3
+"""ytpl 本機控制台：狀態、設定、建置動作。
+
+設計原則
+  - 只用標準庫。跟主程式一樣「clone 下來就能跑」，不必先建 venv。
+  - 預設只綁 127.0.0.1。要對外開放必須自己帶 token。
+  - 不以 root 執行，也不保管任何密碼：需要特權的動作只試 sudo -n（非互動），
+    失敗就明確告訴你要加哪一條 sudoers，不會把密碼餵進程式。
+  - 寫入類動作只做兩件事：改設定檔、呼叫既有 script。不重寫底層邏輯。
+
+用法
+  python3 webui.py                      # http://127.0.0.1:8787
+  python3 webui.py --port 9000
+  python3 webui.py --host 0.0.0.0 --token-file webui-token   # 對外必帶 token
+"""
+
+import argparse
+import hmac
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# 程式碼放哪裡（HERE）與資料放哪裡（PREFIX）分開。
+#   安裝後：src/ 會攤平到安裝目錄，兩者相同，一切都在 PREFIX 底下。
+#   從 repo 跑：程式在 src/，設定也在 src/，資料（media、logs）在安裝目錄。
+# 所以每個檔案都用 pick() 兩邊找，找不到才落在 PREFIX。
+PREFIX = HERE
+MEDIA = os.path.join(PREFIX, "media")
+LOGS = os.path.join(PREFIX, "logs")
+MODES = os.path.join(PREFIX, "modes.json")
+SETTINGS = os.path.join(PREFIX, "settings.json")
+PLAYLIST = os.path.join(PREFIX, "playlist.json")
+PLAYLIST_LOCAL = os.path.join(PREFIX, "playlist-local.json")
+CONCAT = os.path.join(PREFIX, "concat.txt")
+PLAYOUT_LOG = os.path.join(LOGS, "playout.log")
+KEYFILE = os.path.join(PREFIX, "stream.key")
+TASK_LOG = os.path.join(LOGS, "webui-task.log")
+
+
+def set_prefix(path):
+    global PREFIX, MEDIA, LOGS, MODES, SETTINGS, PLAYLIST, PLAYLIST_LOCAL
+    global CONCAT, PLAYOUT_LOG, KEYFILE, TASK_LOG
+    PREFIX = os.path.abspath(path)
+
+    def pick(name):
+        for base in (PREFIX, HERE):
+            p = os.path.join(base, name)
+            if os.path.exists(p):
+                return p
+        return os.path.join(PREFIX, name)
+
+    MEDIA = pick("media")
+    LOGS = pick("logs")
+    MODES = pick("modes.json")
+    SETTINGS = pick("settings.json")
+    PLAYLIST = pick("playlist.json")
+    PLAYLIST_LOCAL = pick("playlist-local.json")
+    CONCAT = pick("concat.txt")
+    KEYFILE = pick("stream.key")
+    PLAYOUT_LOG = os.path.join(LOGS, "playout.log")
+    TASK_LOG = os.path.join(LOGS, "webui-task.log")
+
+PLAYOUT_START = re.compile(
+    r"([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}) 第 ([0-9]+) 次啟動")
+
+
+# ── 小工具 ──────────────────────────────────────────────────────────
+def sh(cmd, timeout=6):
+    """跑一個指令並回傳 (rc, 輸出)。逾時或找不到指令都當成失敗，不丟例外。"""
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           stdin=subprocess.DEVNULL)
+        return p.returncode, (p.stdout or "") + (p.stderr or "")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 1, str(exc)
+
+
+def read_json(path, default=None):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path, data):
+    """原子寫入，並留一份 .bak。設定檔壞掉會讓整條鏈路起不來，所以不做半套。"""
+    if os.path.exists(path):
+        try:
+            with open(path, encoding="utf-8") as src:
+                old = src.read()
+            with open(path + ".bak", "w", encoding="utf-8") as dst:
+                dst.write(old)
+        except OSError:
+            pass
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    os.replace(tmp, path)
+
+
+def tail(path, n=40):
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as fh:
+            return [ln.rstrip("\n") for ln in fh.readlines()[-n:]]
+    except OSError:
+        return []
+
+
+def unquote(s):
+    """去掉 concat 清單每行外層的引號（不寫死引號字元，省得在原始碼裡打架）。"""
+    s = s.strip()
+    for q in (chr(39), chr(34)):
+        if len(s) >= 2 and s.startswith(q) and s.endswith(q):
+            s = s[1:-1]
+    return s
+
+
+def human(num):
+    for unit in ("B", "KB", "MB", "GB"):
+        if num < 1024 or unit == "GB":
+            return ("%d B" % num) if unit == "B" else ("%.1f %s" % (num, unit))
+        num /= 1024.0
+
+
+def dirsize(path):
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total
+
+
+# ── 狀態 ────────────────────────────────────────────────────────────
+# 用 pgrep 而不是 launchctl：查 system domain 的服務需要 root，而這支程式刻意
+# 不以 root 執行。行程在不在、日誌有沒有在動，一樣看得出來。
+PROCS = [
+    ("mediamtx", "mediamtx"),
+    ("playout", "playout.sh"),
+    ("playout ffmpeg", "concat.txt"),
+    ("publish", "yt_publish.sh"),
+    ("publish ffmpeg", "live2/"),
+    ("health", "healthcheck.py"),
+    ("refresh", "refreshwatch.py"),
+]
+
+
+def procs():
+    out = []
+    for name, pattern in PROCS:
+        _rc, txt = sh(["pgrep", "-f", pattern])
+        n = len([x for x in txt.split() if x.strip().isdigit()])
+        out.append({"name": name, "count": n, "up": n > 0})
+    return out
+
+
+def mtx(api, path_name):
+    url = "%s/v3/paths/get/%s" % (api.rstrip("/"), path_name)
+    try:
+        with urllib.request.urlopen(url, timeout=3) as r:
+            d = json.load(r)
+        return {"ok": True, "ready": bool(d.get("ready")),
+                "readers": len(d.get("readers") or []),
+                "bytesReceived": d.get("bytesReceived"),
+                "tracks": d.get("tracks") or []}
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def round_info():
+    """單輪長度（讀 playlist-local.json）與下一次循環的時間點。"""
+    d = read_json(PLAYLIST_LOCAL)
+    if not d or not d.get("segments"):
+        return {}
+    total = 0.0
+    for s in d["segments"]:
+        total += float(s.get("outpoint") or s.get("seconds") or 0)
+    info = {"segments": len(d["segments"]), "round_seconds": round(total, 1)}
+    last = None
+    for line in tail(PLAYOUT_LOG, 3000):
+        m = PLAYOUT_START.search(line)
+        if m:
+            last = m
+    if last and total > 0:
+        st = time.mktime(time.strptime(last.group(1), "%Y-%m-%d %H:%M:%S"))
+        now = time.time()
+        k = int((now - st) // total) + 1
+        nxt = st + total * k
+        info["playout_start"] = last.group(1)
+        info["playout_run"] = int(last.group(2))
+        info["next_loop"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(nxt))
+        info["loop_in_seconds"] = int(nxt - now)
+    return info
+
+
+def content_info():
+    entries = []
+    if os.path.exists(CONCAT):
+        for line in tail(CONCAT, 600):
+            if line.startswith("file "):
+                p = unquote(line[5:])
+                entries.append((os.path.basename(p), os.path.exists(p)))
+    key = os.path.exists(KEYFILE)
+    return {
+        "concat_entries": len(entries),
+        "concat_missing": [n for n, ok in entries if not ok],
+        "media_size": human(dirsize(MEDIA)) if os.path.isdir(MEDIA) else "0 B",
+        "stream_key": {"exists": key,
+                       "bytes": os.path.getsize(KEYFILE) if key else 0},
+    }
+
+
+def status(api, path_name):
+    return {
+        "now": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "prefix": PREFIX,
+        "proc": procs(),
+        "mtx": mtx(api, path_name),
+        "round": round_info(),
+        "content": content_info(),
+        "logs": {
+            "health": tail(os.path.join(LOGS, "health.log"), 8),
+            "alerts": tail(os.path.join(LOGS, "alerts.jsonl"), 5),
+            "publish": tail(os.path.join(LOGS, "publish.log"), 5),
+        },
+    }
+
+
+# ── 動作（背景執行，一次一件）────────────────────────────────────────
+TASK = {"running": False, "action": "", "started": "", "pid": None, "rc": None}
+TASK_LOCK = threading.Lock()
+
+
+def build_cmd(action, body):
+    """把動作翻成 argv。一律用清單、不經 shell，也不接受使用者給的任意路徑。"""
+    if action == "mode-build":
+        mode = str(body.get("mode") or "").strip()
+        if mode not in (read_json(MODES) or {}):
+            return None, "沒有這個模式：%s" % mode
+        cmd = [sys.executable, os.path.join(HERE, "mode_build.py"), "--mode", mode]
+        for flag in ("scan-only", "deploy-only", "skip-transitions"):
+            if body.get(flag):
+                cmd.append("--" + flag)
+        if body.get("switch"):
+            cmd.append("--switch")
+        return cmd, ""
+    if action == "concat":
+        return [sys.executable, os.path.join(HERE, "make_concat_list.py"),
+                PLAYLIST_LOCAL, "-o", CONCAT, "--base-dir", HERE], ""
+    if action == "status":
+        return [sys.executable, os.path.join(HERE, "build_local_content.py"),
+                "--playlist", PLAYLIST, "--status"], ""
+    if action == "loopwatch":
+        return [sys.executable, os.path.join(HERE, "loopwatch.py"),
+                "--playlist", PLAYLIST_LOCAL, "--lead", "45", "--tail", "90"], ""
+    return None, "未知動作：%s" % action
+
+
+def start_task(action, body):
+    cmd, err = build_cmd(action, body)
+    if err:
+        return {"ok": False, "error": err}
+    with TASK_LOCK:
+        if TASK["running"]:
+            return {"ok": False, "error": "已經有工作在跑：%s" % TASK["action"]}
+        os.makedirs(LOGS, exist_ok=True)
+        with open(TASK_LOG, "w", encoding="utf-8") as fh:
+            fh.write("$ %s\n" % " ".join(cmd))
+        out = open(TASK_LOG, "a", encoding="utf-8")
+        proc = subprocess.Popen(cmd, cwd=HERE, stdin=subprocess.DEVNULL,
+                                stdout=out, stderr=subprocess.STDOUT)
+        TASK.update({"running": True, "action": action,
+                     "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+                     "pid": proc.pid, "rc": None, "cmd": " ".join(cmd)})
+
+    def waiter():
+        rc = proc.wait()
+        out.close()
+        with TASK_LOCK:
+            TASK.update({"running": False, "rc": rc})
+
+    threading.Thread(target=waiter, daemon=True).start()
+    return {"ok": True, "cmd": " ".join(cmd)}
+
+
+def task_state():
+    with TASK_LOCK:
+        st = dict(TASK)
+    st["log"] = tail(TASK_LOG, 200)
+    return st
+
+
+# ── 需要特權的動作 ──────────────────────────────────────────────────
+def restart_service(label):
+    """先試 system domain（非互動 sudo），不行再試目前使用者的 gui domain。"""
+    if not re.match(r"^[A-Za-z0-9_.-]+$", label or ""):
+        return {"ok": False, "error": "不合法的服務名稱"}
+    _rc, txt = sh(["sudo", "-n", "launchctl", "kickstart", "-k", "system/" + label],
+                  timeout=15)
+    if _rc == 0:
+        return {"ok": True, "how": "sudo launchctl kickstart -k system/" + label}
+    rc2, _txt2 = sh(["launchctl", "kickstart", "-k",
+                     "gui/%d/%s" % (os.getuid(), label)], timeout=15)
+    if rc2 == 0:
+        return {"ok": True,
+                "how": "launchctl kickstart -k gui/%d/%s" % (os.getuid(), label)}
+    return {"ok": False,
+            "error": "兩個 domain 都失敗（" + txt.strip()[-200:] + "）",
+            "hint": "system domain 需要非互動 sudo，請在 /etc/sudoers.d/ytpl-webui 加："
+                    "  <你的帳號> ALL=(root) NOPASSWD: /bin/launchctl kickstart -k system/"
+                    + label}
+
+
+# ── HTTP ────────────────────────────────────────────────────────────
+class Handler(BaseHTTPRequestHandler):
+    server_version = "ytpl-webui"
+    api = "http://127.0.0.1:9997"
+    path_name = "live/main"
+    token = ""
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+        if isinstance(body, (dict, list)):
+            body = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        elif isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authed(self):
+        if not self.token:
+            return True
+        got = self.headers.get("X-Ytpl-Token") or ""
+        if not got and "?" in self.path:
+            for part in self.path.split("?", 1)[1].split("&"):
+                if part.startswith("token="):
+                    got = part[6:]
+        return hmac.compare_digest(got, self.token)
+
+    def _body(self):
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return {}
+        if n <= 0 or n > 2 * 1024 * 1024:
+            return {}
+        try:
+            return json.loads(self.rfile.read(n).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return {}
+
+    def do_GET(self):
+        path = self.path.split("?", 1)[0]
+        if not self._authed():
+            return self._send(401, {"error": "需要 token"})
+        if path == "/":
+            return self._send(200, PAGE, "text/html; charset=utf-8")
+        if path == "/api/status":
+            return self._send(200, status(self.api, self.path_name))
+        if path == "/api/config":
+            return self._send(200, {"settings": read_json(SETTINGS, {}),
+                                    "modes": read_json(MODES, {})})
+        if path == "/api/task":
+            return self._send(200, task_state())
+        return self._send(404, {"error": "not found"})
+
+    def do_POST(self):
+        path = self.path.split("?", 1)[0]
+        if not self._authed():
+            return self._send(401, {"error": "需要 token"})
+        # 只收帶自訂標頭的 JSON：跨站表單無法帶自訂標頭，這一條同時擋掉 CSRF。
+        if self.headers.get("X-Ytpl") != "1":
+            return self._send(400, {"error": "缺少 X-Ytpl 標頭"})
+        body = self._body()
+        if path == "/api/config":
+            target = {"settings": SETTINGS, "modes": MODES}.get(body.get("kind"))
+            data = body.get("data")
+            if not target:
+                return self._send(400, {"error": "kind 必須是 settings 或 modes"})
+            if not isinstance(data, dict) or not data:
+                return self._send(400, {"error": "data 必須是非空物件"})
+            try:
+                write_json(target, data)
+            except OSError as exc:
+                return self._send(500, {"error": "寫入失敗：%s" % exc})
+            return self._send(200, {"ok": True, "wrote": os.path.basename(target),
+                                    "note": "下次建置生效；舊版已備份為 .bak"})
+        if path == "/api/action":
+            return self._send(200, start_task(body.get("action") or "", body))
+        if path == "/api/service":
+            return self._send(200, restart_service(body.get("label") or ""))
+        if path == "/api/stream-key":
+            key = (body.get("key") or "").strip()
+            if not re.match(r"^[A-Za-z0-9_-]{8,64}$", key):
+                return self._send(400, {"error": "金鑰格式看起來不對（只允許英數與 - _）"})
+            try:
+                fd = os.open(KEYFILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                os.write(fd, key.encode("utf-8"))
+                os.close(fd)
+            except OSError as exc:
+                return self._send(500, {"error": "寫入失敗：%s" % exc})
+            return self._send(200, {"ok": True, "bytes": len(key),
+                                    "note": "要重啟 publish 服務才會生效"})
+        return self._send(404, {"error": "not found"})
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--prefix", default=HERE,
+                    help="資料目錄（預設＝本檔所在目錄）。安裝後不需指定；"
+                         "直接從 repo 跑時指向套件根目錄")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8787)
+    ap.add_argument("--api", default=os.environ.get("API", "http://127.0.0.1:9997"))
+    ap.add_argument("--path-name", default=os.environ.get("PATH_NAME", "live/main"))
+    ap.add_argument("--token-file", default=os.path.join(HERE, "webui-token"))
+    a = ap.parse_args()
+    set_prefix(a.prefix)
+
+    token = ""
+    if os.path.exists(a.token_file):
+        with open(a.token_file, encoding="utf-8") as fh:
+            token = fh.read().strip()
+    if a.host not in ("127.0.0.1", "localhost", "::1") and not token:
+        print("拒絕啟動：--host %s 等於對外開放，必須提供 token。" % a.host,
+              file=sys.stderr)
+        print("  先產生：" , file=sys.stderr)
+        print("    openssl rand -hex 16 > %s && chmod 600 %s"
+              % (a.token_file, a.token_file), file=sys.stderr)
+        return 2
+
+    Handler.api = a.api
+    Handler.path_name = a.path_name
+    Handler.token = token
+    srv = ThreadingHTTPServer((a.host, a.port), Handler)
+    print("ytpl 控制台：http://%s:%d/   （API %s，路徑 %s）"
+          % (a.host, a.port, a.api, a.path_name), flush=True)
+    if token:
+        print("已啟用 token 驗證（%s）" % a.token_file, flush=True)
+    print("按 Ctrl-C 結束", flush=True)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        print("")
+    return 0
+
+
+# PAGE 必須在 if __name__ 之前定義：以腳本執行時那一行會直接進入
+# serve_forever()，寫在它後面的定義都來不及跑到（實測踩過：GET / 回空的）。
+PAGE = """<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ytpl 控制台</title>
+<style>
+:root{color-scheme:light dark}
+body{font:14px/1.6 -apple-system,Helvetica,Arial,sans-serif;margin:0;padding:20px;max-width:1000px}
+h1{font-size:20px;margin:0 0 4px}
+h2{font-size:15px;margin:26px 0 8px;padding-bottom:4px;border-bottom:1px solid #8884}
+table{border-collapse:collapse;width:100%}
+td,th{text-align:left;padding:3px 8px 3px 0;vertical-align:top}
+th{font-weight:600;white-space:nowrap}
+.up{color:#0a0}.down{color:#c00}.dim{opacity:.65}
+pre{background:#8881;padding:8px;border-radius:6px;overflow:auto;max-height:240px;font-size:12px;margin:0}
+textarea{width:100%;height:200px;font:12px/1.5 ui-monospace,Menlo,monospace;background:#8881;border-radius:6px;border:1px solid #8884;padding:8px}
+button{font:inherit;padding:5px 12px;border-radius:6px;border:1px solid #8886;background:#8882;cursor:pointer;margin:2px 4px 2px 0}
+button:hover{background:#8884}
+input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;background:#8881}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0}
+#msg{min-height:1.6em;font-weight:600}
+</style></head><body>
+<h1>ytpl 控制台</h1>
+<div class="dim" id="head"></div>
+<div id="msg"></div>
+
+<h2>服務行程</h2><table id="proc"></table>
+<h2>播出狀態</h2><table id="play"></table>
+<h2>內容</h2><table id="content"></table>
+<h2>日誌</h2><table id="logs"></table>
+
+<h2>設定</h2>
+<p class="dim">settings.json 管畫質、版面與行為；modes.json 管每個模式播什麼。
+儲存後下次建置生效，舊版會留成 .bak。</p>
+<div class="row"><b>settings.json</b><button onclick="saveSettings()">儲存</button></div>
+<textarea id="ta-settings" spellcheck="false"></textarea>
+<div class="row"><b>modes.json</b><button onclick="saveModes()">儲存</button></div>
+<textarea id="ta-modes" spellcheck="false"></textarea>
+
+<h2>動作</h2>
+<div class="row">
+<select id="mode"></select>
+<button onclick="actBuild()">建置</button>
+<button onclick="actScan()">只掃描</button>
+<button onclick="actSwitch()">建置並切換</button>
+<button onclick="actConcat()">重建 concat</button>
+<button onclick="actStatus()">檢查缺檔</button>
+</div>
+<p class="dim">建置是背景工作，會下載與轉檔，可能數十分鐘。切換播出端會中斷數秒。</p>
+<pre id="task"></pre>
+
+<h2>直播金鑰</h2>
+<p class="dim">寫入 stream.key（權限 600）。金鑰只進不出，這個頁面不會把它顯示出來。</p>
+<div class="row"><input type="password" id="key" size="42" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx">
+<button onclick="writeKey()">寫入</button></div>
+
+<h2>服務</h2><div class="row" id="svc"></div>
+<p class="dim">system domain 需要非互動 sudo；失敗時會顯示要加哪一條 sudoers。</p>
+
+<script>
+var LABELS = ["com.ytpl.mediamtx","com.ytpl.playout","com.ytpl.publish","com.ytpl.health","com.ytpl.refresh"];
+
+function esc(s){
+  return String(s === null || s === undefined ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function text(id, s){ document.getElementById(id).textContent = s; }
+function html(id, s){ document.getElementById(id).innerHTML = s; }
+function msg(s){ text("msg", s || ""); }
+
+function post(url, body){
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Ytpl": "1" },
+    body: JSON.stringify(body)
+  }).then(function(r){ return r.json(); });
+}
+
+function badge(ok, s){ return "<span class=\"" + (ok ? "up" : "down") + "\">" + esc(s) + "</span>"; }
+
+function refresh(){
+  fetch("/api/status").then(function(r){ return r.json(); }).then(function(s){
+    text("head", s.now + "　目錄 " + s.prefix);
+    var p = "<tr><th>行程</th><th>狀態</th></tr>";
+    s.proc.forEach(function(x){
+      p += "<tr><td>" + esc(x.name) + "</td><td>" +
+           (x.up ? badge(true, "執行中 (" + x.count + ")") : badge(false, "沒有在跑")) +
+           "</td></tr>";
+    });
+    html("proc", p);
+
+    var m = s.mtx.ok
+      ? ((s.mtx.ready ? "ready" : "未 ready") + "　讀者 " + s.mtx.readers +
+         "　bytesReceived " + s.mtx.bytesReceived)
+      : ("查不到：" + s.mtx.error);
+    var r2 = "";
+    r2 += "<tr><th>MediaMTX</th><td>" + badge(!!(s.mtx.ok && s.mtx.ready), m) + "</td></tr>";
+    r2 += "<tr><th>單輪</th><td>" + esc((s.round.segments || 0) + " 段　" +
+          (s.round.round_seconds || 0) + " 秒") + "</td></tr>";
+    if (s.round.next_loop){
+      r2 += "<tr><th>下次循環</th><td>" + esc(s.round.next_loop) + "（" +
+            esc(s.round.loop_in_seconds) + " 秒後）</td></tr>";
+    }
+    html("play", r2);
+
+    var c = "";
+    c += "<tr><th>concat</th><td>" + s.content.concat_entries + " 段" +
+         (s.content.concat_missing.length
+           ? "　" + badge(false, "缺 " + s.content.concat_missing.join(", ")) : "") +
+         "</td></tr>";
+    c += "<tr><th>media</th><td>" + esc(s.content.media_size) + "</td></tr>";
+    c += "<tr><th>stream.key</th><td>" +
+         (s.content.stream_key.exists
+           ? badge(true, "已設定（" + s.content.stream_key.bytes + " bytes）")
+           : badge(false, "未設定")) + "</td></tr>";
+    html("content", c);
+
+    var l = "<tr><th>health</th><td><pre>" + esc((s.logs.health || []).join("\n")) + "</pre></td></tr>";
+    l += "<tr><th>alerts</th><td><pre>" + esc((s.logs.alerts || []).join("\n") || "（無）") + "</pre></td></tr>";
+    html("logs", l);
+  }).catch(function(e){ msg("讀狀態失敗：" + e); });
+}
+
+function loadCfg(){
+  fetch("/api/config").then(function(r){ return r.json(); }).then(function(c){
+    document.getElementById("ta-settings").value = JSON.stringify(c.settings, null, 2);
+    document.getElementById("ta-modes").value = JSON.stringify(c.modes, null, 2);
+    var sel = document.getElementById("mode");
+    sel.innerHTML = "";
+    Object.keys(c.modes || {}).forEach(function(k){
+      var o = document.createElement("option");
+      o.value = k;
+      o.textContent = k + (c.modes[k].label ? "（" + c.modes[k].label + "）" : "");
+      sel.appendChild(o);
+    });
+  });
+}
+
+function save(kind){
+  var data;
+  try { data = JSON.parse(document.getElementById("ta-" + kind).value); }
+  catch (e) { return msg("JSON 有錯：" + e.message); }
+  post("/api/config", { kind: kind, data: data }).then(function(r){
+    msg(r.ok ? ("已寫入 " + r.wrote + "（" + r.note + "）") : ("失敗：" + (r.error || "")));
+  }).catch(function(e){ msg("失敗：" + e); });
+}
+function saveSettings(){ save("settings"); }
+function saveModes(){ save("modes"); }
+
+function act(action, extra){
+  var body = { action: action, mode: document.getElementById("mode").value };
+  var e = extra || {};
+  for (var k in e) { body[k] = e[k]; }
+  post("/api/action", body).then(function(r){
+    msg(r.ok ? ("已開始：" + r.cmd) : ("無法開始：" + (r.error || "")));
+    pollTask();
+  });
+}
+function actBuild(){ act("mode-build", {}); }
+function actScan(){ act("mode-build", { "scan-only": 1 }); }
+function actSwitch(){ act("mode-build", { "switch": 1 }); }
+function actConcat(){ act("concat", {}); }
+function actStatus(){ act("status", {}); }
+
+function pollTask(){
+  fetch("/api/task").then(function(r){ return r.json(); }).then(function(t){
+    var head = (t.running ? "執行中　" : "已完成／待機　") + (t.action || "") +
+               (t.started ? ("　" + t.started) : "") +
+               (t.rc === null || t.rc === undefined ? "" : ("　結束碼 " + t.rc));
+    text("task", head + "\n\n" + (t.log || []).join("\n"));
+    if (t.running) { setTimeout(pollTask, 2000); } else { refresh(); }
+  });
+}
+
+function writeKey(){
+  var k = document.getElementById("key").value;
+  if (!k) { return msg("請先輸入金鑰"); }
+  post("/api/stream-key", { key: k }).then(function(r){
+    document.getElementById("key").value = "";
+    msg(r.ok ? ("已寫入 stream.key（" + r.bytes + " bytes）。" + r.note)
+             : ("失敗：" + (r.error || "")));
+    refresh();
+  });
+}
+
+function mkSvc(){
+  var d = document.getElementById("svc");
+  d.innerHTML = "";
+  LABELS.forEach(function(l){
+    var b = document.createElement("button");
+    b.textContent = "重啟 " + l.replace("com.ytpl.", "");
+    b.onclick = function(){
+      post("/api/service", { label: l }).then(function(r){
+        msg(r.ok ? ("已重啟（" + r.how + "）") : ((r.error || "") + " " + (r.hint || "")));
+        refresh();
+      });
+    };
+    d.appendChild(b);
+  });
+}
+
+refresh();
+loadCfg();
+pollTask();
+mkSvc();
+setInterval(refresh, 5000);
+</script></body></html>"""
+
+
+if __name__ == "__main__":
+    sys.exit(main())

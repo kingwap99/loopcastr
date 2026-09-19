@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ytpl.playout</string>
+
+    <!-- 播出端：單一行程 concat 餵 MediaMTX。實測換片與繞回清單開頭皆 0 縫。 -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__HOME__/ytpl/playout.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PLAYLIST</key>
+        <string>__HOME__/ytpl/playlist-local.json</string>
+        <key>LIST</key>
+        <string>__HOME__/ytpl/concat.txt</string>
+        <key>DEST</key>
+        <string>rtmp://127.0.0.1:1935/live/main</string>
+        <key>LOG</key>
+        <string>__HOME__/ytpl/logs/playout.log</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!-- 即時編碼不要被 App Nap／排程節流壓到 -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/ytpl/logs/playout-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/ytpl/logs/playout-stderr.log</string>
+</dict>
+</plist>
