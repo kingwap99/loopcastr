@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """產生 T-07 用的縮短測試版：每集剪成固定秒數，右上角燒上流水號。
 
-為什麼要自己畫字：.41 兩台 ffmpeg 都沒有 freetype（沒有 drawtext），也沒有
+為什麼要自己畫字：目標機兩台 ffmpeg 都沒有 freetype（沒有 drawtext），也沒有
 PIL／ImageMagick，而 Chrome 無頭在「沒有圖形登入」的機器上產不出截圖。
 所以這裡用純標準函式庫寫 PNG（zlib + struct）並自帶 5x7 點陣數字字型。
 

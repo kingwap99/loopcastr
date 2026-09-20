@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """把一段文字（通常是網址）畫成 QR Code PNG。
 
-為什麼要自己寫：.41 沒有 qrencode、沒有 PIL、ffmpeg 也沒有 freetype。所以
+為什麼要自己寫：目標機沒有 qrencode、沒有 PIL、ffmpeg 也沒有 freetype。所以
 只裝純 Python 的 qrcode 套件拿矩陣，PNG 自己用 zlib + struct 寫出來。
 
 用法
