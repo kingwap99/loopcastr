@@ -146,6 +146,38 @@ def dirsize(path):
     return total
 
 
+# ── 來源網址驗證 ────────────────────────────────────────────────────
+def _is_youtube(url):
+    """只接受 YouTube 家族的網址 —— 這個 API 會拿使用者給的網址去呼叫 yt-dlp。"""
+    if not url.lower().startswith(("http://", "https://")):
+        return False
+    host = url.split("//", 1)[1].split("/", 1)[0].lower()
+    host = host.split("@")[-1].split(":")[0]
+    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com")
+
+
+def probe_sources(video_source, shorts_url):
+    """實際解析一次，確認填的網址是對的（不用等整條建置跑完才發現打錯）。"""
+    parts = []
+    for label, url in (("頻道／清單", video_source), ("shorts", shorts_url)):
+        if not url:
+            parts.append("%s：未填" % label)
+            continue
+        if not _is_youtube(url):
+            parts.append("%s：只接受 youtube.com／youtu.be 網址" % label)
+            continue
+        rc, txt = sh(["yt-dlp", "--no-warnings", "--flat-playlist",
+                      "--playlist-end", "1", "--print", "%(id)s|%(title)s", url],
+                     timeout=90)
+        lines = [x for x in (txt or "").strip().splitlines() if x.strip()]
+        if rc == 0 and lines and "|" in lines[0]:
+            vid, title = lines[0].split("|", 1)
+            parts.append("%s：OK　第一支 %s（%s）" % (label, vid, title[:30]))
+        else:
+            parts.append("%s：失敗　%s" % (label, (lines or ["沒有輸出"])[-1][:70]))
+    return {"ok": True, "summary": "　｜　".join(parts)}
+
+
 # ── 狀態 ────────────────────────────────────────────────────────────
 # 用 pgrep 而不是 launchctl：查 system domain 的服務需要 root，而這支程式刻意
 # 不以 root 執行。行程在不在、日誌有沒有在動，一樣看得出來。
@@ -411,6 +443,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, start_task(body.get("action") or "", body))
         if path == "/api/service":
             return self._send(200, restart_service(body.get("label") or ""))
+        if path == "/api/probe":
+            return self._send(200, probe_sources(body.get("video_source") or "",
+                                                 body.get("shorts_url") or ""))
         if path == "/api/stream-key":
             key = (body.get("key") or "").strip()
             if not re.match(r"^[A-Za-z0-9_-]{8,64}$", key):
@@ -488,6 +523,10 @@ button{font:inherit;padding:5px 12px;border-radius:6px;border:1px solid #8886;ba
 button:hover{background:#8884}
 input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;background:#8881}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0}
+.modebox{border:1px solid #8884;border-radius:8px;padding:10px 14px;margin:10px 0}
+.modebox h3{margin:0 0 8px;font-size:14px}
+.modebox label{display:inline-block;min-width:15em}
+.modebox input[type=text]{min-width:24em}
 #msg{min-height:1.6em;font-weight:600}
 </style></head><body>
 <h1>ytpl 控制台</h1>
@@ -499,13 +538,22 @@ input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;b
 <h2>內容</h2><table id="content"></table>
 <h2>日誌</h2><table id="logs"></table>
 
-<h2>設定</h2>
-<p class="dim">settings.json 管畫質、版面與行為；modes.json 管每個模式播什麼。
-儲存後下次建置生效，舊版會留成 .bak。</p>
+<h2>來源設定</h2>
+<p class="dim">每個模式要播什麼。填好按「儲存這個模式」，再按上面的「建置」才會生效
+（會下載與轉檔，可能要幾分鐘）。「驗證網址」會先解析一次，確認網址沒打錯。</p>
+<div id="modes"></div>
+
+<h2>進階設定</h2>
+<details>
+<summary>settings.json（畫質、版面、淡化、黑尾門檻）</summary>
 <div class="row"><b>settings.json</b><button onclick="saveSettings()">儲存</button></div>
 <textarea id="ta-settings" spellcheck="false"></textarea>
-<div class="row"><b>modes.json</b><button onclick="saveModes()">儲存</button></div>
+</details>
+<details>
+<summary>modes.json 原始內容（上面表單沒涵蓋的欄位改這裡；存檔會整份覆蓋）</summary>
+<div class="row"><b>modes.json</b><button onclick="saveModes()">儲存原始 JSON</button></div>
 <textarea id="ta-modes" spellcheck="false"></textarea>
+</details>
 
 <h2>動作</h2>
 <div class="row">
@@ -595,6 +643,7 @@ function loadCfg(){
   fetch("/api/config").then(function(r){ return r.json(); }).then(function(c){
     document.getElementById("ta-settings").value = JSON.stringify(c.settings, null, 2);
     document.getElementById("ta-modes").value = JSON.stringify(c.modes, null, 2);
+    renderModes(c.modes);
     var sel = document.getElementById("mode");
     sel.innerHTML = "";
     Object.keys(c.modes || {}).forEach(function(k){
@@ -616,6 +665,95 @@ function save(kind){
 }
 function saveSettings(){ save("settings"); }
 function saveModes(){ save("modes"); }
+
+var FIELDS = [
+  ["video_source", "頻道或播放清單網址", "text", 56, "https://www.youtube.com/@YourChannel/videos"],
+  ["shorts_url", "shorts 網址", "text", 56, "https://www.youtube.com/@YourChannel/shorts"],
+  ["video_limit", "影片數上限", "number", 6, ""],
+  ["max_seconds", "每支長度上限（秒，0＝全長）", "number", 6, ""],
+  ["shorts_count", "shorts 支數", "number", 6, ""],
+  ["shorts_seconds", "每支 short 長度上限（秒）", "number", 6, ""],
+  ["refresh_seconds", "重新掃描間隔（秒，0＝不掃）", "number", 6, ""]
+];
+var MODES_CACHE = {};
+
+function renderModes(modes){
+  MODES_CACHE = modes || {};
+  var host = document.getElementById("modes");
+  host.innerHTML = "";
+  var keys = Object.keys(MODES_CACHE).filter(function(k){ return k !== "_comment"; });
+  if (!keys.length) { host.textContent = "（modes.json 裡沒有可編輯的模式）"; return; }
+  keys.forEach(function(mk){
+    var m = MODES_CACHE[mk] || {};
+    var box = document.createElement("div");
+    box.className = "modebox";
+    var h = document.createElement("h3");
+    h.textContent = mk + (m.label ? "（" + m.label + "）" : "");
+    box.appendChild(h);
+    var inputs = {};
+    FIELDS.forEach(function(f){
+      var row = document.createElement("div");
+      row.className = "row";
+      var lab = document.createElement("label");
+      lab.textContent = f[1];
+      var inp = document.createElement("input");
+      inp.type = f[2];
+      if (f[3]) { inp.size = f[3]; }
+      if (f[4]) { inp.placeholder = f[4]; }
+      inp.value = (m[f[0]] === undefined || m[f[0]] === null) ? "" : m[f[0]];
+      row.appendChild(lab);
+      row.appendChild(inp);
+      box.appendChild(row);
+      inputs[f[0]] = inp;
+    });
+    var bar = document.createElement("div");
+    bar.className = "row";
+    var b1 = document.createElement("button");
+    b1.textContent = "儲存這個模式";
+    b1.onclick = function(){ saveMode(mk, inputs); };
+    var b2 = document.createElement("button");
+    b2.textContent = "驗證網址";
+    b2.onclick = function(){ probe(inputs); };
+    bar.appendChild(b1);
+    bar.appendChild(b2);
+    box.appendChild(bar);
+    if (m.note) {
+      var p = document.createElement("p");
+      p.className = "dim";
+      p.textContent = m.note;
+      box.appendChild(p);
+    }
+    host.appendChild(box);
+  });
+}
+
+function saveMode(mk, inputs){
+  var modes = JSON.parse(JSON.stringify(MODES_CACHE));
+  if (!modes[mk]) { modes[mk] = {}; }
+  FIELDS.forEach(function(f){
+    var raw = inputs[f[0]].value.trim();
+    if (f[2] === "number") {
+      var n = parseInt(raw, 10);
+      modes[mk][f[0]] = isNaN(n) ? 0 : n;
+    } else {
+      modes[mk][f[0]] = raw;
+    }
+  });
+  post("/api/config", { kind: "modes", data: modes }).then(function(r){
+    msg(r.ok ? ("已儲存 " + mk + "：" + r.note) : ("儲存失敗：" + (r.error || "")));
+    if (r.ok) { loadCfg(); }
+  }).catch(function(e){ msg("儲存失敗：" + e); });
+}
+
+function probe(inputs){
+  msg("驗證中…（會實際解析一次，約數秒）");
+  post("/api/probe", {
+    video_source: inputs.video_source.value.trim(),
+    shorts_url: inputs.shorts_url.value.trim()
+  }).then(function(r){
+    msg(r.ok ? r.summary : ("驗證失敗：" + (r.error || "")));
+  }).catch(function(e){ msg("驗證失敗：" + e); });
+}
 
 function act(action, extra){
   var body = { action: action, mode: document.getElementById("mode").value };
