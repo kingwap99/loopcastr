@@ -31,7 +31,8 @@
     "countdown": true,
     "transition_caption": "去追劇",
     "sponsor_url": "",
-    "sponsor_caption": "贊助"
+    "sponsor_caption": "贊助",
+    "sponsor_code": ""
   },
   "content": {
     "black_tail_min": 5.0,

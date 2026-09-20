@@ -240,7 +240,8 @@ def main():
                 sb = os.path.join(TMP, "sponsor-%s.png" % sid)
                 wmtext.render_link_button(blc.SPONSOR_URL, sb, size=blc.QR_SIZE,
                                           qr_px=blc.QR_PX,
-                                          caption=blc.SPONSOR_CAPTION)
+                                          caption=blc.SPONSOR_CAPTION,
+                                          show_url=False)
                 ov.append((sb, None, "x=W-w:y=H-h"))
 
                 # shorts 連續輪動：第 p 趟第 i 支用池子裡第 (p*len(eps) + i - 1) 支。

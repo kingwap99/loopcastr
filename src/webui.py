@@ -232,6 +232,8 @@ SETTINGS_SCHEMA = [
          "填了就固定在畫面右下角顯示 QR；留空＝不顯示", ""),
         ("sponsor_caption", "贊助按鈕文字", "text", None, None,
          "QR 下方的說明文字", "贊助"),
+        ("sponsor_code", "贊助碼", "text", None, None,
+         "填入指定值會關閉贊助 QR（留空＝正常顯示）", ""),
     ]),
     ("content", "內容處理", [
         ("black_tail_min", "黑尾門檻（秒）", "float", None, (0, 120),
