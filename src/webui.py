@@ -30,6 +30,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# 控制台標題連到專案本身。只有這一份是專案自己的位址，不需要參數化。
+REPO_URL = "https://github.com/kingwap99/ytpl2ytstream"
+PROJECT = "ytpl2ytstream"
+
 # 程式碼放哪裡（HERE）與資料放哪裡（PREFIX）分開。
 #   安裝後：src/ 會攤平到安裝目錄，兩者相同，一切都在 PREFIX 底下。
 #   從 repo 跑：程式在 src/，設定也在 src/，資料（media、logs）在安裝目錄。
@@ -980,8 +984,8 @@ def main():
     Handler.path_name = a.path_name
     Handler.token = token
     srv = ThreadingHTTPServer((a.host, a.port), Handler)
-    print("ytpl 控制台：http://%s:%d/   （API %s，路徑 %s）"
-          % (a.host, a.port, a.api, a.path_name), flush=True)
+    print("%s 控制台：http://%s:%d/   （API %s，路徑 %s）"
+          % (PROJECT, a.host, a.port, a.api, a.path_name), flush=True)
     if token:
         print("已啟用 token 驗證（%s）" % a.token_file, flush=True)
     print("按 Ctrl-C 結束", flush=True)
@@ -997,11 +1001,13 @@ def main():
 PAGE = r"""<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ytpl 控制台</title>
+<title>__PROJECT__ 控制台</title>
 <style>
 :root{color-scheme:light dark}
 body{font:14px/1.6 -apple-system,Helvetica,Arial,sans-serif;margin:0;padding:20px;max-width:1000px}
 h1{font-size:20px;margin:0 0 4px}
+h1 a{color:inherit;text-decoration:none;border-bottom:1px dotted #8888}
+h1 a:hover{border-bottom-style:solid}
 h2{font-size:15px;margin:26px 0 8px;padding-bottom:4px;border-bottom:1px solid #8884}
 table{border-collapse:collapse;width:100%}
 td,th{text-align:left;padding:3px 8px 3px 0;vertical-align:top}
@@ -1031,7 +1037,7 @@ border:1px solid;line-height:1.5}
 .chip-bad{background:#c001;border-color:#c006}
 button.primary{font-weight:700;border-color:#0a0}
 </style></head><body>
-<h1>ytpl 控制台</h1>
+<h1><a href="__REPO_URL__" title="GitHub：__PROJECT__">__PROJECT__</a> 控制台</h1>
 <div class="dim" id="head"></div>
 <div id="msg"></div>
 
@@ -1472,6 +1478,9 @@ pollTask();
 mkSvc();
 setInterval(refresh, 5000);
 </script></body></html>"""
+
+# 佔位符在字串裡換掉，不用 %-格式化（CSS 裡有 width:100% 這種東西）。
+PAGE = PAGE.replace("__REPO_URL__", REPO_URL).replace("__PROJECT__", PROJECT)
 
 
 if __name__ == "__main__":
