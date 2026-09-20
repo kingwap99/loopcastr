@@ -19,6 +19,7 @@ import hmac
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -393,7 +394,11 @@ def check_ready(mode, modes_cfg, api, path_name):
 
     with TASK_LOCK:
         running, started = TASK["running"], TASK["started"]
+        stopping = TASK.get("stopping")
     if running:
+        if stopping:
+            return _verdict("building", "正在停止建置…",
+                            "已經送出停止訊號，收工後會自動清掉被中斷的半成品")
         return _verdict("building", "正在建置（下載／轉檔中）",
                         "從 %s 開始，完成前不要開播；下面那個框有即時進度" % (started or "剛剛"))
 
@@ -446,8 +451,276 @@ def ready_map(api, path_name):
 
 
 # ── 動作（背景執行，一次一件）────────────────────────────────────────
-TASK = {"running": False, "action": "", "started": "", "pid": None, "rc": None}
+TASK = {"running": False, "action": "", "started": "", "pid": None, "rc": None,
+        "mode": "", "stopping": False, "adopted": False}
 TASK_LOCK = threading.Lock()
+
+
+# ── 行程樹（停止建置用）──────────────────────────────────────────────
+# 為什麼要看整棵樹：webui 拉起的 mode_build 會再開 build_local_content，後者再
+# 開 ffmpeg。只殺最上層的話，ffmpeg 會變成孤兒繼續吃 CPU、繼續寫檔。
+def ps_snapshot():
+    """一次 ps 取得整張表：ppid -> [pid] 與 pid -> stat。macOS 的 ps 沒有 --ppid。"""
+    rc, out = sh(["ps", "-Ao", "pid=,ppid=,stat="], timeout=8)
+    kids, info = {}, {}
+    if rc != 0:
+        return kids, info
+    for line in (out or "").splitlines():
+        f = line.split()
+        if len(f) < 3 or not f[0].isdigit() or not f[1].isdigit():
+            continue
+        pid, ppid = int(f[0]), int(f[1])
+        kids.setdefault(ppid, []).append(pid)
+        info[pid] = f[2].strip()
+    return kids, info
+
+
+def pid_alive(pid, info):
+    """殭屍（Z）算已經結束：它只等父行程回收，殺不動也不需要殺。"""
+    st = info.get(pid)
+    return bool(st) and not st.startswith("Z")
+
+
+def tree_pids(root, kids):
+    seen, stack, out = set(), [root], []
+    while stack:
+        p = stack.pop()
+        if p in seen:
+            continue
+        seen.add(p)
+        out.append(p)
+        stack.extend(kids.get(p, ()))
+    return out
+
+
+def find_build_pids(only_here=False):
+    """現在的 mode_build.py 行程 -> {pid: 模式名}。
+
+    only_here：只認這一份安裝（命令列裡有 <HERE>/mode_build.py）的建置。
+    同一台機器上可能同時跑著別的目錄的安裝，不能互相搶。
+    """
+    rc, out = sh(["pgrep", "-f", "mode_build.py"], timeout=8)
+    if rc != 0:
+        return {}
+    marker = os.path.join(HERE, "mode_build.py")
+    found = {}
+    for tok in (out or "").split():
+        if not tok.isdigit():
+            continue
+        pid = int(tok)
+        _rc, cmd = sh(["ps", "-o", "command=", "-p", str(pid)], timeout=8)
+        cmd = cmd or ""
+        if only_here and marker not in cmd:
+            continue
+        m = re.search(r"--mode\s+(\S+)", cmd)
+        found[pid] = m.group(1) if m else ""
+    return found
+
+
+def stage_dirs(mode):
+    """暫存目錄的命名跟 mode_build.py 的 files_for() 一致，改那裡要一起改這裡。"""
+    return ["/tmp/stage-ep-%s" % mode, "/tmp/stage-tr-%s" % mode]
+
+
+def ffprobe_seconds(path):
+    """讀長度。0.0＝讀不出來（半成品）。"""
+    rc, out = sh(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                  "-of", "csv=p=0", path], timeout=30)
+    try:
+        return float((out or "").strip())
+    except ValueError:
+        return 0.0
+
+
+FFPROBE_OK = {"checked": False, "ok": False}
+
+
+def have_ffprobe():
+    """先確認 ffprobe 真的叫得起來。
+
+    不能靠「ffprobe 輸出裡有 not found」來判斷它不存在 —— 半成品的錯誤訊息
+    就是「moov atom not found」，那會讓清理整個被跳過。
+    """
+    if not FFPROBE_OK["checked"]:
+        rc, out = sh(["ffprobe", "-version"], timeout=10)
+        FFPROBE_OK["ok"] = rc == 0 and "ffprobe version" in (out or "")
+        FFPROBE_OK["checked"] = True
+    return FFPROBE_OK["ok"]
+
+
+def sweep_stage(mode):
+    """清掉被中斷的半成品。
+
+    落地是「暫存目錄裡有這個檔案就當做完了」，被中斷的半成品會一路被當成完成品
+    帶到部署，所以停下來之後要先把讀不出長度的那種清掉，下一輪才會重做。
+    只刪 .mp4，而且只在 ffprobe 讀不到任何長度時才刪。
+    """
+    gone, kept = [], 0
+    if not mode:
+        return gone, kept
+    if not have_ffprobe():
+        task_note("停止：找不到 ffprobe，無法判斷哪些是半成品，這次不清暫存目錄")
+        return gone, kept
+    for d in stage_dirs(mode):
+        if not os.path.isdir(d):
+            continue
+        for name in sorted(os.listdir(d)):
+            if not name.endswith(".mp4"):
+                continue
+            full = os.path.join(d, name)
+            secs = ffprobe_seconds(full)
+            if secs >= 1.0:
+                kept += 1
+                continue
+            try:
+                os.unlink(full)
+                gone.append(name)
+            except OSError:
+                kept += 1
+    return gone, kept
+
+
+def inflight_outputs(targets, mode):
+    """被我們殺掉的行程「正在寫哪幾個輸出檔」。
+
+    為什麼非做這件事不可：ffmpeg 收到 SIGTERM 會正常收尾，把 moov 寫出來，
+    留下一個讀得出來、卻只有幾十秒的檔案（實測 65.6 秒）。落地是「檔案存在
+    就當做完了」，這種短檔會被當成完成品一路播出去。所以被中斷的輸出檔一律
+    刪掉，不看它讀不讀得出來。
+    """
+    if not mode:
+        return []
+    roots = tuple(stage_dirs(mode) + [os.path.join(MEDIA, ".raw")])
+    hits, now = set(), time.time()
+    for pid in targets:
+        _rc, cmd = sh(["ps", "-o", "command=", "-p", str(pid)], timeout=8)
+        for tok in (cmd or "").split():
+            tok = tok.strip(chr(39) + chr(34))
+            if not tok.endswith(".mp4") or not tok.startswith("/"):
+                continue
+            if not tok.startswith(roots):
+                continue
+            try:
+                if now - os.path.getmtime(tok) > 120:   # 不是這次在寫的，別動它
+                    continue
+            except OSError:
+                continue
+            hits.add(tok)
+    return sorted(hits)
+
+
+def task_note(text_):
+    """把 console 自己的訊息也寫進同一個進度檔，使用者在同一個框就看得到。"""
+    try:
+        os.makedirs(LOGS, exist_ok=True)
+        with open(TASK_LOG, "a", encoding="utf-8") as fh:
+            fh.write("\n[%s] %s\n" % (time.strftime("%H:%M:%S"), text_))
+    except OSError:
+        pass
+
+
+def reap_stopped(targets, mode, inflight):
+    """等行程收工；不聽話的補 SIGKILL；最後清半成品。"""
+    try:
+        deadline = time.time() + 3
+        while time.time() < deadline:
+            _kids, info = ps_snapshot()
+            if not any(pid_alive(p, info) for p in targets):
+                break
+            time.sleep(0.3)
+        _kids, info = ps_snapshot()
+        hard = [p for p in targets if pid_alive(p, info)]
+        for pid in hard:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        if hard:
+            task_note("停止：%d 個行程沒有回應 SIGTERM，已補 SIGKILL" % len(hard))
+        killed = []
+        for p in inflight:
+            try:
+                os.unlink(p)
+                killed.append(os.path.basename(p))
+            except OSError:
+                pass
+        gone, kept = sweep_stage(mode)
+        task_note("停止完成：刪掉 %d 個被中斷的輸出、%d 個讀不出來的半成品"
+                  "（保留 %d 個完整檔）%s"
+                  % (len(killed), len(gone), kept,
+                     ("：" + "、".join(killed + gone)) if (killed or gone) else ""))
+    finally:
+        with TASK_LOCK:
+            TASK["stopping"] = False
+
+
+def stop_task():
+    with TASK_LOCK:
+        if not TASK["running"]:
+            return {"ok": False, "error": "現在沒有在跑的工作"}
+        if TASK.get("stopping"):
+            return {"ok": False, "error": "已經在停止中了，等它收尾"}
+        TASK["stopping"] = True
+        root, mode, action = TASK["pid"], TASK.get("mode") or "", TASK["action"]
+
+    kids, _info = ps_snapshot()
+    targets = tree_pids(root, kids) if root else []
+    # launchd 的 refreshwatch 也會拉 mode_build，那是另一棵樹（我們不是它的父行程）。
+    # 同一個模式的一起收掉，否則按了停止，背景還有一個建置在跑。
+    if action == "mode-build" and mode:
+        for pid, m in find_build_pids(only_here=True).items():
+            if pid in targets or pid == os.getpid():
+                continue
+            if m == mode:
+                targets.append(pid)
+    targets = sorted(set(targets))
+
+    # 先把「正在寫哪些檔案」記下來，殺掉之後行程就問不到了。
+    inflight = inflight_outputs(targets, mode)
+    for pid in targets:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
+    threading.Thread(target=reap_stopped, args=(targets, mode, inflight),
+                     daemon=True).start()
+    task_note("停止：對 %s 送出 SIGTERM"
+              % (", ".join("pid %d" % p for p in targets) if targets else "（沒有找到行程）"))
+    return {"ok": True, "pids": targets, "mode": mode,
+            "detail": "pid %s" % (", ".join(str(p) for p in targets) or "無")
+                      + "；停下來後會自動清掉被中斷的半成品"}
+
+
+def watch_adopted(pid):
+    """webui 重啟後接手的那個建置跑完了，要把狀態收回來。"""
+    while True:
+        _kids, info = ps_snapshot()
+        if not pid_alive(pid, info):
+            break
+        time.sleep(3)
+    with TASK_LOCK:
+        if TASK.get("pid") == pid:
+            TASK.update({"running": False, "rc": None, "adopted": False,
+                         "stopping": False})
+    task_note("webui 重啟前就在跑的建置已經結束（不是這次控制台啟動的，結束碼未知）")
+
+
+def adopt_running_build():
+    """webui 重啟時，先前由它拉起的建置還活著（子行程不會跟著父行程死）。
+
+    不接手的話，控制台會以為沒事、允許再按一次建置，兩個建置就會撞在同一個
+    暫存目錄上。
+    """
+    found = find_build_pids(only_here=True)
+    if not found:
+        return
+    pid = sorted(found)[0]
+    _rc, start = sh(["ps", "-o", "lstart=", "-p", str(pid)], timeout=8)
+    with TASK_LOCK:
+        TASK.update({"running": True, "action": "mode-build", "mode": found[pid],
+                     "pid": pid, "rc": None, "stopping": False, "adopted": True,
+                     "started": (start or "").strip() or "（先前啟動）"})
+    threading.Thread(target=watch_adopted, args=(pid,), daemon=True).start()
 
 
 def build_cmd(action, body):
@@ -486,21 +759,32 @@ def build_cmd(action, body):
 
 
 def start_task(action, body):
+    if action in ("stop", "stop-build"):
+        return stop_task()
     cmd, err = build_cmd(action, body)
     if err:
         return {"ok": False, "error": err}
+    # 建置一定要知道自己屬於哪個模式，停止時才知道要清哪個暫存目錄。
+    mode = str(body.get("mode") or "").strip() if action == "mode-build" else ""
     with TASK_LOCK:
+        if TASK.get("stopping"):
+            return {"ok": False,
+                    "error": "上一個工作還在收尾（正在停止），等下面顯示「已完成／待機」再按"}
         if TASK["running"]:
             return {"ok": False, "error": "已經有工作在跑：%s" % TASK["action"]}
         os.makedirs(LOGS, exist_ok=True)
         with open(TASK_LOG, "w", encoding="utf-8") as fh:
             fh.write("$ %s\n" % " ".join(cmd))
         out = open(TASK_LOG, "a", encoding="utf-8")
+        # start_new_session：讓整棵建置樹自成一個 process group。停止時殺一組
+        # 就夠，不會誤殺 webui 自己（它跟 webui 同組過）。
         proc = subprocess.Popen(cmd, cwd=HERE, stdin=subprocess.DEVNULL,
-                                stdout=out, stderr=subprocess.STDOUT)
+                                stdout=out, stderr=subprocess.STDOUT,
+                                start_new_session=True)
         TASK.update({"running": True, "action": action,
                      "started": time.strftime("%Y-%m-%d %H:%M:%S"),
-                     "pid": proc.pid, "rc": None, "cmd": " ".join(cmd)})
+                     "pid": proc.pid, "rc": None, "cmd": " ".join(cmd),
+                     "mode": mode, "stopping": False, "adopted": False})
 
     def waiter():
         rc = proc.wait()
@@ -677,6 +961,8 @@ def main():
     ap.add_argument("--token-file", default=os.path.join(HERE, "webui-token"))
     a = ap.parse_args()
     set_prefix(a.prefix)
+    # 重啟前由這個控制台拉起的建置還活著，先把狀態認回來（不然會允許再按一次）。
+    adopt_running_build()
 
     token = ""
     if os.path.exists(a.token_file):
@@ -725,6 +1011,8 @@ pre{background:#8881;padding:8px;border-radius:6px;overflow:auto;max-height:240p
 textarea{width:100%;height:200px;font:12px/1.5 ui-monospace,Menlo,monospace;background:#8881;border-radius:6px;border:1px solid #8884;padding:8px}
 button{font:inherit;padding:5px 12px;border-radius:6px;border:1px solid #8886;background:#8882;cursor:pointer;margin:2px 4px 2px 0}
 button:hover{background:#8884}
+button:disabled{opacity:.45;cursor:default}
+button.danger{border-color:#c668}
 input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;background:#8881}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0}
 .modebox{border:1px solid #8884;border-radius:8px;padding:10px 14px;margin:10px 0}
@@ -755,14 +1043,17 @@ button.primary{font-weight:700;border-color:#0a0}
 <h2>② 開始直播</h2>
 <div class="row">
 <select id="mode"></select>
-<button class="primary" onclick="actSwitch()">建置並切換（開始直播）</button>
-<button onclick="actBuild()">只建置，不切換</button>
-<button onclick="actScan()">只掃描來源</button>
-<button onclick="actConcat()">重建 concat 清單</button>
-<button onclick="actStatus()">檢查缺哪些檔案</button>
+<button class="primary" data-need-idle onclick="actSwitch()">建置並切換（開始直播）</button>
+<button data-need-idle onclick="actBuild()">只建置，不切換</button>
+<button data-need-idle onclick="actScan()">只掃描來源</button>
+<button data-need-idle onclick="actConcat()">重建 concat 清單</button>
+<button data-need-idle onclick="actStatus()">檢查缺哪些檔案</button>
+<button class="danger" id="stopbtn" onclick="actStop()">停止建置</button>
 </div>
 <p class="dim">第一次會下載與轉檔（每支影片數十 MB，數分鐘到數十分鐘）；已經下載過的會跳過。
-切換會重啟播出端，中斷數秒。按鈕按下去是在背景跑，下面會即時顯示進度。</p>
+切換會重啟播出端，中斷數秒。按鈕按下去是在背景跑，下面會即時顯示進度。
+按「停止建置」會把整個建置連子行程（含 ffmpeg）一起停掉，並清掉被中斷的半成品；
+已經轉好的檔案會留著，下次建置從缺的補。</p>
 <pre id="task"></pre>
 
 <h2>播出狀態</h2><table id="play"></table>
@@ -1119,14 +1410,32 @@ function actScan(){ act("mode-build", { "scan-only": 1 }); }
 function actSwitch(){ act("mode-build", { "switch": 1 }); }
 function actConcat(){ act("concat", {}); }
 function actStatus(){ act("status", {}); }
+function actStop(){
+  post("/api/action", { action: "stop" }).then(function(r){
+    msg(r.ok ? ("已送出停止：" + (r.detail || "")) : ("無法停止：" + (r.error || "")));
+    setTimeout(pollTask, 500);
+  });
+}
+
+// 有工作在跑時把「開始」那一排按鈕鎖住，只留「停止建置」可按；反過來也一樣。
+function lockButtons(t){
+  var busy = !!t.running;
+  var els = document.querySelectorAll("[data-need-idle]");
+  for (var i = 0; i < els.length; i++) { els[i].disabled = busy; }
+  var sb = document.getElementById("stopbtn");
+  if (sb) { sb.disabled = !busy || !!t.stopping; }
+}
 
 function pollTask(){
   fetch("/api/task").then(function(r){ return r.json(); }).then(function(t){
-    var head = (t.running ? "執行中　" : "已完成／待機　") + (t.action || "") +
+    lockButtons(t);
+    var head = (t.running ? (t.stopping ? "正在停止…　" : "執行中　") : "已完成／待機　") +
+               (t.action || "") + (t.adopted ? "（webui 重啟前啟動的）" : "") +
                (t.started ? ("　" + t.started) : "") +
-               (t.rc === null || t.rc === undefined ? "" : ("　結束碼 " + t.rc));
+               (t.rc === null || t.rc === undefined ? ""
+                 : ("　結束碼 " + t.rc + (t.rc < 0 ? "（被中止）" : "")));
     text("task", head + "\n\n" + (t.log || []).join("\n"));
-    if (t.running) { setTimeout(pollTask, 2000); } else { refresh(); }
+    if (t.running) { setTimeout(pollTask, t.stopping ? 1000 : 2000); } else { refresh(); }
   });
 }
 

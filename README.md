@@ -57,7 +57,7 @@
 |---|---|
 | 狀態 | 服務行程、MediaMTX ready／讀者數／流量、單輪長度與下次循環時間、concat 缺檔、health 與 alerts |
 | 設定 | 直接編輯 `settings.json` 與 `modes.json`（存檔前驗 JSON，舊版留 `.bak`） |
-| 動作 | 建置／只掃描／建置並切換、重建 concat、檢查缺檔（背景執行並回報進度） |
+| 動作 | 建置／只掃描／建置並切換、重建 concat、檢查缺檔（背景執行並回報進度）、**停止建置**（連子行程一起收，並清掉被中斷的輸出檔） |
 
 只用標準庫，不必額外安裝。預設只綁 `127.0.0.1`，要對外開放**必須**帶 token 否則拒絕啟動；
 不以 root 執行、不保管密碼，**stream key 只進不出**。細節見 [操作手冊](docs/manual.md)。
@@ -192,7 +192,7 @@ Once installed, day-to-day operation needs no shell commands:
 |---|---|
 | Status | processes, MediaMTX ready/readers/traffic, round length and next loop time, missing concat entries, health and alerts |
 | Settings | edit `settings.json` and `modes.json` (JSON is validated; the previous version is kept as `.bak`) |
-| Actions | build / scan only / build and switch, rebuild concat, check for missing files (runs in the background with progress) |
+| Actions | build / scan only / build and switch, rebuild concat, check for missing files, **stop build** (kills the whole process tree and deletes the interrupted output files); runs in the background with progress |
 
 Standard library only, so there is nothing to install. It binds to `127.0.0.1` by default; exposing it
 requires a token or it refuses to start. It never runs as root and never stores passwords, and the
@@ -263,4 +263,3 @@ This project does **not** redistribute any of the following; install them yourse
 2. You are responsible for how you download and re-transmit content; the authors accept no liability for your use.
 3. Downloading is still subject to each platform terms of service - check that your use case complies.
 4. Third-party rights (music, likeness, news footage) must be cleared by whoever supplies the content.
-
