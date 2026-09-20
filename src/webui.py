@@ -810,6 +810,9 @@ function refresh(){
       if (hasIt) { selEl.value = s.playing_mode; selMode = s.playing_mode; MODE_PICKED = true; }
     }
     renderReady((s.ready || {})[selMode]);
+    var rdTop = (s.ready || {})[selMode];
+    var badgeTop = rdTop ? ((rdTop.state === "ok" ? "✅ " : "⚠ ") + rdTop.short) : "";
+    if (badgeTop) { text("head", s.now + "　目錄 " + s.prefix + "　·　" + badgeTop); }
     var p = "<tr><th>行程</th><th>狀態</th></tr>";
     s.proc.forEach(function(x){
       p += "<tr><td>" + esc(x.name) + "</td><td>" +
