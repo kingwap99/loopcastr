@@ -543,6 +543,7 @@ def restart_service(label):
 # ── HTTP ────────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
     server_version = "ytpl-webui"
+    protocol_version = "HTTP/1.1"
     api = "http://127.0.0.1:9997"
     path_name = "live/main"
     token = ""
@@ -586,6 +587,12 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):
+        try:
+            self._do_GET()
+        except Exception as exc:
+            self._fail(exc)
+
+    def _do_GET(self):
         path = self.path.split("?", 1)[0]
         if not self._authed():
             return self._send(401, {"error": "需要 token"})
@@ -603,6 +610,19 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        try:
+            self._do_POST()
+        except Exception as exc:
+            self._fail(exc)
+
+    def _fail(self, exc):
+        """handler 內出錯時回一個正常的 500，不要直接斷線（斷線在瀏覽器會變成 NetworkError）"""
+        try:
+            self._send(500, {"error": "內部錯誤：%s" % exc})
+        except Exception:
+            pass
+
+    def _do_POST(self):
         path = self.path.split("?", 1)[0]
         if not self._authed():
             return self._send(401, {"error": "需要 token"})
@@ -801,7 +821,10 @@ function post(url, body){
 
 
 function refresh(){
+  if (REFRESHING) { return; }
+  REFRESHING = true;
   fetch("/api/status").then(function(r){ return r.json(); }).then(function(s){
+    STAT_FAIL = 0;
     text("head", s.now + "　目錄 " + s.prefix);
     var selEl = document.getElementById("mode");
     var selMode = (selEl && selEl.value) || "";
@@ -850,7 +873,11 @@ function refresh(){
     var l = "<tr><th>health</th><td><pre>" + esc((s.logs.health || []).join("\n")) + "</pre></td></tr>";
     l += "<tr><th>alerts</th><td><pre>" + esc((s.logs.alerts || []).join("\n") || "（無）") + "</pre></td></tr>";
     html("logs", l);
-  }).catch(function(e){ msg("讀狀態失敗：" + e); });
+  }).catch(function(e){
+    STAT_FAIL += 1;
+    if (STAT_FAIL === 1) { msg("讀狀態失敗，正在重試…"); setTimeout(refresh, 1500); }
+    else { msg("讀狀態失敗（連續 " + STAT_FAIL + " 次）：" + e); }
+  }).then(function(){ REFRESHING = false; });
 }
 
 function loadCfg(){
@@ -891,6 +918,8 @@ function saveModes(){ save("modes"); }
 var SETTINGS_SCHEMA = [];
 var SETTINGS_CACHE = {};
 var MODE_PICKED = false;
+var STAT_FAIL = 0;
+var REFRESHING = false;
 var FIELDS = [
   ["label", "模式名稱（顯示用）", "text", 20, "新聞模式"],
   ["video_source", "① 播放清單網址（要播的影片）", "text", 56,
