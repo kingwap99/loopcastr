@@ -62,6 +62,10 @@
 只用標準庫，不必額外安裝。預設只綁 `127.0.0.1`，要對外開放**必須**帶 token 否則拒絕啟動；
 不以 root 執行、不保管密碼，**stream key 只進不出**。細節見 [操作手冊](docs/manual.md)。
 
+頁面標題的專案名連到 GitHub（另開分頁）；標題下方有一顆「▶ 看直播畫面」，直接開
+MediaMTX 的 HLS 頁（就是播出端真正送出去的那一路）。`mediamtx.yml` 的 `hls` 是 `no`
+（repo 的預設值）時不會顯示那顆按鈕 —— 沒開 HLS 就沒有那個頁面，按了只會連到空的。
+
 ### 設定放哪裡
 
 | 檔案 | 管什麼 |
@@ -197,6 +201,11 @@ Once installed, day-to-day operation needs no shell commands:
 Standard library only, so there is nothing to install. It binds to `127.0.0.1` by default; exposing it
 requires a token or it refuses to start. It never runs as root and never stores passwords, and the
 **stream key is write-only** (the page can set it but will never display it).
+
+The project name in the page title links to GitHub (opens in a new tab), and the "▶ 看直播畫面"
+button below it opens MediaMTX's HLS page — the stream that is actually being sent out. When
+`hls` is `no` in `mediamtx.yml` (the repo default) that button is not shown, because there is no
+such page to open.
 
 ### Where settings live
 

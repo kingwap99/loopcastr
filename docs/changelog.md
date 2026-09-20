@@ -280,3 +280,22 @@ launchd 收掉那個 job 就整組一起收。這正是先前「跑到一半，�
 | 建置的 pgid | ＝自己的 pid（不再跟 webui 同組） |
 | `kickstart -k` 重啟控制台後 | 建置**還活著**，ppid 變成 1 |
 | 新控制台 | 接手顯示「執行中（webui 重啟前啟動的）」，結束時由 watcher 收回狀態 |
+
+## 控制台標題與「看直播畫面」按鈕（2026-09-21）
+
+- 標題改成 `ytpl2ytstream 控制台`，專案名連到 GitHub 專案頁，**另開分頁**
+  （`target="_blank" rel="noopener"`）。瀏覽器分頁標題與啟動時印的橫幅也一起改。
+- 標題下面新增「▶ 看直播畫面」，開 MediaMTX 的 HLS 頁。
+
+HLS 的位址不寫死，讀 `mediamtx.yml` 的 `hls` 與 `hlsAddress`：
+
+| `mediamtx.yml` | 控制台顯示 |
+|---|---|
+| `hls: yes` ＋ `hlsAddress: 127.0.0.1:8888`（部署端） | 按鈕連到 `http://127.0.0.1:8888/live/main/` |
+| `hls: no`（repo 預設值） | **不顯示按鈕**，改一行灰字說明「hls 是 no」 |
+| 找不到 `mediamtx.yml` | 同上，說明改成「找不到 mediamtx.yml」 |
+
+【實測】部署端 `/api/status` 回 `{'enabled': True, 'port': 8888, 'path': 'live/main'}`，
+頁面渲染出 `<a class="btn live" href="http://127.0.0.1:8888/live/main/" target="_blank" rel="noopener">`；
+`/live/main/` 回 HTTP 200、`/live/main/index.m3u8` 回 302（MediaMTX 的轉址，正常）。
+只回傳埠號與路徑、主機名稱由瀏覽器填，所以從別台機器開控制台也連得到。

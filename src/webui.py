@@ -49,11 +49,12 @@ CONCAT = os.path.join(PREFIX, "concat.txt")
 PLAYOUT_LOG = os.path.join(LOGS, "playout.log")
 KEYFILE = os.path.join(PREFIX, "stream.key")
 TASK_LOG = os.path.join(LOGS, "webui-task.log")
+MEDIAMTX = os.path.join(PREFIX, "mediamtx.yml")
 
 
 def set_prefix(path):
     global PREFIX, MEDIA, LOGS, MODES, SETTINGS, PLAYLIST, PLAYLIST_LOCAL
-    global CONCAT, PLAYOUT_LOG, KEYFILE, TASK_LOG
+    global CONCAT, PLAYOUT_LOG, KEYFILE, TASK_LOG, MEDIAMTX
     PREFIX = os.path.abspath(path)
 
     def pick(name):
@@ -71,6 +72,7 @@ def set_prefix(path):
     PLAYLIST_LOCAL = pick("playlist-local.json")
     CONCAT = pick("concat.txt")
     KEYFILE = pick("stream.key")
+    MEDIAMTX = pick("mediamtx.yml")
     PLAYOUT_LOG = os.path.join(LOGS, "playout.log")
     TASK_LOG = os.path.join(LOGS, "webui-task.log")
 
@@ -287,6 +289,32 @@ def mtx(api, path_name):
         return {"ok": False, "error": str(exc)}
 
 
+def hls_preview(path_name):
+    """HLS 預覽頁的位址。
+
+    位址由 mediamtx.yml 決定：`hls: no`（repo 的預設值）時 MediaMTX 根本沒開
+    HLS，所以按鈕不該出現 —— 按了只會連到一個空頁面。
+    只回傳埠號與路徑，主機名稱交給瀏覽器自己填（從別的機器開控制台也通）。
+    """
+    cfg = {}
+    try:
+        with open(MEDIAMTX, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.split("#", 1)[0].strip()
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    cfg[k.strip()] = v.strip()
+    except OSError:
+        return {"enabled": False, "why": "找不到 mediamtx.yml"}
+    if cfg.get("hls", "").lower() not in ("yes", "true", "1"):
+        return {"enabled": False, "why": "mediamtx.yml 的 hls 是 no（預設值，要用請改成 yes）"}
+    addr = cfg.get("hlsAddress") or ":8888"
+    port = addr.rpartition(":")[2] or "8888"
+    if not port.isdigit():
+        return {"enabled": False, "why": "hlsAddress 讀不出埠號：%s" % addr}
+    return {"enabled": True, "port": int(port), "path": path_name, "why": ""}
+
+
 def round_info():
     """單輪長度（讀 playlist-local.json）與下一次循環的時間點。"""
     d = read_json(PLAYLIST_LOCAL)
@@ -336,6 +364,7 @@ def status(api, path_name):
         "prefix": PREFIX,
         "proc": procs(),
         "mtx": mtx(api, path_name),
+        "preview": hls_preview(path_name),
         "round": round_info(),
         "content": content_info(),
         "ready": ready_map(api, path_name),
@@ -1019,6 +1048,10 @@ button{font:inherit;padding:5px 12px;border-radius:6px;border:1px solid #8886;ba
 button:hover{background:#8884}
 button:disabled{opacity:.45;cursor:default}
 button.danger{border-color:#c668}
+a.btn{display:inline-block;padding:5px 12px;border-radius:6px;border:1px solid #8886;
+background:#8882;text-decoration:none;color:inherit;margin:2px 4px 2px 0}
+a.btn:hover{background:#8884}
+a.btn.live{border-color:#0a06;font-weight:700}
 input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;background:#8881}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0}
 .modebox{border:1px solid #8884;border-radius:8px;padding:10px 14px;margin:10px 0}
@@ -1037,8 +1070,9 @@ border:1px solid;line-height:1.5}
 .chip-bad{background:#c001;border-color:#c006}
 button.primary{font-weight:700;border-color:#0a0}
 </style></head><body>
-<h1><a href="__REPO_URL__" title="GitHub：__PROJECT__">__PROJECT__</a> 控制台</h1>
+<h1><a href="__REPO_URL__" target="_blank" rel="noopener" title="GitHub：__PROJECT__">__PROJECT__</a> 控制台</h1>
 <div class="dim" id="head"></div>
+<div class="row" id="quick"></div>
 <div id="msg"></div>
 
 <h2>① 來源設定</h2>
@@ -1111,12 +1145,25 @@ function post(url, body){
 
     function badge(ok, s){ return '<span class="' + (ok ? "up" : "down") + '>' + esc(s) + "</span>"; }
 
+// 標題下面那顆「看直播畫面」。位址沒變就不重畫 —— 每 5 秒重建一次的話，
+// 剛好按在連結上的那一下會被換掉。
+function renderQuick(s){
+  var p = s.preview || {};
+  var url = p.enabled ? ("http://" + location.hostname + ":" + p.port + "/" + p.path + "/") : "";
+  if (url === LAST_LIVE_URL) { return; }
+  LAST_LIVE_URL = url;
+  html("quick", url
+    ? ('<a class="btn live" href="' + esc(url) + '" target="_blank" rel="noopener">▶ 看直播畫面</a>')
+    : ('<span class="dim">沒有直播畫面預覽：' + esc(p.why || "") + "</span>"));
+}
+
 function refresh(){
   if (REFRESHING) { return; }
   REFRESHING = true;
   fetch("/api/status").then(function(r){ return r.json(); }).then(function(s){
     STAT_FAIL = 0;
     text("head", s.now + "　目錄 " + s.prefix);
+    renderQuick(s);
     var selEl = document.getElementById("mode");
     var selMode = (selEl && selEl.value) || "";
     if (!selMode && s.playing_mode && (s.ready || {})[s.playing_mode]) { selMode = s.playing_mode; }
@@ -1219,6 +1266,7 @@ var MODE_PICKED = false;
 var MODE_CHIPS = {};
 var STAT_FAIL = 0;
 var REFRESHING = false;
+var LAST_LIVE_URL = null;
 var FIELDS = [
   ["label", "模式名稱（顯示用）", "text", 20, "新聞模式"],
   ["video_source", "① 播放清單網址（要播的影片）", "text", 56,
