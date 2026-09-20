@@ -344,8 +344,18 @@ def build_cmd(action, body):
     """把動作翻成 argv。一律用清單、不經 shell，也不接受使用者給的任意路徑。"""
     if action == "mode-build":
         mode = str(body.get("mode") or "").strip()
-        if mode not in (read_json(MODES) or {}):
+        modes = read_json(MODES) or {}
+        if mode not in modes:
             return None, "沒有這個模式：%s" % mode
+        src = str((modes.get(mode) or {}).get("video_source") or "").strip()
+        # 先擋掉註定失敗的建置：跑一場要下載數百 MB、花好幾分鐘。
+        if not src:
+            return None, "%s 還沒填「頻道或播放清單網址」" % mode
+        if "YourChannel" in src:
+            return None, ("%s 的來源還是範例值 @YourChannel，請先到「來源設定」填真實的頻道網址"
+                          % mode)
+        if not _is_youtube(src):
+            return None, "%s 的來源不是 YouTube 網址：%s" % (mode, src)
         cmd = [sys.executable, os.path.join(HERE, "mode_build.py"), "--mode", mode]
         for flag in ("scan-only", "deploy-only", "skip-transitions"):
             if body.get(flag):
@@ -568,7 +578,7 @@ def main():
 
 # PAGE 必須在 if __name__ 之前定義：以腳本執行時那一行會直接進入
 # serve_forever()，寫在它後面的定義都來不及跑到（實測踩過：GET / 回空的）。
-PAGE = """<!doctype html>
+PAGE = r"""<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ytpl 控制台</title>
@@ -662,7 +672,7 @@ function post(url, body){
   }).then(function(r){ return r.json(); });
 }
 
-function badge(ok, s){ return "<span class=\"" + (ok ? "up" : "down") + "\">" + esc(s) + "</span>"; }
+    function badge(ok, s){ return '<span class="' + (ok ? "up" : "down") + '>' + esc(s) + "</span>"; }
 
 function refresh(){
   fetch("/api/status").then(function(r){ return r.json(); }).then(function(s){
@@ -767,6 +777,12 @@ function renderModes(modes){
     var h = document.createElement("h3");
     h.textContent = mk + (m.label ? "（" + m.label + "）" : "");
     box.appendChild(h);
+    if (String(m.video_source || "").indexOf("YourChannel") >= 0) {
+      var warn = document.createElement("p");
+      warn.className = "down";
+      warn.textContent = "來源還是範例值 @YourChannel —— 建置前請先填上真實的頻道網址。";
+      box.appendChild(warn);
+    }
     var inputs = {};
     FIELDS.forEach(function(f){
       var row = document.createElement("div");
