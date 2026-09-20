@@ -762,7 +762,7 @@ var FIELDS = [
   ["max_seconds", "每支長度上限（秒，0＝全長）", "number", 6, ""],
   ["shorts_count", "shorts 支數", "number", 6, ""],
   ["shorts_seconds", "每支 short 長度上限（秒）", "number", 6, ""],
-  ["refresh_seconds", "重新掃描間隔（秒，0＝不掃）", "number", 6, ""]
+  ["refresh_seconds", "重新掃描間隔（秒，0＝不掃）", "number", 6, ""],
   ["shorts_passes", "一輪播幾趟（0＝用預設）", "number", 6, ""]
 ];
 var MODES_CACHE = {};
