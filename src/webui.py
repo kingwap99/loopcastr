@@ -333,12 +333,116 @@ def status(api, path_name):
         "mtx": mtx(api, path_name),
         "round": round_info(),
         "content": content_info(),
+        "ready": ready_map(api, path_name),
+        "playing_mode": mode_of_edition(loaded_edition().get("list")),
         "logs": {
             "health": tail(os.path.join(LOGS, "health.log"), 8),
             "alerts": tail(os.path.join(LOGS, "alerts.jsonl"), 5),
             "publish": tail(os.path.join(LOGS, "publish.log"), 5),
         },
     }
+
+
+# ── 開播檢查 ────────────────────────────────────────────────────────
+# 「檔案轉好了沒、播出端切換了沒、串流通了沒」是操作者最常問的三件事，
+# 直接算成一句結論顯示在頁面上，不要讓他自己讀 log。
+EDITION = {
+    "live": ("playlist-local.json", "concat.txt"),
+    "news": ("playlist-news-local.json", "concat-news.txt"),
+    "promotion": ("playlist-promotion-local.json", "concat-promotion.txt"),
+    "test": ("playlist-test-local.json", "concat-test.txt"),
+}
+
+
+def loaded_edition():
+    """播出端「實際載入」的那一版。讀 launchctl 而不是讀檔案：
+    編輯過 plist 但沒重啟時，檔案的內容會騙人。"""
+    rc, txt = sh(["launchctl", "print", "gui/%d/com.ytpl.playout" % os.getuid()], timeout=5)
+    if rc != 0:
+        rc, txt = sh(["sudo", "-n", "launchctl", "print", "system/com.ytpl.playout"], timeout=5)
+    out = {"list": "", "playlist": "", "ok": False}
+    for line in (txt or "").splitlines():
+        s = line.strip()
+        if s.startswith("LIST =>"):
+            out["list"] = s.split("=>", 1)[1].strip()
+        elif s.startswith("PLAYLIST =>"):
+            out["playlist"] = s.split("=>", 1)[1].strip()
+    out["ok"] = bool(out["list"] or out["playlist"])
+    return out
+
+
+def _verdict(state, short, detail):
+    return {"state": state, "short": short, "detail": detail}
+
+
+def check_ready(mode, modes_cfg, api, path_name):
+    """這個模式現在可以正式開播了嗎？"""
+    cfg = (modes_cfg or {}).get(mode) or {}
+    src = str(cfg.get("video_source") or "").strip()
+
+    if mode not in EDITION:
+        return _verdict("unknown", "不確定的模式", "沒有 %s 對應的清單檔名" % mode)
+    pl_name, list_name = EDITION[mode]
+
+    if not src:
+        return _verdict("no_source", "還沒填播放清單網址",
+                        "到上面的「① 來源設定」填播放清單與 shorts 網址，存檔後再建置")
+    if "YourChannel" in src:
+        return _verdict("no_source", "來源還是範例值 @YourChannel",
+                        "請改成你真實的頻道或播放清單網址")
+
+    with TASK_LOCK:
+        running, started = TASK["running"], TASK["started"]
+    if running:
+        return _verdict("building", "正在建置（下載／轉檔中）",
+                        "從 %s 開始，完成前不要開播；下面那個框有即時進度" % (started or "剛剛"))
+
+    pl_path = os.path.join(PREFIX, pl_name)
+    list_path = os.path.join(PREFIX, list_name)
+    if not os.path.exists(pl_path) or not os.path.exists(list_path):
+        return _verdict("no_content", "還沒建置內容",
+                        "找不到 %s／%s；按下面的「建置並切換（開始直播）」" % (pl_name, list_name))
+
+    segs = (read_json(pl_path) or {}).get("segments") or []
+    total = sum(float(s.get("outpoint") or s.get("seconds") or 0) for s in segs)
+    files, missing = 0, []
+    for line in tail(list_path, 2000):
+        if line.startswith("file "):
+            files += 1
+            if not os.path.exists(unquote(line[5:])):
+                missing.append(os.path.basename(unquote(line[5:])))
+    info = "%d 段、單輪約 %d 分" % (len(segs), round(total / 60))
+    if missing:
+        return _verdict("partial", "內容不完整（有檔案不見了）",
+                        "少了 %d 個：%s" % (len(missing), "、".join(missing[:4])))
+
+    if os.path.basename(loaded_edition().get("list") or "") != list_name:
+        now = os.path.basename(loaded_edition().get("list") or "") or "（沒有載入播出端）"
+        return _verdict("not_switched", "已轉好，但播出端還在播另一版",
+                        "%s 已就緒（%s）。目前播的是 %s；按「建置並切換（開始直播）」就會切過去"
+                        % (list_name, info, now))
+
+    m = mtx(api, path_name)
+    if not m.get("ok") or not m.get("ready"):
+        return _verdict("stream_down", "串流沒有起來",
+                        "MediaMTX 沒有 ready；看下面的「服務行程」與日誌")
+
+    return _verdict("ok", "可以開始直播",
+                    "已經轉好、也切換完成（%s），串流正常" % info)
+
+
+def mode_of_edition(list_path):
+    """concat-<mode>.txt → <mode>；concat.txt（正式版）→ live。"""
+    b = os.path.basename(list_path or "")
+    for m, pair in EDITION.items():
+        if b == pair[1]:
+            return m
+    return ""
+
+
+def ready_map(api, path_name):
+    modes = read_json(MODES) or {}
+    return {m: check_ready(m, modes, api, path_name) for m in modes if m != "_comment"}
 
 
 # ── 動作（背景執行，一次一件）────────────────────────────────────────
@@ -608,6 +712,11 @@ input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;b
 .modebox label{display:inline-block;min-width:15em}
 .modebox input[type=text]{min-width:24em}
 #msg{min-height:1.6em;font-weight:600}
+.ready-ok,.ready-wait,.ready-bad{border-radius:8px;padding:10px 14px;margin:8px 0;
+border:1px solid;line-height:1.5}
+.ready-ok{background:#0a01;border-color:#0a06}
+.ready-wait{background:#fa01;border-color:#fa06}
+.ready-bad{background:#c001;border-color:#c006}
 button.primary{font-weight:700;border-color:#0a0}
 </style></head><body>
 <h1>ytpl 控制台</h1>
@@ -620,6 +729,7 @@ button.primary{font-weight:700;border-color:#0a0}
 <div id="modes"></div>
 
 <h2>② 開始直播</h2>
+<div id="ready"></div>
 <div class="row">
 <select id="mode"></select>
 <button class="primary" onclick="actSwitch()">建置並切換（開始直播）</button>
@@ -681,9 +791,25 @@ function post(url, body){
 
     function badge(ok, s){ return '<span class="' + (ok ? "up" : "down") + '>' + esc(s) + "</span>"; }
 
+    function renderReady(r){
+      var host = document.getElementById("ready");
+      if (!r) { host.innerHTML = ""; return; }
+      var cls = { "ok": "ready-ok", "building": "ready-wait", "not_switched": "ready-wait" }[r.state] || "ready-bad";
+      var icon = { "ok": "✅", "building": "⏳", "not_switched": "🟡" }[r.state] || "⚠";
+      host.innerHTML = '<div class="' + cls + '"><b>' + icon + " " + esc(r.short) + "</b><br>" + esc(r.detail) + "</div>";
+    }
+
+
 function refresh(){
   fetch("/api/status").then(function(r){ return r.json(); }).then(function(s){
     text("head", s.now + "　目錄 " + s.prefix);
+    var selEl = document.getElementById("mode");
+    var selMode = (selEl && selEl.value) || "";
+    if (selEl && !MODE_PICKED && s.playing_mode) {
+      var hasIt = [].slice.call(selEl.options).some(function(o){ return o.value === s.playing_mode; });
+      if (hasIt) { selEl.value = s.playing_mode; selMode = s.playing_mode; MODE_PICKED = true; }
+    }
+    renderReady((s.ready || {})[selMode]);
     var p = "<tr><th>行程</th><th>狀態</th></tr>";
     s.proc.forEach(function(x){
       p += "<tr><td>" + esc(x.name) + "</td><td>" +
@@ -735,13 +861,16 @@ function loadCfg(){
     renderSettings(SETTINGS_SCHEMA, SETTINGS_CACHE);
     renderModes(c.modes);
     var sel = document.getElementById("mode");
+    sel.onchange = function(){ refresh(); };
     sel.innerHTML = "";
-    Object.keys(c.modes || {}).forEach(function(k){
-      var o = document.createElement("option");
-      o.value = k;
-      o.textContent = k + (c.modes[k].label ? "（" + c.modes[k].label + "）" : "");
-      sel.appendChild(o);
-    });
+    Object.keys(c.modes || {}).filter(function(k){ return k !== "_comment"; })
+      .forEach(function(k){
+        var o = document.createElement("option");
+        o.value = k;
+        o.textContent = k + (c.modes[k].label ? "（" + c.modes[k].label + "）" : "");
+        sel.appendChild(o);
+      });
+    refresh();
   });
 }
 
@@ -758,6 +887,7 @@ function saveModes(){ save("modes"); }
 
 var SETTINGS_SCHEMA = [];
 var SETTINGS_CACHE = {};
+var MODE_PICKED = false;
 var FIELDS = [
   ["label", "模式名稱（顯示用）", "text", 20, "新聞模式"],
   ["video_source", "① 播放清單網址（要播的影片）", "text", 56,
