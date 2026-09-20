@@ -227,7 +227,7 @@ def main():
             btn_w = 0
             if not a.no_button:
                 kw = {"caption": a.button_caption} if a.button_caption else {}
-            btn_w, _ = wmtext.render_link_button(url, btn, size=blc.QR_SIZE,
+                btn_w, _ = wmtext.render_link_button(url, btn, size=blc.QR_SIZE,
                                                  qr_px=blc.QR_PX,
                                                  **kw)
 
@@ -236,6 +236,12 @@ def main():
                                 w=1280 - btn_w, tag=sid, band_left=0)
             if not a.no_button:
                 ov.append((btn, None, "x=W-w:y=0"))
+            if not a.no_button and blc.SPONSOR_URL:
+                sb = os.path.join(TMP, "sponsor-%s.png" % sid)
+                wmtext.render_link_button(blc.SPONSOR_URL, sb, size=blc.QR_SIZE,
+                                          qr_px=blc.QR_PX,
+                                          caption=blc.SPONSOR_CAPTION)
+                ov.append((sb, None, "x=W-w:y=H-h"))
 
                 # shorts 連續輪動：第 p 趟第 i 支用池子裡第 (p*len(eps) + i - 1) 支。
                 idx = p * len(eps) + (i - 1)

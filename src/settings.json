@@ -29,7 +29,9 @@
     "link_button": true,
     "link_caption": "▶ 看原片",
     "countdown": true,
-    "transition_caption": "去追劇"
+    "transition_caption": "去追劇",
+    "sponsor_url": "",
+    "sponsor_caption": "贊助"
   },
   "content": {
     "black_tail_min": 5.0,
@@ -37,4 +39,3 @@
     "transitions_parallel": 3
   }
 }
-

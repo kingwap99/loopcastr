@@ -228,6 +228,10 @@ SETTINGS_SCHEMA = [
          "QR 下方那一行「01/03　剩餘 02:57」", True),
         ("transition_caption", "按鈕文字（過場）", "text", None, None,
          "過場的按鈕說明", "去追劇"),
+        ("sponsor_url", "贊助連結（QR）", "text", None, None,
+         "填了就固定在畫面右下角顯示 QR；留空＝不顯示", ""),
+        ("sponsor_caption", "贊助按鈕文字", "text", None, None,
+         "QR 下方的說明文字", "贊助"),
     ]),
     ("content", "內容處理", [
         ("black_tail_min", "黑尾門檻（秒）", "float", None, (0, 120),

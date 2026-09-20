@@ -103,6 +103,10 @@ TEXT_STROKE = int(cfg("overlay", "text_stroke", 4))
 QR_SIZE = int(cfg("overlay", "qr_size", 30))
 QR_PX = int(cfg("overlay", "qr_px", 120))
 
+# 贊助／抖內按鈕：網址留空就不顯示（固定放畫面右下角）
+SPONSOR_URL = cfg("overlay", "sponsor_url", "")
+SPONSOR_CAPTION = cfg("overlay", "sponsor_caption", "贊助")
+
 TRANSITION_FILE = os.path.join(MEDIA_DIR, "_transition.mp4")
 TRANSITION_ID = "_tr"
 
@@ -540,6 +544,13 @@ def main():
                         "https://youtu.be/%s" % sid, btn, size=QR_SIZE, qr_px=QR_PX,
                         caption=args.link_caption)
                     overlays.append((btn, None, "x=W-w:y=0"))
+                    # 贊助 QR 固定放右下角，跟集數的資訊分開，不搶同一塊空間。
+                    if SPONSOR_URL:
+                        sb = os.path.join(RAW_DIR, "sponsor-%s.png" % sid)
+                        wmtext.render_link_button(SPONSOR_URL, sb, size=QR_SIZE,
+                                                  qr_px=QR_PX,
+                                                  caption=SPONSOR_CAPTION)
+                        overlays.append((sb, None, "x=W-w:y=H-h"))
                 except Exception as exc:
                     log("      %s 連結按鈕失敗，改為不疊：%s" % (sid, exc))
                     btn_w = btn_h = 0
