@@ -178,6 +178,68 @@ def probe_sources(video_source, shorts_url):
     return {"ok": True, "summary": "　｜　".join(parts)}
 
 
+# ── 設定表單的 schema ───────────────────────────────────────────────
+# (段落, 標題, [(key, 欄位標籤, 型別, 選項, 範圍, 說明)])
+# 表單由這份 schema 產生，所以新增旋鈕只要加一行；型別支援 text／int／float／bool／choice。
+SETTINGS_SCHEMA = [
+    # (段落, 標題, [(key, 欄位標籤, 型別, 選項, 範圍, 說明, 預設值)])
+    # 表單由這份 schema 產生：新增旋鈕只要加一行。型別支援 text／int／float／bool／choice。
+    # 「預設值」是 settings.json 沒有這個 key 時表單要顯示什麼，也是程式的內建預設
+    # （兩邊必須一致，否則表單會顯示一個跟實際行為不同的數字）。
+    ("media", "畫質與流量", [
+        ("target", "解析度", "choice", ["1080", "720", "480"], None,
+         "所有片段都正規化到這個尺寸。播出端是純複製，所以全部必須一致", "720"),
+        ("fps", "影格率", "int", None, (1, 60), "一般用 30", 30),
+        ("venc", "編碼器", "choice", ["libx264", "h264_videotoolbox"], None,
+         "libx264 品質穩定但吃 CPU；videotoolbox 走硬體、較省電", "libx264"),
+        ("preset", "x264 preset", "choice",
+         ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium"], None,
+         "越快＝同流量下畫質越差；veryfast 是多數情況的平衡點", "veryfast"),
+        ("video_bitrate", "影片位元率", "text", None, None,
+         "例如 2500k／4000k。最直接影響畫質與上傳頻寬的旋鈕", "2500k"),
+        ("video_maxrate", "位元率上限", "text", None, None, "通常與位元率相同", "2500k"),
+        ("video_bufsize", "位元率緩衝", "text", None, None, "通常是位元率的 2 倍", "5000k"),
+        ("abr", "音訊位元率", "text", None, None, "128k 對談話內容足夠", "128k"),
+        ("sample_rate", "音訊取樣率", "int", None, (8000, 48000), "48000 是通用值", 48000),
+        ("audio_fade", "換片淡入淡出（秒）", "float", None, (0, 10),
+         "每段開頭淡入、結尾淡出。播出端接縫插不了濾鏡，所以要建置時烤進檔案", 2.5),
+        ("max_seconds", "每支長度上限（秒）", "int", None, (0, 14400),
+         "0＝播完整支。模式層級（modes.json）可以再覆寫", 0),
+        ("passes", "一輪播幾趟", "int", None, (1, 10),
+         "大於 1 時一輪會重播影片，shorts 池接著往下輪", 1),
+    ]),
+    ("overlay", "畫面元素", [
+        ("date_label", "日期前綴", "text", None, None,
+         "浮水印上「首播日期：」那段文字，換語系改這裡", "首播日期："),
+        ("overlay_y", "浮水印距頂端（px）", "int", None, (0, 400), "", 40),
+        ("overlay_margin", "左右邊界（px）", "int", None, (0, 400), "", 40),
+        ("band_left", "跑馬燈左界（px）", "int", None, (0, 640),
+         "0＝自動用畫面寬度的 1/7，讓開原片左上角的 logo", 0),
+        ("marquee_speed", "跑馬燈速度（px/秒）", "int", None, (10, 600), "", 120),
+        ("marquee_gap", "跑馬燈間距（px）", "int", None, (0, 1000), "兩輪文字之間的空白", 220),
+        ("text_size", "文字大小（px）", "int", None, (16, 96), "", 44),
+        ("text_stroke", "文字描邊（px）", "int", None, (0, 12),
+         "描邊讓字在任何畫面上都看得清", 4),
+        ("qr_size", "QR 按鈕字級", "int", None, (12, 60), "", 30),
+        ("qr_px", "QR 邊長（px）", "int", None, (60, 300), "越大越好掃，但佔畫面", 120),
+        ("link_button", "顯示 QR 按鈕", "bool", None, None, "關掉就只剩跑馬燈", True),
+        ("link_caption", "按鈕文字（集數）", "text", None, None, "集數的按鈕說明", "▶ 看原片"),
+        ("countdown", "顯示剩餘時間倒數", "bool", None, None,
+         "QR 下方那一行「01/03　剩餘 02:57」", True),
+        ("transition_caption", "按鈕文字（過場）", "text", None, None,
+         "過場的按鈕說明", "去追劇"),
+    ]),
+    ("content", "內容處理", [
+        ("black_tail_min", "黑尾門檻（秒）", "float", None, (0, 120),
+         "片尾連續黑畫面超過這個秒數就截掉。播出端看不出來，觀眾端是一片黑", 5.0),
+        ("black_tail_slack", "黑尾容許範圍（秒）", "float", None, (0, 30),
+         "黑尾結束點要落在片尾幾秒內才算數", 2.5),
+        ("transitions_parallel", "過場同時編幾個", "int", None, (1, 8),
+         "越高越快但越吃 CPU", 3),
+    ]),
+]
+
+
 # ── 狀態 ────────────────────────────────────────────────────────────
 # 用 pgrep 而不是 launchctl：查 system domain 的服務需要 root，而這支程式刻意
 # 不以 root 執行。行程在不在、日誌有沒有在動，一樣看得出來。
@@ -414,6 +476,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/config":
             return self._send(200, {"settings": read_json(SETTINGS, {}),
                                     "modes": read_json(MODES, {})})
+        if path == "/api/schema":
+            return self._send(200, {"settings": SETTINGS_SCHEMA})
         if path == "/api/task":
             return self._send(200, task_state())
         return self._send(404, {"error": "not found"})
@@ -543,7 +607,11 @@ input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;b
 （會下載與轉檔，可能要幾分鐘）。「驗證網址」會先解析一次，確認網址沒打錯。</p>
 <div id="modes"></div>
 
-<h2>進階設定</h2>
+<h2>畫質與版面</h2>
+<p class="dim">存檔後要按「建置」才會套用到已下載的內容（改畫質等於重新轉檔）。</p>
+<div id="settings"></div>
+
+<h2>進階設定（原始 JSON）</h2>
 <details>
 <summary>settings.json（畫質、版面、淡化、黑尾門檻）</summary>
 <div class="row"><b>settings.json</b><button onclick="saveSettings()">儲存</button></div>
@@ -640,9 +708,14 @@ function refresh(){
 }
 
 function loadCfg(){
-  fetch("/api/config").then(function(r){ return r.json(); }).then(function(c){
+  fetch("/api/schema").then(function(r){ return r.json(); }).then(function(sc){
+    SETTINGS_SCHEMA = sc.settings || [];
+    return fetch("/api/config");
+  }).then(function(r){ return r.json(); }).then(function(c){
+    SETTINGS_CACHE = c.settings || {};
     document.getElementById("ta-settings").value = JSON.stringify(c.settings, null, 2);
     document.getElementById("ta-modes").value = JSON.stringify(c.modes, null, 2);
+    renderSettings(SETTINGS_SCHEMA, SETTINGS_CACHE);
     renderModes(c.modes);
     var sel = document.getElementById("mode");
     sel.innerHTML = "";
@@ -666,7 +739,10 @@ function save(kind){
 function saveSettings(){ save("settings"); }
 function saveModes(){ save("modes"); }
 
+var SETTINGS_SCHEMA = [];
+var SETTINGS_CACHE = {};
 var FIELDS = [
+  ["label", "模式名稱（顯示用）", "text", 20, "新聞模式"],
   ["video_source", "頻道或播放清單網址", "text", 56, "https://www.youtube.com/@YourChannel/videos"],
   ["shorts_url", "shorts 網址", "text", 56, "https://www.youtube.com/@YourChannel/shorts"],
   ["video_limit", "影片數上限", "number", 6, ""],
@@ -674,6 +750,7 @@ var FIELDS = [
   ["shorts_count", "shorts 支數", "number", 6, ""],
   ["shorts_seconds", "每支 short 長度上限（秒）", "number", 6, ""],
   ["refresh_seconds", "重新掃描間隔（秒，0＝不掃）", "number", 6, ""]
+  ["shorts_passes", "一輪播幾趟（0＝用預設）", "number", 6, ""]
 ];
 var MODES_CACHE = {};
 
@@ -753,6 +830,86 @@ function probe(inputs){
   }).then(function(r){
     msg(r.ok ? r.summary : ("驗證失敗：" + (r.error || "")));
   }).catch(function(e){ msg("驗證失敗：" + e); });
+}
+
+function renderSettings(schema, values){
+  var host = document.getElementById("settings");
+  host.innerHTML = "";
+  schema.forEach(function(sec){
+    var box = document.createElement("div");
+    box.className = "modebox";
+    var h = document.createElement("h3");
+    h.textContent = sec[1] + "（" + sec[0] + "）";
+    box.appendChild(h);
+    var inputs = {};
+    sec[2].forEach(function(f){
+      var row = document.createElement("div");
+      row.className = "row";
+      var lab = document.createElement("label");
+      lab.textContent = f[1];
+      var el;
+      if (f[2] === "bool") {
+        el = document.createElement("input");
+        el.type = "checkbox";
+      } else if (f[2] === "choice") {
+        el = document.createElement("select");
+        (f[3] || []).forEach(function(c){
+          var o = document.createElement("option");
+          o.value = c;
+          o.textContent = c;
+          el.appendChild(o);
+        });
+      } else {
+        el = document.createElement("input");
+        el.type = (f[2] === "int" || f[2] === "float") ? "number" : "text";
+        if (f[2] === "float") { el.step = "0.1"; }
+        if (f[2] === "text") { el.size = 14; }
+        if (f[4]) { el.min = f[4][0]; el.max = f[4][1]; }
+      }
+      var cur = (values[sec[0]] || {})[f[0]];
+      if (f[2] === "bool") { el.checked = (cur !== false); }
+      else { el.value = (cur === undefined || cur === null) ? (f[6] === undefined ? "" : f[6]) : cur; }
+      row.appendChild(lab);
+      row.appendChild(el);
+      if (f[5]) {
+        var sp = document.createElement("span");
+        sp.className = "dim";
+        sp.textContent = f[5];
+        row.appendChild(sp);
+      }
+      box.appendChild(row);
+      inputs[f[0]] = el;
+    });
+    var bar = document.createElement("div");
+    bar.className = "row";
+    var btn = document.createElement("button");
+    btn.textContent = "儲存這一段";
+    btn.onclick = function(){ saveSettingsSection(sec, inputs); };
+    bar.appendChild(btn);
+    box.appendChild(bar);
+    host.appendChild(box);
+  });
+}
+
+function saveSettingsSection(sec, inputs){
+  var s = JSON.parse(JSON.stringify(SETTINGS_CACHE || {}));
+  var name = sec[0];
+  if (!s[name]) { s[name] = {}; }
+  sec[2].forEach(function(f){
+    var k = f[0];
+    var el = inputs[k];
+    if (f[2] === "bool") { s[name][k] = !!el.checked; }
+    else if (f[2] === "int" || f[2] === "float") {
+      var v = (f[2] === "int") ? parseInt(el.value, 10) : parseFloat(el.value);
+      if (isNaN(v)) { delete s[name][k]; }   // 清空＝刪掉這個 key，讓程式的預設值接手
+      else { s[name][k] = v; }
+    }
+    else { s[name][k] = el.value.trim(); }
+  });
+  post("/api/config", { kind: "settings", data: s }).then(function(r){
+    msg(r.ok ? ("已儲存 " + name + "：" + r.note) : ("儲存失敗：" + (r.error || "")));
+    if (r.ok) { loadCfg(); }
+  }).catch(function(e){ msg("儲存失敗：" + e); });
 }
 
 function act(action, extra){

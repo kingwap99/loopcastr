@@ -79,7 +79,7 @@ FALLBACK_CLIENT = "android"
 TARGETS = {"1080": (1920, 1080), "720": (1280, 720), "480": (854, 480)}
 
 BLACK_TAIL_MIN = float(cfg("content", "black_tail_min", 5.0))   # 片尾黑畫面幾秒算黑尾
-BLACK_TAIL_SLACK = 2.5   # 黑尾結束點要落在片尾幾秒內才算數
+BLACK_TAIL_SLACK = float(cfg("content", "black_tail_slack", 2.5))  # 黑尾結束點要落在片尾幾秒內
 
 DATE_LABEL = cfg("overlay", "date_label", "首播日期：")   # 日期浮水印的前綴
 AUDIO_FADE = float(cfg("media", "audio_fade", 2.5))       # 開頭淡入／結尾淡出幾秒
@@ -88,6 +88,20 @@ MARQUEE_Y = OVERLAY_Y - 30                                # 跑馬燈再往上�
 OVERLAY_MARGIN = int(cfg("overlay", "overlay_margin", 40))  # 左右邊界
 MARQUEE_SPEED = int(cfg("overlay", "marquee_speed", 120))   # 跑馬燈速度（像素／秒）
 MARQUEE_GAP = int(cfg("overlay", "marquee_gap", 220))       # 跑馬燈兩輪之間的空白
+
+# 編碼參數。位元率是最直接影響畫質與頻寬的旋鈕，不要寫死在指令列裡。
+VIDEO_PRESET = cfg("media", "preset", "veryfast")
+VIDEO_LEVEL = cfg("media", "level", "3.1")
+VIDEO_BITRATE = cfg("media", "video_bitrate", "2500k")
+VIDEO_MAXRATE = cfg("media", "video_maxrate", "2500k")
+VIDEO_BUFSIZE = cfg("media", "video_bufsize", "5000k")
+AUDIO_RATE = int(cfg("media", "sample_rate", 48000))
+
+# 畫面元素的尺寸
+TEXT_SIZE = int(cfg("overlay", "text_size", 44))
+TEXT_STROKE = int(cfg("overlay", "text_stroke", 4))
+QR_SIZE = int(cfg("overlay", "qr_size", 30))
+QR_PX = int(cfg("overlay", "qr_px", 120))
 
 TRANSITION_FILE = os.path.join(MEDIA_DIR, "_transition.mp4")
 TRANSITION_ID = "_tr"
@@ -187,16 +201,16 @@ def normalize(raw, out, w, h, venc, abr, fps, overlays=None, max_seconds=0,
           "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black,fps=%d,format=yuv420p"
           % (w, h, w, h, fps))
     if venc == "h264_videotoolbox":
-        vargs = ["-c:v", "h264_videotoolbox", "-b:v", "2500k",
+        vargs = ["-c:v", "h264_videotoolbox", "-b:v", VIDEO_BITRATE,
                  "-profile:v", "high", "-g", str(fps * 2)]
     else:
-        vargs = ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high",
-                 "-level", "3.1", "-g", str(fps * 2), "-b:v", "2500k",
-                 "-maxrate", "2500k", "-bufsize", "5000k"]
+        vargs = ["-c:v", "libx264", "-preset", VIDEO_PRESET, "-profile:v", "high",
+                 "-level", VIDEO_LEVEL, "-g", str(fps * 2), "-b:v", VIDEO_BITRATE,
+                 "-maxrate", VIDEO_MAXRATE, "-bufsize", VIDEO_BUFSIZE]
     # -nostdin 是必要的：這個腳本常被 ssh heredoc 帶著跑，ffmpeg 若去讀
     # stdin 會把腳本內容當成互動指令，讀到 q 就提早結束，輸出被靜默截斷
     # （實測同一支影片分別得到 137s 與 163s）。stdin=DEVNULL 是第二層保險。
-    tail = ["-c:a", "aac", "-b:a", abr, "-ar", "48000", "-ac", "2"]
+    tail = ["-c:a", "aac", "-b:a", abr, "-ar", str(AUDIO_RATE), "-ac", "2"]
     # 長度上限一定要跟原始檔長度取較小值，兩個理由：
     #   1) 疊圖的 -loop 1／loop 讓圖永遠不結束，不給上限就會一直編下去
     #      （實測踩過：檔案無限長大）。
@@ -395,7 +409,7 @@ def main():
                     help="內容目錄（預設 media/）。多模式並存時給 media/<模式>")
     # 過場是「第 i 支影片配第 i 支 short」，一輪只用到池子前 N 支。--passes 讓
     # 一輪播出包含多趟影片，shorts 接著往下輪（第 2 趟從第 31 支起）。
-    ap.add_argument("--passes", type=int, default=1,
+    ap.add_argument("--passes", type=int, default=int(cfg("media", "passes", 1)),
                     help="一輪裡影片重複幾趟（預設 1）。讓 shorts 池全部輪到")
     args = ap.parse_args()
 
@@ -523,7 +537,7 @@ def main():
                 try:
                     btn = os.path.join(RAW_DIR, "btn-%s.png" % sid)
                     btn_w, btn_h = wmtext.render_link_button(
-                        "https://youtu.be/%s" % sid, btn, size=30, qr_px=120,
+                        "https://youtu.be/%s" % sid, btn, size=QR_SIZE, qr_px=QR_PX,
                         caption=args.link_caption)
                     overlays.append((btn, None, "x=W-w:y=0"))
                 except Exception as exc:
@@ -573,12 +587,12 @@ def main():
                     if title:
                         text = "%s　%s" % (title, text)
                     label = os.path.join(RAW_DIR, "label-%s.png" % sid)
-                    ow, _ = wmtext.render(text, label, size=44, stroke=4)
+                    ow, _ = wmtext.render(text, label, size=TEXT_SIZE, stroke=TEXT_STROKE)
                     if ow > span:
                         strip = os.path.join(RAW_DIR, "strip-%s.png" % sid)
                         res = wmtext.render_marquee_strip(
-                            text, strip, tile_gap=MARQUEE_GAP, size=44,
-                            stroke=4)
+                            text, strip, tile_gap=MARQUEE_GAP, size=TEXT_SIZE,
+                            stroke=TEXT_STROKE)
                         if not res:
                             raise RuntimeError("跑馬燈長條圖產生失敗")
                         sw, sh, tile = res

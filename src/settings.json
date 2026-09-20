@@ -1,12 +1,19 @@
 {
-  "_comment": "ytpl 通用設定。程式與 WebUI 都讀這一份當預設值；命令列參數可以逐次覆寫。要改「播什麼」請改 modes.json，這裡只管畫質、版面與行為。",
+  "_comment": "ytpl 通用設定。程式與 WebUI 都讀這一份當預設值；命令列參數可以逐次覆寫。要改「播什麼」（來源頻道、最多幾支、長度上限）請改 modes.json，這裡只管編碼與版面。",
   "media": {
     "target": "720",
     "fps": 30,
     "venc": "libx264",
+    "preset": "veryfast",
+    "level": "3.1",
+    "video_bitrate": "2500k",
+    "video_maxrate": "2500k",
+    "video_bufsize": "5000k",
     "abr": "128k",
+    "sample_rate": 48000,
     "audio_fade": 2.5,
-    "max_seconds": 0
+    "max_seconds": 0,
+    "passes": 1
   },
   "overlay": {
     "date_label": "首播日期：",
@@ -15,12 +22,19 @@
     "marquee_speed": 120,
     "marquee_gap": 220,
     "band_left": 0,
+    "text_size": 44,
+    "text_stroke": 4,
+    "qr_size": 30,
+    "qr_px": 120,
     "link_button": true,
     "link_caption": "▶ 看原片",
     "countdown": true,
     "transition_caption": "去追劇"
   },
   "content": {
-    "black_tail_min": 5.0
+    "black_tail_min": 5.0,
+    "black_tail_slack": 2.5,
+    "transitions_parallel": 3
   }
 }
+

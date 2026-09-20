@@ -33,10 +33,6 @@ MEDIA = os.path.join(HERE, "media")
 CLEAN = os.path.join(MEDIA, "_transition-clean.mp4")
 TMP = "/tmp/wm"
 
-VENC = ["-c:v", "libx264", "-preset", "veryfast", "-profile:v", "high",
-        "-level", "3.1", "-g", "60", "-b:v", "2500k", "-maxrate", "2500k",
-        "-bufsize", "5000k"]
-AENC = ["-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"]
 
 
 def make_qr(url, path, scale=8, border=4):
@@ -61,12 +57,12 @@ def title_overlays(title, air, w=1280, tag="", band_left=0):
     text = (("%s　%s%s" % (title, blc.DATE_LABEL, air)) if title
             else ("%s%s" % (blc.DATE_LABEL, air)))
     label = os.path.join(TMP, "label-%s.png" % tag)
-    ow, _ = wmtext.render(text, label, size=44, stroke=4)
+    ow, _ = wmtext.render(text, label, size=blc.TEXT_SIZE, stroke=blc.TEXT_STROKE)
     if ow > span:
         strip = os.path.join(TMP, "strip-%s.png" % tag)
         res = wmtext.render_marquee_strip(text, strip,
-                                          tile_gap=blc.MARQUEE_GAP,
-                                          size=44, stroke=4)
+                                              tile_gap=blc.MARQUEE_GAP,
+                                              size=blc.TEXT_SIZE, stroke=blc.TEXT_STROKE)
         if not res:
             return []
         sw, sh, tile = res
@@ -150,7 +146,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--seconds", type=float, default=20.0)
-    ap.add_argument("--parallel", type=int, default=3)
+    ap.add_argument("--parallel", type=int,
+                    default=int(blc.cfg("content", "transitions_parallel", 3)) if blc else 3)
     ap.add_argument("--scale", type=int, default=8)
     ap.add_argument("--verify", type=int, default=0,
                     help="做完後抽幾支做解碼驗證（0＝不驗）")
@@ -230,8 +227,9 @@ def main():
             btn_w = 0
             if not a.no_button:
                 kw = {"caption": a.button_caption} if a.button_caption else {}
-                btn_w, _ = wmtext.render_link_button(url, btn, size=30, qr_px=120,
-                                                     **kw)
+            btn_w, _ = wmtext.render_link_button(url, btn, size=blc.QR_SIZE,
+                                                 qr_px=blc.QR_PX,
+                                                 **kw)
 
             # 標題列：右界到按鈕左緣，左界 0（直式短片兩側是黑邊，不用讓開 logo）
             ov = title_overlays(seg.get("title") or "", seg.get("air_date") or "",
