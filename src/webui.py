@@ -602,23 +602,37 @@ input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;b
 .modebox label{display:inline-block;min-width:15em}
 .modebox input[type=text]{min-width:24em}
 #msg{min-height:1.6em;font-weight:600}
+button.primary{font-weight:700;border-color:#0a0}
 </style></head><body>
 <h1>ytpl 控制台</h1>
 <div class="dim" id="head"></div>
 <div id="msg"></div>
 
-<h2>服務行程</h2><table id="proc"></table>
+<h2>① 來源設定</h2>
+<p class="dim">填這兩個網址 → 按「儲存這個模式」→ 再按下面的「開始直播」。
+「驗證網址」會先實際解析一次，確認網址沒打錯（填錯不用等整場建置跑完才發現）。</p>
+<div id="modes"></div>
+
+<h2>② 開始直播</h2>
+<div class="row">
+<select id="mode"></select>
+<button class="primary" onclick="actSwitch()">建置並切換（開始直播）</button>
+<button onclick="actBuild()">只建置，不切換</button>
+<button onclick="actScan()">只掃描來源</button>
+<button onclick="actConcat()">重建 concat 清單</button>
+<button onclick="actStatus()">檢查缺哪些檔案</button>
+</div>
+<p class="dim">第一次會下載與轉檔（每支影片數十 MB，數分鐘到數十分鐘）；已經下載過的會跳過。
+切換會重啟播出端，中斷數秒。按鈕按下去是在背景跑，下面會即時顯示進度。</p>
+<pre id="task"></pre>
+
 <h2>播出狀態</h2><table id="play"></table>
+<h2>服務行程</h2><table id="proc"></table>
 <h2>內容</h2><table id="content"></table>
 <h2>日誌</h2><table id="logs"></table>
 
-<h2>來源設定</h2>
-<p class="dim">每個模式要播什麼。填好按「儲存這個模式」，再按上面的「建置」才會生效
-（會下載與轉檔，可能要幾分鐘）。「驗證網址」會先解析一次，確認網址沒打錯。</p>
-<div id="modes"></div>
-
 <h2>畫質與版面</h2>
-<p class="dim">存檔後要按「建置」才會套用到已下載的內容（改畫質等於重新轉檔）。</p>
+<p class="dim">存檔後要重新建置才會套用到已下載的內容（改畫質等於重新轉檔）。</p>
 <div id="settings"></div>
 
 <h2>進階設定（原始 JSON）</h2>
@@ -633,18 +647,6 @@ input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;b
 <textarea id="ta-modes" spellcheck="false"></textarea>
 </details>
 
-<h2>動作</h2>
-<div class="row">
-<select id="mode"></select>
-<button onclick="actBuild()">建置</button>
-<button onclick="actScan()">只掃描</button>
-<button onclick="actSwitch()">建置並切換</button>
-<button onclick="actConcat()">重建 concat</button>
-<button onclick="actStatus()">檢查缺檔</button>
-</div>
-<p class="dim">建置是背景工作，會下載與轉檔，可能數十分鐘。切換播出端會中斷數秒。</p>
-<pre id="task"></pre>
-
 <h2>直播金鑰</h2>
 <p class="dim">寫入 stream.key（權限 600）。金鑰只進不出，這個頁面不會把它顯示出來。</p>
 <div class="row"><input type="password" id="key" size="42" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx">
@@ -652,7 +654,6 @@ input,select{font:inherit;padding:5px;border-radius:6px;border:1px solid #8886;b
 
 <h2>服務</h2><div class="row" id="svc"></div>
 <p class="dim">system domain 需要非互動 sudo；失敗時會顯示要加哪一條 sudoers。</p>
-
 <script>
 var LABELS = ["com.ytpl.mediamtx","com.ytpl.playout","com.ytpl.publish","com.ytpl.health","com.ytpl.refresh"];
 
@@ -753,8 +754,10 @@ var SETTINGS_SCHEMA = [];
 var SETTINGS_CACHE = {};
 var FIELDS = [
   ["label", "模式名稱（顯示用）", "text", 20, "新聞模式"],
-  ["video_source", "頻道或播放清單網址", "text", 56, "https://www.youtube.com/@YourChannel/videos"],
-  ["shorts_url", "shorts 網址", "text", 56, "https://www.youtube.com/@YourChannel/shorts"],
+  ["video_source", "① 播放清單網址（要播的影片）", "text", 56,
+   "https://www.youtube.com/@YourChannel/videos"],
+  ["shorts_url", "② 過場 shorts 網址（轉場輪播）", "text", 56,
+   "https://www.youtube.com/@YourChannel/shorts"],
   ["video_limit", "影片數上限", "number", 6, ""],
   ["max_seconds", "每支長度上限（秒，0＝全長）", "number", 6, ""],
   ["shorts_count", "shorts 支數", "number", 6, ""],
