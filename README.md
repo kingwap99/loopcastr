@@ -87,7 +87,6 @@
       spec-v1.2.md             系統規格書：架構、需求、實測數據、風險、待決事項（核心文件）
       manual.md                操作手冊：部署、日常操作、故障排除、已知限制
       changelog.md             變更與實測紀錄：逐日的量測、修正與被推翻的假設
-      open-source-checklist.md 開源前檢核與調整進度
       archive/                 過程中的評估與更正紀錄（包含被推翻的假設，實測數字都在裡面）
 
 ### 參考部署（實測環境）
@@ -220,7 +219,6 @@ Change what plays in `modes.json`, not in `settings.json` - two sources of truth
       spec-v1.2.md             system spec: architecture, requirements, measurements, risks (core document)
       manual.md                operations manual: deploy, day-to-day, troubleshooting, limitations
       changelog.md             measurements, fixes and refuted hypotheses, in date order
-      open-source-checklist.md open-source readiness checklist and progress
       archive/                 earlier evaluations and corrections, including refuted hypotheses
 
 ### Reference deployment (measured environment)
