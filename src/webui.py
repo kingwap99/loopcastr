@@ -753,7 +753,6 @@ button.primary{font-weight:700;border-color:#0a0}
 <div id="modes"></div>
 
 <h2>② 開始直播</h2>
-<div id="ready"></div>
 <div class="row">
 <select id="mode"></select>
 <button class="primary" onclick="actSwitch()">建置並切換（開始直播）</button>
@@ -815,16 +814,6 @@ function post(url, body){
 
     function badge(ok, s){ return '<span class="' + (ok ? "up" : "down") + '>' + esc(s) + "</span>"; }
 
-function renderReady(r, mode){
-      var host = document.getElementById("ready");
-      if (!r) { host.innerHTML = ""; return; }
-      var cls = { "ok": "ready-ok", "building": "ready-wait", "not_switched": "ready-wait" }[r.state] || "ready-bad";
-      var icon = { "ok": "✅", "building": "⏳", "not_switched": "🟡" }[r.state] || "⚠";
-  var label = (mode ? mode + "：" : "");
-  host.innerHTML = '<div class="' + cls + '><b>' + icon + " " + esc(label + r.short) + "</b><br>" + esc(r.detail) + "</div>";
-    }
-
-
 function refresh(){
   if (REFRESHING) { return; }
   REFRESHING = true;
@@ -833,11 +822,12 @@ function refresh(){
     text("head", s.now + "　目錄 " + s.prefix);
     var selEl = document.getElementById("mode");
     var selMode = (selEl && selEl.value) || "";
+    if (!selMode && s.playing_mode && (s.ready || {})[s.playing_mode]) { selMode = s.playing_mode; }
+    if (!selMode && selEl && selEl.options.length) { selMode = selEl.options[0].value; }
     if (selEl && !MODE_PICKED && s.playing_mode) {
       var hasIt = [].slice.call(selEl.options).some(function(o){ return o.value === s.playing_mode; });
       if (hasIt) { selEl.value = s.playing_mode; selMode = s.playing_mode; MODE_PICKED = true; }
     }
-    renderReady((s.ready || {})[selMode], selMode);
     for (var mk in MODE_CHIPS) {
       var st = (s.ready || {})[mk];
       if (!st) { continue; }
@@ -846,7 +836,7 @@ function refresh(){
     }
     var rdTop = (s.ready || {})[selMode];
     var badgeTop = rdTop ? ((rdTop.state === "ok" ? "✅ " : "⚠ ") + selMode + "：" + rdTop.short) : "";
-    if (badgeTop) { text("head", s.now + "　目錄 " + s.prefix + "　·　" + badgeTop); }
+    text("head", s.now + "　目錄 " + s.prefix + (badgeTop ? "　·　" + badgeTop : ""));
     var p = "<tr><th>行程</th><th>狀態</th></tr>";
     s.proc.forEach(function(x){
       p += "<tr><td>" + esc(x.name) + "</td><td>" +
