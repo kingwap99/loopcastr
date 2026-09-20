@@ -33,8 +33,22 @@ sudo_do() {
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PLIST="$HERE/com.ytpl.playout.plist"
-INSTALLED="/Library/LaunchDaemons/com.ytpl.playout.plist"
 PB=/usr/libexec/PlistBuddy
+
+# 服務可能裝在兩個地方：system domain 的 LaunchDaemon（開機就起，需要 root），
+# 或使用者自己的 gui domain LaunchAgent（install.sh --agents，不需要 root）。
+# 切換要改的是「實際被載入的那一份」—— 改錯地方會變成「回報切換成功但根本沒換」
+# （實測踩過：plist 改了、載入的那份沒改，播出端照樣播舊的）。
+INSTALLED="/Library/LaunchDaemons/com.ytpl.playout.plist"
+LABEL=com.ytpl.playout
+if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
+  SCOPE=gui
+  INSTALLED="$HOME/Library/LaunchAgents/$LABEL.plist"
+elif launchctl print "system/$LABEL" >/dev/null 2>&1; then
+  SCOPE=system
+else
+  SCOPE=none
+fi
 
 case "${1:-show}" in
   live)      WANT_PL="playlist-local.json";           WANT_LIST="concat.txt" ;;
@@ -51,6 +65,7 @@ cur_list="$($PB -c 'Print :EnvironmentVariables:LIST' "$PLIST" 2>/dev/null || tr
 if [ -z "$WANT_PL" ]; then
   echo "目前播放清單：${cur_pl}"
   echo "      LIST=${cur_list}"
+  echo "      服務：${SCOPE} domain（${INSTALLED}）"
   exit 0
 fi
 
@@ -65,14 +80,33 @@ python3 "$HERE/make_concat_list.py" "$HERE/$WANT_PL" -o "$HERE/$WANT_LIST" --bas
 $PB -c "Set :EnvironmentVariables:PLAYLIST $HERE/$WANT_PL" "$PLIST"
 $PB -c "Set :EnvironmentVariables:LIST $HERE/$WANT_LIST" "$PLIST"
 
-sudo_do cp "$PLIST" "$INSTALLED"
-sudo_do chown root:wheel "$INSTALLED"
-sudo_do chmod 644 "$INSTALLED"
-sudo_do launchctl bootout system/com.ytpl.playout 2>/dev/null
-sudo_do launchctl bootstrap system "$INSTALLED" || exit 5
+case "$SCOPE" in
+  gui)
+    cp "$PLIST" "$INSTALLED"                 # 載入的是這一份，一定要覆蓋它
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
+    launchctl bootstrap "gui/$(id -u)" "$INSTALLED" || exit 5
+    ;;
+  system)
+    sudo_do cp "$PLIST" "$INSTALLED"
+    sudo_do chown root:wheel "$INSTALLED"
+    sudo_do chmod 644 "$INSTALLED"
+    sudo_do launchctl bootout "system/$LABEL" 2>/dev/null
+    sudo_do launchctl bootstrap system "$INSTALLED" || exit 5
+    ;;
+  none)
+    echo "⚠ 找不到已載入的 ${LABEL}（既不在 gui 也不在 system domain）。" >&2
+    echo "  已改好 $PLIST 與 concat 清單，但沒有服務可以重啟；請先執行 ./install.sh" >&2
+    exit 6
+    ;;
+esac
 sleep 6
-echo "已切換到 ${1}：${WANT_PL} / ${WANT_LIST}"
-sudo_do launchctl list | grep -i "ytpl.playout" || true
+echo "已切換到 ${1}：${WANT_PL} / ${WANT_LIST}（${SCOPE} domain）"
+if [ "$SCOPE" = "gui" ]; then
+  launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 \
+    && echo "  $LABEL 已載入" || echo "  ⚠ $LABEL 沒載入成功" >&2
+else
+  sudo_do launchctl list | grep -i "${LABEL}" || true
+fi
 
 # 重新掛循環觀測（單輪長度變了，循環點要重算）
 pkill -f 'loopwatc[h].py' 2>/dev/null
