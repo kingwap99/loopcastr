@@ -69,7 +69,7 @@ def meta(vid, retries=3):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True, help="播放清單網址（或 watch?v=...&list=...）")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", "-o", required=True)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--target", default="rtmp://127.0.0.1:1935/live/main")
     a = ap.parse_args()
