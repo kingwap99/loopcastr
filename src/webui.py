@@ -737,6 +737,10 @@ border:1px solid;line-height:1.5}
 .ready-ok{background:#0a01;border-color:#0a06}
 .ready-wait{background:#fa01;border-color:#fa06}
 .ready-bad{background:#c001;border-color:#c006}
+.chip{font-size:12px;padding:1px 8px;border-radius:10px;margin-left:8px;border:1px solid;vertical-align:middle}
+.chip-ok{background:#0a01;border-color:#0a06}
+.chip-wait{background:#fa01;border-color:#fa06}
+.chip-bad{background:#c001;border-color:#c006}
 button.primary{font-weight:700;border-color:#0a0}
 </style></head><body>
 <h1>ytpl 控制台</h1>
@@ -811,12 +815,13 @@ function post(url, body){
 
     function badge(ok, s){ return '<span class="' + (ok ? "up" : "down") + '>' + esc(s) + "</span>"; }
 
-    function renderReady(r){
+function renderReady(r, mode){
       var host = document.getElementById("ready");
       if (!r) { host.innerHTML = ""; return; }
       var cls = { "ok": "ready-ok", "building": "ready-wait", "not_switched": "ready-wait" }[r.state] || "ready-bad";
       var icon = { "ok": "✅", "building": "⏳", "not_switched": "🟡" }[r.state] || "⚠";
-      host.innerHTML = '<div class="' + cls + '"><b>' + icon + " " + esc(r.short) + "</b><br>" + esc(r.detail) + "</div>";
+  var label = (mode ? mode + "：" : "");
+  host.innerHTML = '<div class="' + cls + '><b>' + icon + " " + esc(label + r.short) + "</b><br>" + esc(r.detail) + "</div>";
     }
 
 
@@ -832,9 +837,15 @@ function refresh(){
       var hasIt = [].slice.call(selEl.options).some(function(o){ return o.value === s.playing_mode; });
       if (hasIt) { selEl.value = s.playing_mode; selMode = s.playing_mode; MODE_PICKED = true; }
     }
-    renderReady((s.ready || {})[selMode]);
+    renderReady((s.ready || {})[selMode], selMode);
+    for (var mk in MODE_CHIPS) {
+      var st = (s.ready || {})[mk];
+      if (!st) { continue; }
+      MODE_CHIPS[mk].textContent = st.short;
+      MODE_CHIPS[mk].className = "chip " + (st.state === "ok" ? "chip-ok" : (st.state === "building" ? "chip-wait" : "chip-bad"));
+    }
     var rdTop = (s.ready || {})[selMode];
-    var badgeTop = rdTop ? ((rdTop.state === "ok" ? "✅ " : "⚠ ") + rdTop.short) : "";
+    var badgeTop = rdTop ? ((rdTop.state === "ok" ? "✅ " : "⚠ ") + selMode + "：" + rdTop.short) : "";
     if (badgeTop) { text("head", s.now + "　目錄 " + s.prefix + "　·　" + badgeTop); }
     var p = "<tr><th>行程</th><th>狀態</th></tr>";
     s.proc.forEach(function(x){
@@ -918,6 +929,7 @@ function saveModes(){ save("modes"); }
 var SETTINGS_SCHEMA = [];
 var SETTINGS_CACHE = {};
 var MODE_PICKED = false;
+var MODE_CHIPS = {};
 var STAT_FAIL = 0;
 var REFRESHING = false;
 var FIELDS = [
@@ -947,6 +959,10 @@ function renderModes(modes){
     box.className = "modebox";
     var h = document.createElement("h3");
     h.textContent = mk + (m.label ? "（" + m.label + "）" : "");
+    var chip = document.createElement("span");
+    chip.className = "chip";
+    h.appendChild(chip);
+    MODE_CHIPS[mk] = chip;
     box.appendChild(h);
     if (String(m.video_source || "").indexOf("YourChannel") >= 0) {
       var warn = document.createElement("p");
