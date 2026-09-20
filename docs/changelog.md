@@ -261,3 +261,22 @@
 現在啟動時會掃 `mode_build.py`（只認自己這份安裝的命令列）接手狀態，並派一個 watcher 等它結束。
 
 【實測】接手後按「停止建置」可以停掉它；同一台機器上另一份安裝的建置不會被誤認、也不會被誤殺。
+
+### 順帶挖出「跑到一半突然中斷」的根因：launchd 是殺一整個 process group
+
+【實測】重啟控制台（`launchctl kickstart -k gui/501/com.ytpl.webui`）時，**先前由控制台拉起的建置會一起死**。
+因為 `Popen` 預設繼承父行程的 process group，建置跟 webui 同組（實測 news 建置的 pgid ＝ webui 的 pid），
+launchd 收掉那個 job 就整組一起收。這正是先前「跑到一半，突然中斷重來」的原因。
+
+更麻煩的是**孫行程反而逃掉**：launchd 收掉的是它追蹤的那幾個行程，
+所以 `mode_build`／`build_local_content` 死了、`ffmpeg` 變成孤兒（ppid 變 1）繼續把那個檔案寫完。
+【實測】日誌停在 `21:08:19`（那支影片的倒數長條／跑馬燈都算完了），
+但檔案一直到 `21:15` 才寫完 moov —— 也就是說「日誌沒動」不等於「沒有東西在跑」。
+
+修法就是上面那個 `start_new_session=True`。【實測】改完之後：
+
+| 檢查點 | 結果 |
+|---|---|
+| 建置的 pgid | ＝自己的 pid（不再跟 webui 同組） |
+| `kickstart -k` 重啟控制台後 | 建置**還活著**，ppid 變成 1 |
+| 新控制台 | 接手顯示「執行中（webui 重啟前啟動的）」，結束時由 watcher 收回狀態 |
