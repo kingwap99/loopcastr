@@ -9,7 +9,7 @@ MediaMTX API。
 用法
   python3 loopwatch.py                 # 自動推算循環點並等待
   python3 loopwatch.py --lead 45 --tail 75
-  python3 loopwatch.py --at 04:19:07   # 直接指定時刻
+  python3 loopwatch.py --at 04:19:07   # 直接requested moment
 """
 
 import argparse
@@ -27,8 +27,10 @@ API = os.environ.get("API", "http://127.0.0.1:9997")
 PATH_NAME = os.environ.get("PATH_NAME", "live/main")
 PLAYOUT_LOG = os.path.join(HERE, "logs", "playout.log")
 PLAYLIST = os.path.join(HERE, "playlist-local.json")
-# 實際日誌格式：[playout] 2026-09-17 00:18:02 第 1 次啟動
-START_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) 第 (\d+) 次啟動")
+# 實際日誌格式：[playout] 2026-09-17 00:18:02 start #1
+# （2026-09-21 之前寫的是「第 1 次啟動」，舊日誌仍然讀得到）
+START_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
+                      r" (?:start #(\d+)|第 (\d+) 次啟動)")
 
 
 def total_seconds(path):
@@ -45,7 +47,7 @@ def last_start():
             m = START_RE.search(line)
             if m:
                 last = (datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"),
-                        int(m.group(2)))
+                        int(m.group(2) or m.group(3)))
     return last
 
 
@@ -65,12 +67,12 @@ def stamp(t):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lead", type=float, default=45.0, help="循環點前幾秒開始取樣")
-    ap.add_argument("--tail", type=float, default=75.0, help="循環點後幾秒停止")
-    ap.add_argument("--interval", type=float, default=0.2, help="取樣間隔秒數")
-    ap.add_argument("--at", default="", help="直接指定循環時刻 HH:MM:SS")
+    ap.add_argument("--lead", type=float, default=45.0, help="start sampling this many seconds before the loop point")
+    ap.add_argument("--tail", type=float, default=75.0, help="stop this many seconds after the loop point")
+    ap.add_argument("--interval", type=float, default=0.2, help="sampling interval in seconds")
+    ap.add_argument("--at", default="", help="give the loop moment directly as HH:MM:SS")
     ap.add_argument("--playlist", default=PLAYLIST,
-                    help="要讀哪份清單算單輪長度（播出端換清單時要跟著改）")
+                    help="which list to read the round length from (change it when the playout switches lists)")
     args = ap.parse_args()
 
     dur = total_seconds(args.playlist)
@@ -80,28 +82,28 @@ def main():
         tgt = now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
         if tgt < now:
             tgt += timedelta(days=1)
-        info = "指定時刻"
+        info = "requested moment"
     else:
         st = last_start()
         if not st:
-            print("找不到 playout.log 的啟動記錄", file=sys.stderr)
+            print("no playout start record in playout.log", file=sys.stderr)
             return 2
         tgt = st[0] + timedelta(seconds=dur)
-        info = "第 %d 次啟動（%s）+ 單輪 %.0fs" % (
+        info = "start #%d (%s) + round %.0fs" % (
             st[1], st[0].strftime("%F %T"), dur)
 
-    print("循環點推算：%s（%s）" % (tgt.strftime("%F %T"), info), flush=True)
+    print("estimated loop point: %s (%s)" % (tgt.strftime("%F %T"), info), flush=True)
     t_tgt = tgt.timestamp()
     t_now = time.time()
     if t_tgt - t_now > 0:
-        print("等待 %.0f 秒後開始取樣..." % (t_tgt - t_now - args.lead), flush=True)
+        print("sampling starts in %.0f s..." % (t_tgt - t_now - args.lead), flush=True)
         while time.time() < t_tgt - args.lead:
             remain = t_tgt - args.lead - time.time()
             time.sleep(min(30.0, max(1.0, remain)))
 
     samples = []
     t_end = t_tgt + args.tail
-    print("開始取樣 %s" % stamp(time.time()), flush=True)
+    print("sampling from %s" % stamp(time.time()), flush=True)
     while time.time() < t_end:
         samples.append(sample())
         time.sleep(args.interval)
@@ -128,17 +130,17 @@ def main():
         off.append((start, samples[-1][0], samples[-1][0] - start))
 
     rel = lambda t: "T%+.1fs" % (t - t_tgt)
-    print("取樣 %d 筆（%.1fs，間隔 %.2fs）" % (len(samples), t_end - (t_tgt - args.lead), args.interval))
-    print("循環點 = %s" % tgt.strftime("%F %T"))
+    print("samples %d (%.1fs, every %.2fs)" % (len(samples), t_end - (t_tgt - args.lead), args.interval))
+    print("loop point = %s" % tgt.strftime("%F %T"))
     if off:
-        print("接收端離線：%d 段，總計 %.3fs" % (len(off), sum(x[2] for x in off)))
+        print("receiver offline: %d windows, %.3fs total" % (len(off), sum(x[2] for x in off)))
         for (a, b2, d) in off:
             print("   %s  %s -> %s  %.3fs" % (
                 rel(a), stamp(a), stamp(b2), d))
     else:
-        print("接收端離線：0 段（跨循環全程連續）")
+        print("receiver offline: 0 windows (continuous across the loop)")
     closed = [s for s in stall if s[1] is not None]
-    print("bytesReceived 零成長：%d 段，最長 %.3fs" % (
+    print("bytesReceived flat: %d windows, longest %.3fs" % (
         len(closed), max((s[2] for s in closed), default=0.0)))
     for s in closed[:8]:
         if s[2] > 0.5:

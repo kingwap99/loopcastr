@@ -25,6 +25,7 @@
 | `install.sh` | **安裝／升級**：複製程式、代入 plist 佔位符、產生 `mediamtx.yml`、註冊 launchd 服務 |
 | `src/settings.json` | 通用設定：畫質、fps、位元率、淡化秒數、浮水印與跑馬燈、黑尾門檻。程式讀它當**預設值**，命令列可覆寫 |
 | `src/modes.json` | 播出模式定義：各模式的來源頻道、長度上限、shorts 池、重新掃描頻率 |
+| `src/settings.json` 的 `ui.lang` | 語言：`zh`／`en`／`both`，同時影響後台介面與畫面字樣 |
 | `src/playlist.example.json` | 母清單**範例**（3 筆假 id）。實際的 `playlist.json` 由 `build_playlist.py` 產生，已列入 `.gitignore` |
 | `mediamtx.example.yml` | MediaMTX 範例設定。刻意用**路徑白名單**（只開 `live/main`），不是 MediaMTX 預設的全開 |
 
@@ -265,7 +266,8 @@ LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Lib
 | 區塊 | 內容 |
 |---|---|
 | `media` | `target`（720／1080／480）、`fps`、`venc`、`abr`、`audio_fade`（換片淡入淡出秒數）、`max_seconds` |
-| `overlay` | `date_label`、位置（`overlay_y`／`overlay_margin`／`band_left`）、跑馬燈（`marquee_speed`／`marquee_gap`）、按鈕（`link_button`／`link_caption`）、`countdown`、`transition_caption` |
+| `overlay` | `date_label`、位置（`overlay_y`／`overlay_margin`／`band_left`）、跑馬燈（`marquee_speed`／`marquee_gap`）、按鈕（`link_button`／`link_caption`）、`countdown`、`transition_caption`。**每個字樣都有一個 `_en` 對應值**（例如 `date_label_en`），`both` 時兩個一起顯示 |
+| `ui` | `lang`：`zh`（全中文）／`en`（全英文）／`both`（雙語）。後台介面與畫面字樣都看這個 |
 | `content` | `black_tail_min`（片尾黑畫面幾秒算黑尾） |
 
 要改「播什麼」請改 `modes.json`，不要在 `settings.json` 裡塞來源資訊 —— 兩份真值會互相打架。
@@ -531,6 +533,14 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.mediamtx.plist
 
 上表是 `src/modes.json` 的**範例值**；實際值就是你在控制台「① 來源設定」填的那些，
 存在部署目錄的 `modes.json`（改完下次建置生效）。
+
+每個模式還有一個 `max_age_hours`（0＝不限）：**只播首播時間在 N 小時內的影片**。
+判斷順序是「先用 `video_limit` 取前 N 支，再過濾年齡」，所以「只播最近 24 小時」要配一個
+夠大的 `video_limit`。過濾後一支都不剩時，掃描會直接失敗（`exit 2`）並且**不覆蓋**原本的清單 ——
+播出端拿到空的 concat 清單會中止，寧可這輪不換。
+
+畫面右上角的首播時間格式是 `YYYY/MM/DD HH:MM`（本機時區）。來源是 yt-dlp 的
+`release_timestamp`；沒有的話退回 `timestamp`，再沒有就只顯示日期 ＋ `00:00`。
 
     python3 mode_build.py --mode promotion            # 掃描 → 落地 → 過場 → 部署 → 重建清單
     python3 mode_build.py --mode promotion --switch   # 上面全部做完，再切換播出端

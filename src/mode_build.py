@@ -45,7 +45,7 @@ def log(msg):
 
 
 def run(cmd, **kw):
-    log("執行 " + " ".join(cmd[:6]) + (" ..." if len(cmd) > 6 else ""))
+    log("run " + " ".join(cmd[:6]) + (" ..." if len(cmd) > 6 else ""))
     kw.setdefault("stdin", subprocess.DEVNULL)
     return subprocess.run(cmd, **kw).returncode
 
@@ -100,6 +100,8 @@ def scan(cfg, f):
            "--url", cfg["video_source"], "--out", f["mother"]]
     if cfg.get("video_limit"):
         cmd += ["--limit", str(cfg["video_limit"])]
+    if cfg.get("max_age_hours"):
+        cmd += ["--max-age-hours", str(cfg["max_age_hours"])]
     return run(cmd)
 
 
@@ -117,7 +119,7 @@ def land(cfg, f):
 
 def transitions(cfg, f, passes):
     if not cfg.get("shorts_url"):
-        log("這個模式沒有設 shorts_url，跳過過場")
+        log("no shorts_url for this mode, skipping transitions")
         return 0
     cmd = [sys.executable, os.path.join(HERE, "build_transitions.py"),
            "--playlist", f["mother"],
@@ -125,7 +127,7 @@ def transitions(cfg, f, passes):
            "--shorts-count", str(cfg.get("shorts_count") or 15),
            "--seconds", str(cfg.get("shorts_seconds") or 90),
            "--button-caption",
-           str(setting("overlay", "transition_caption", "去追劇")),
+           str(BLC.TRANSITION_CAPTION if BLC else "去追劇"),
            "--parallel", "2",
            "--passes", str(passes),
            "--out-dir", f["stage_tr"]]
@@ -133,7 +135,11 @@ def transitions(cfg, f, passes):
 
 
 def deploy(f):
-    """把暫存目錄裡驗得過的檔案 mv 進 media/（同 volume，原子置換）。"""
+    """Move the verified files from the staging dir into media/<mode>/.
+
+    Same volume, so this is an atomic replace: the playout process (which reopens
+    files every loop) only ever sees a complete old or a complete new file.
+    """
     moved = skipped = 0
     os.makedirs(f["media"], exist_ok=True)
     for d in (f["stage_ep"], f["stage_tr"]):
@@ -145,17 +151,17 @@ def deploy(f):
             src = os.path.join(d, name)
             secs = probe_seconds(src)
             if secs < 1.0:
-                log("!! %s 讀不出長度（未完成），留在暫存目錄" % name)
+                log("!! %s has no readable duration (incomplete), left in staging" % name)
                 skipped += 1
                 continue
             shutil.move(src, os.path.join(f["media"], name))
             moved += 1
-    log("部署：置換 %d 個，跳過 %d 個" % (moved, skipped))
+    log("deploy: moved %d, skipped %d" % (moved, skipped))
     return skipped == 0
 
 
 def fix_manifest(f):
-    """落地若用了 --out-dir，manifest 會記成暫存路徑；部署後改回 media/<id>.mp4。"""
+    """If landing used --out-dir the manifest records the staging path; rewrite it."""
     mp = os.path.join(f["media"], "manifest.json")
     if not os.path.exists(mp):
         return
@@ -168,7 +174,7 @@ def fix_manifest(f):
             rec["file"] = want
             n += 1
     json.dump(m, open(mp, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    log("manifest：修正 %d 筆路徑" % n)
+    log("manifest: fixed %d paths" % n)
 
 
 def rebuild_playlist(cfg, f, passes):
@@ -192,9 +198,9 @@ def make_concat(f):
 def switch(mode):
     script = os.path.join(HERE, "switch_edition.sh")
     if not os.path.exists(script):
-        log("找不到 switch_edition.sh")
+        log("switch_edition.sh not found")
         return 1
-    log("切換播出端到 %s" % mode)
+    log("switching the playout to %s" % mode)
     return subprocess.run([script, mode], stdin=subprocess.DEVNULL).returncode
 
 
@@ -209,53 +215,54 @@ def main():
 
     modes = load_modes()
     if a.mode not in modes:
-        log("modes.json 裡沒有這個模式：%s（有 %s）" % (a.mode, ", ".join(modes)))
+        log("no such mode in modes.json: %s (have %s)" % (a.mode, ", ".join(modes)))
         return 2
     cfg = modes[a.mode]
     f = files_for(a.mode)
-    log("模式 %s（%s）：來源 %s，上限 %s 秒，shorts %s 支"
+    log("mode %s (%s): source %s, limit %s s, %s shorts, max age %s h"
         % (a.mode, cfg.get("label"), cfg.get("video_source"),
-           cfg.get("max_seconds") or "全長", cfg.get("shorts_count")))
+           cfg.get("max_seconds") or "full length", cfg.get("shorts_count"),
+           cfg.get("max_age_hours") or "no limit"))
 
     if a.scan_only:
         return scan(cfg, f)
 
     if not a.deploy_only:
         if scan(cfg, f) != 0:
-            log("掃描失敗，中止")
+            log("scan failed, stopping")
             return 1
         if land(cfg, f) != 0:
-            log("落地有失敗；仍會嘗試部署已完成的檔案")
+            log("landing had failures; still deploying whatever completed")
 
     passes = passes_for(cfg, f)
     if not a.deploy_only and not a.skip_transitions:
-        log("一輪播 %d 趟影片（shorts 池 %s 支、影片 %d 支）"
+        log("%d pass(es) per round (shorts pool %s, videos %d)"
             % (passes, cfg.get("shorts_count"),
                len(json.load(open(f["mother"], encoding="utf-8"))["segments"])
                if os.path.exists(f["mother"]) else 0))
         if transitions(cfg, f, passes) != 0:
-            log("過場建置有失敗")
+            log("some transitions failed")
 
     if not deploy(f):
-        log("有檔案沒完成，先不重建清單。修好後重跑即可（會自動續傳）")
+        log("some files are incomplete; not rebuilding the list. Rerun to resume.")
         return 3
 
     fix_manifest(f)
     if rebuild_playlist(cfg, f, passes) != 0:
-        log("重建清單失敗")
+        log("rebuilding the playout list failed")
         return 1
     if make_concat(f) != 0:
-        log("產生 concat 清單失敗")
+        log("generating the concat list failed")
         return 1
 
     segs = json.load(open(f["local"], encoding="utf-8"))["segments"]
     total = sum(s.get("outpoint") or s["seconds"] for s in segs)
-    log("%s 就緒：%d 段、總長 %.0fs（%.2f 小時）"
+    log("%s ready: %d segments, %.0fs total (%.2f h)"
         % (os.path.basename(f["concat"]), len(segs), total, total / 3600.0))
 
     if a.switch:
         return switch(a.mode)
-    log("要切換播出端請執行：SUDO_PASS=... ./switch_edition.sh %s" % a.mode)
+    log("to switch the playout: ./switch_edition.sh %s" % a.mode)
     return 0
 
 

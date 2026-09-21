@@ -150,37 +150,37 @@ def main():
                     default=int(blc.cfg("content", "transitions_parallel", 3)) if blc else 3)
     ap.add_argument("--scale", type=int, default=8)
     ap.add_argument("--verify", type=int, default=0,
-                    help="做完後抽幾支做解碼驗證（0＝不驗）")
+                    help="how many transitions to decode-verify afterwards (0 = skip)")
     ap.add_argument("--playlist", default=os.path.join(HERE, "playlist-local.json"),
-                    help="從哪份清單決定集數順序（預設 playlist-local.json）。"
-                         "要對新清單產生過場時，指向那份母清單即可")
+                    help="which list defines the episode order (default playlist-local.json)."
+                         "point it at the master list when building transitions for a new list")
     ap.add_argument("--shorts-url", default="",
-                    help="改成用該網址的 shorts 輪播當過場（例如頻道的 /shorts）。"
-                         "留空則用固定的 _transition-clean.mp4")
+                    help="use a shorts carousel from this URL as the transitions (e.g. a channel's /shorts)."
+                         "when empty, use the fixed _transition-clean.mp4")
     ap.add_argument("--shorts-count", type=int, default=30,
-                    help="抓幾支 shorts 當輪播池（預設 30，上限 50）")
+                    help="how many shorts to use as the carousel pool (default 30, max 50)")
     ap.add_argument("--button-caption",
-                    default=(blc.cfg("overlay", "transition_caption", "去追劇")
-                             if blc else "去追劇"),
-                    help="過場 QR 按鈕的說明文字（預設「去追劇」；集數是「看原片」）")
+                    default=(blc.TRANSITION_CAPTION if blc else "去追劇"),
+                    help="caption on the transition QR button (episodes use link_caption); "
+                         "default comes from settings.json overlay.transition_caption")
     ap.add_argument("--no-button", action="store_true",
-                    help="過場不要疊 QR 按鈕")
+                    help="do not overlay the QR button on transitions")
     # 播出中要換過場時，先輸出到暫存目錄、驗完再 mv 進去：mv 是原子置換，
     # 播出端（-c copy 每個循環重開檔案）只會拿到完整的舊檔或新檔。
     ap.add_argument("--out-dir", default="",
-                    help="輸出目錄（預設 media/）。給暫存目錄可避免播出端讀到半成品")
+                    help="output directory (default media/); a staging dir keeps the playout from reading half-written files")
     # shorts 是獨立輪動、不跟影片趟數對齊：第 p 趟第 i 支用的是池子裡第
     # (p*集數 + i - 1) 支。所以 30 支影片配 50 支 shorts 時，passes=2 會讓
     # 第二趟從第 31 支 short 接著播。
     ap.add_argument("--passes", type=int, default=1,
-                    help="影片重複幾趟（預設 1）。用來讓 shorts 池全部輪到")
+                    help="how many passes of videos per round (default 1) so the whole shorts pool gets used")
     a = ap.parse_args()
 
     out_dir = a.out_dir or MEDIA
     os.makedirs(out_dir, exist_ok=True)
 
     if not os.path.exists(CLEAN) and not a.shorts_url:
-        print("找不到 %s，請先保留一份沒有 QR 的乾淨過場" % CLEAN, file=sys.stderr)
+        print("%s not found; keep a clean transition without a QR first" % CLEAN, file=sys.stderr)
         return 2
 
     d = json.load(open(a.playlist, encoding="utf-8"))
@@ -193,7 +193,7 @@ def main():
     if a.shorts_url:
         n = min(a.shorts_count or 30, 50)
         ids = fetch_shorts(a.shorts_url, n)
-        print("取得 %d 支 shorts，開始下載與正規化…" % len(ids), flush=True)
+        print("got %d shorts, downloading and normalizing..." % len(ids), flush=True)
         bases = []
         raw_dir = os.path.join(MEDIA, ".raw")
         for k, sid in enumerate(ids, 1):
@@ -203,9 +203,9 @@ def main():
                 print("  short %2d/%d %-13s -> %s"
                       % (k, len(ids), sid, os.path.basename(dst)), flush=True)
             else:
-                print("  short %-13s 失敗：%s" % (sid, err), flush=True)
+                print("  short %-13s failed: %s" % (sid, err), flush=True)
         if not bases:
-            print("沒有任何 short 可用，中止", file=sys.stderr)
+            print("no usable shorts, stopping", file=sys.stderr)
             return 3
     else:
         bases = [CLEAN]
@@ -249,7 +249,7 @@ def main():
                 jobs.append({"i": i, "pass": p, "sid": sid, "url": url, "out": out,
                              "base": bases[idx % len(bases)], "ov": ov})
 
-    print("產生 %d 段過場（標題列 ＋ QR）…" % len(jobs), flush=True)
+    print("building %d transitions (title bar + QR)..." % len(jobs), flush=True)
     done = fail = 0
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=max(1, a.parallel)) as ex:
@@ -262,10 +262,10 @@ def main():
                 print("FAIL %02d %-14s %s" % (j["i"], j["sid"], err), flush=True)
             else:
                 done += 1
-    print("編碼完成 OK=%d FAIL=%d，耗時 %.0f 秒" % (done, fail, time.time() - t0))
+    print("encoding done OK=%d FAIL=%d in %.0f s" % (done, fail, time.time() - t0))
 
     if a.verify and fail == 0:
-        print("抽樣驗證（從影片解碼）…", flush=True)
+        print("sample verification (decoded from the encoded files)...", flush=True)
         step = max(1, len(jobs) // a.verify)
         bad = 0
         for j in jobs[::step][:a.verify]:
@@ -275,8 +275,8 @@ def main():
             if not ok:
                 bad += 1
             print("  %02d %-14s %s  %r"
-                  % (j["i"], j["sid"], "OK " if ok else "壞", got))
-        print("驗證結果：%d/%d 正確" % (a.verify - bad, a.verify))
+                  % (j["i"], j["sid"], "OK " if ok else "BAD", got))
+        print("verification: %d/%d correct" % (a.verify - bad, a.verify))
         return 0 if bad == 0 else 1
     return 0 if fail == 0 else 1
 

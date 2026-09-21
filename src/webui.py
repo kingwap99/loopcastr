@@ -78,7 +78,8 @@ def set_prefix(path):
     TASK_LOG = os.path.join(LOGS, "webui-task.log")
 
 PLAYOUT_START = re.compile(
-    r"([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}) 第 ([0-9]+) 次啟動")
+    r"([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})"
+    r" (?:start #([0-9]+)|第 ([0-9]+) 次啟動)")
 
 
 # ── 小工具 ──────────────────────────────────────────────────────────
@@ -381,7 +382,7 @@ def round_info():
         k = int((now - st) // total) + 1
         nxt = st + total * k
         info["playout_start"] = last.group(1)
-        info["playout_run"] = int(last.group(2))
+        info["playout_run"] = int(last.group(2) or last.group(3))
         info["next_loop"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(nxt))
         info["loop_in_seconds"] = int(nxt - now)
     return info

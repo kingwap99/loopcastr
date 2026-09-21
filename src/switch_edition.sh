@@ -56,21 +56,21 @@ case "${1:-show}" in
   promotion) WANT_PL="playlist-promotion-local.json"; WANT_LIST="concat-promotion.txt" ;;
   test)      WANT_PL="playlist-test-local.json";      WANT_LIST="concat-test.txt" ;;
   show)      WANT_PL="";                              WANT_LIST="" ;;
-  *) echo "用法：$0 [live|news|promotion|test|show]"; exit 2 ;;
+  *) echo "usage: $0 [live|news|promotion|test|show]"; exit 2 ;;
 esac
 
 cur_pl="$($PB -c 'Print :EnvironmentVariables:PLAYLIST' "$PLIST" 2>/dev/null || true)"
 cur_list="$($PB -c 'Print :EnvironmentVariables:LIST' "$PLIST" 2>/dev/null || true)"
 
 if [ -z "$WANT_PL" ]; then
-  echo "目前播放清單：${cur_pl}"
+  echo "current playlist: ${cur_pl}"
   echo "      LIST=${cur_list}"
-  echo "      服務：${SCOPE} domain（${INSTALLED}）"
+  echo "      service: ${SCOPE} domain (${INSTALLED})"
   exit 0
 fi
 
 if [ ! -f "$HERE/$WANT_PL" ]; then
-  echo "找不到 $HERE/${WANT_PL}，請先產生再切換" >&2
+  echo "$HERE/${WANT_PL} not found; build it before switching" >&2
   exit 3
 fi
 
@@ -94,16 +94,16 @@ case "$SCOPE" in
     sudo_do launchctl bootstrap system "$INSTALLED" || exit 5
     ;;
   none)
-    echo "⚠ 找不到已載入的 ${LABEL}（既不在 gui 也不在 system domain）。" >&2
-    echo "  已改好 $PLIST 與 concat 清單，但沒有服務可以重啟；請先執行 ./install.sh" >&2
+    echo "WARNING: ${LABEL} is not loaded in either the gui or the system domain." >&2
+    echo "  $PLIST and the concat list were updated, but there is no service to restart; run ./install.sh first" >&2
     exit 6
     ;;
 esac
 sleep 6
-echo "已切換到 ${1}：${WANT_PL} / ${WANT_LIST}（${SCOPE} domain）"
+echo "switched to ${1}: ${WANT_PL} / ${WANT_LIST} (${SCOPE} domain)"
 if [ "$SCOPE" = "gui" ]; then
   launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 \
-    && echo "  $LABEL 已載入" || echo "  ⚠ $LABEL 沒載入成功" >&2
+    && echo "  $LABEL loaded" || echo "  WARNING: $LABEL did not load" >&2
 else
   sudo_do launchctl list | grep -i "${LABEL}" || true
 fi

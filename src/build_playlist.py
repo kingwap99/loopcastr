@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""從 YouTube 播放清單產生母清單 JSON（給 build_local_content.py 用）。
+"""Build the master playlist JSON from a YouTube playlist or channel.
 
-為什麼要逐支抓：flat 模式一次拿整個清單很快，但**拿不到首播日期**
-（upload_date/release_date 都是 NA）。日期要拿來當畫面上的浮水印，
-所以只能一支一支問。
+Why fetch video by video: flat mode gets the whole list fast but cannot give the
+**first-air time** (upload_date/release_date come back as NA). That time is drawn
+on the video as a watermark, so we have to ask one by one.
 
-用法
+Usage
   python3 build_playlist.py --url "https://www.youtube.com/playlist?list=XXX" \
-      --out playlist-tucheng.json
-  python3 build_playlist.py --url ... --out ... --limit 3   # 試跑
+      --out playlist-mine.json
+  python3 build_playlist.py --url ... --out ... --limit 3          # try a few
+  python3 build_playlist.py --url ... --out ... --max-age-hours 24 # only recent
 
-輸出格式與現有 playlist.json 相容，另外多了三個欄位：
-  source_playlist / playlist_title   來源資訊，換清單時可追溯
-  segments[].air_date                YYYY-MM-DD，畫面上會顯示這個
-  segments[].title                   方便對照
+Output is compatible with the existing playlist JSON, plus:
+  source_playlist / playlist_title   where it came from
+  segments[].air_date                YYYY/MM/DD HH:MM, drawn on the video
+  segments[].air_ts                  the same moment as a unix timestamp
+  segments[].title                   for cross-checking
 """
 
 import argparse
@@ -37,40 +39,60 @@ def list_ids(url):
     p = run(["--flat-playlist", "--print", "%(id)s", url])
     ids = [x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
     if not ids:
-        print("拿不到影片清單：%s" % (p.stderr or "")[:200], file=sys.stderr)
+        print("Could not list videos: %s" % (p.stderr or "")[:200], file=sys.stderr)
     return ids
 
 
 def meta(vid, retries=3):
-    """回傳 (title, seconds, air_date)。失敗回 (None, None, None)。"""
+    """Return (title, seconds, air_text, air_ts). On failure (None, None, None, 0).
+
+    air_text is YYYY/MM/DD HH:MM in the machine's local time zone.
+    release_timestamp is the premiere moment and has the time of day;
+    upload_date only has the date, so it is the last resort.
+    """
     for i in range(retries):
         p = run(["--skip-download",
-                 "--print", "%(title)s\t%(duration)s\t%(upload_date)s\t%(release_date)s",
+                 "--print", "%(title)s\t%(duration)s\t%(release_timestamp)s"
+                            "\t%(timestamp)s\t%(upload_date)s",
                  "https://www.youtube.com/watch?v=%s" % vid])
         line = (p.stdout or "").strip().splitlines()
         if line:
             parts = line[-1].split("\t")
-            if len(parts) == 4:
-                title, dur, up, rel = parts
-                date = (rel if rel and rel != "NA" else up)
-                if date and date != "NA" and len(date) == 8:
-                    date = "%s-%s-%s" % (date[:4], date[4:6], date[6:])
+            if len(parts) == 5:
+                title, dur, rel_ts, up_ts, up_date = parts
+                ts = 0
+                for cand in (rel_ts, up_ts):
+                    try:
+                        ts = int(float(cand))
+                        break
+                    except (TypeError, ValueError):
+                        continue
+                if ts > 0:
+                    air = time.strftime("%Y/%m/%d %H:%M", time.localtime(ts))
+                elif up_date and up_date != "NA" and len(up_date) == 8:
+                    # 只有日期沒有時間，就當成當天 00:00
+                    air = "%s/%s/%s 00:00" % (up_date[:4], up_date[4:6], up_date[6:])
                 else:
-                    date = ""
+                    air, ts = "", 0
                 try:
                     secs = float(dur)
                 except ValueError:
                     secs = 0.0
-                return title, secs, date
+                return title, secs, air, ts
         time.sleep(3 + i * 2)
-    return None, None, None
+    return None, None, None, 0
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", required=True, help="播放清單網址（或 watch?v=...&list=...）")
+    ap.add_argument("--url", required=True,
+                    help="playlist URL (or watch?v=...&list=...)")
     ap.add_argument("--out", "-o", required=True)
-    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--limit", type=int, default=0,
+                    help="take at most this many videos (0 = all)")
+    ap.add_argument("--max-age-hours", type=float, default=0,
+                    help="keep only videos first aired within N hours (0 = no limit). "
+                         "Applied after --limit.")
     ap.add_argument("--target", default="rtmp://127.0.0.1:1935/live/main")
     a = ap.parse_args()
 
@@ -83,12 +105,12 @@ def main():
     ids = list_ids(url)
     if a.limit:
         ids = ids[:a.limit]
-    print("清單共 %d 支，開始逐支取 metadata…" % len(ids), flush=True)
+    print("Playlist has %d videos, fetching metadata one by one..." % len(ids), flush=True)
 
     segs = []
     fail = 0
     for i, vid in enumerate(ids, 1):
-        title, secs, date = meta(vid)
+        title, secs, air, ts = meta(vid)
         if not title:
             fail += 1
             print("  FAIL %s" % vid, flush=True)
@@ -97,9 +119,22 @@ def main():
                      "url": "https://www.youtube.com/watch?v=%s" % vid,
                      "format": FMT, "mode": "copy",
                      "seconds": int(secs) if secs else 0,
-                     "air_date": date, "title": title})
+                     "air_date": air, "air_ts": ts, "title": title})
         print("  %2d/%d %-13s %6.0fs  %s  %s"
-              % (i, len(ids), vid, secs, date or "(無日期)", title[:40]), flush=True)
+              % (i, len(ids), vid, secs, air or "(no date)", title[:40]), flush=True)
+
+    if a.max_age_hours > 0:
+        cutoff = time.time() - a.max_age_hours * 3600.0
+        kept = [s for s in segs if s.get("air_ts") and s["air_ts"] >= cutoff]
+        dropped = len(segs) - len(kept)
+        print("Age filter: %s h -> keep %d, drop %d (no timestamp counts as too old)"
+              % (a.max_age_hours, len(kept), dropped), flush=True)
+        if not kept:
+            print("ERROR: nothing is newer than %s hours; refusing to write an empty "
+                  "playlist (the current one is left untouched). Raise --max-age-hours "
+                  "or the video limit." % a.max_age_hours, file=sys.stderr)
+            return 2
+        segs = kept
 
     total = sum(s["seconds"] or 0 for s in segs)
     out = {"target": a.target,
@@ -107,14 +142,13 @@ def main():
            "source_playlist": url, "segments": segs}
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=2)
-    print("寫出 %s：%d 支、總長 %.0fs（%.1f 小時），FAIL=%d"
+    print("Wrote %s: %d videos, %.0fs total (%.1f h), FAIL=%d"
           % (a.out, len(segs), total, total / 3600.0, fail))
     nodate = [s["id"] for s in segs if not s["air_date"]]
     if nodate:
-        print("沒有日期的：%s" % ", ".join(nodate))
+        print("Without a date: %s" % ", ".join(nodate))
     return 0 if fail == 0 else 1
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

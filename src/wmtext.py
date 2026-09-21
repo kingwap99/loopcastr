@@ -95,7 +95,7 @@ def _render_bitmap(text, path, scale=6, outline=2):
 
 
 def render_countdown_strip(prefix, total, path, size=28, pad=12, radius=12,
-                            stroke=3):
+                            stroke=3, pre="剩餘 ", suf=""):
     """把每一秒的倒數畫成「一張直條圖」，回傳 (單張寬, 單張高)。
 
     為什麼不是一秒一個檔案的序列：1 fps 的序列輸入跟 30 fps 的主畫面在
@@ -110,7 +110,7 @@ def render_countdown_strip(prefix, total, path, size=28, pad=12, radius=12,
     f = ImageFont.truetype(font_path, size)
     probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
     n = int(total)
-    texts = ["%s剩餘 %02d:%02d" % (prefix, r // 60, r % 60)
+    texts = ["%s%s%02d:%02d%s" % (prefix, pre, r // 60, r % 60, suf)
              for r in range(n, 0, -1)]
     boxes = [probe.textbbox((0, 0), t, font=f, stroke_width=stroke)
              for t in texts]

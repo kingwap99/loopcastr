@@ -363,3 +363,67 @@ stream.key 也存好了，但 YouTube 的直播是黑的。原因不是設定，
 | `+### 本機控制台` | 修掉那個多出來的字元（heading 壞掉） |
 | 單輪 14,487 秒／15,549 秒等舊數字 | 拿掉寫死的數字，改成看 `playlist-*.json` |
 | 故障排除沒有一列講「服務沒被載入」 | 補上（就是上面那個 publish 的坑） |
+
+## 首播時間到分、只播 N 小時內的影片、雙語字樣（2026-09-21）
+
+### 1. 首播日期改成 `YYYY/MM/DD HH:MM`
+
+`build_playlist.py` 原本只抓 `upload_date`／`release_date`（都是 `YYYYMMDD`，**沒有時間**），
+所以畫面上只有日期。改用 `release_timestamp`（首播那一刻的 unix 秒）再格式化成本地時間：
+
+    $ yt-dlp --skip-download --print "%(release_timestamp)s|%(timestamp)s|%(upload_date)s" ...
+    1782388806|1782388806|20260625        # 有時間
+
+【實測】`--limit 4` 抓 TPP 頻道：
+
+    3s3GiSWmcnE  2026/09/18 19:00
+    L-zviGr6mFs  2026/09/12 19:00
+    FJy0b34m51s  2026/09/04 21:00
+    -HBsA990jdg  2026/08/29 19:00
+
+沒有 `release_timestamp` 時退回 `timestamp`，再沒有就退回日期 ＋ `00:00`。
+清單多了 `air_ts`（同一個時刻的 unix 秒），給下面的年齡過濾用。
+
+### 2. `max_age_hours`：只播 N 小時內首播的影片
+
+`modes.json` 每個模式可以設 `max_age_hours`（0＝不限），過濾在 `build_playlist.py`
+取完 metadata 之後做（順序：先用 `video_limit` 取前 N 支，再過濾年齡）。
+沒有時間戳的影片一律視為太舊（無法證明它新）。
+
+【實測】同一份清單（最新一支是 71.7 小時前）：
+
+| `--max-age-hours` | 結果 |
+|---|---|
+| 72 | keep 1, drop 3 → 寫出 1 支 |
+| 24 | keep 0 → **拒寫**、exit 2，原本的清單不動 |
+
+會拒絕寫出空清單是刻意的：播出端拿到空的 concat 清單會直接中止，寧可這輪不換。
+
+### 3. 語言：`ui.lang` ＝ `zh`／`en`／`both`
+
+畫面上的字樣（首播日期前綴、QR 按鈕說明、贊助、倒數）都在 `settings.json` 的
+`overlay` 裡有一組 `*_en` 對應值，`both` 會用「／」串起來（開頭的 ▶ 只留一個、冒號只留最後一個）：
+
+| 元素 | zh | en | both |
+|---|---|---|---|
+| 首播 | 首播日期： | First aired: | 首播日期／First aired： |
+| 集數 QR | ▶ 看原片 | ▶ Watch original | ▶ 看原片／Watch original |
+| 過場 QR | 去追劇 | Watch more | 去追劇／Watch more |
+| 贊助 QR | 贊助 | Support | 贊助／Support |
+| 倒數 | 剩餘 02:57 | 02:57 left | 剩餘 02:57 left |
+
+【實測】用 45 秒的測試片段重編，抽格看畫面：標題列是
+`土城十講｜第二十三講 用善良戰勝惡意　首播日期／First aired：2026/06/25 19:00`，
+QR 下方是 `01/01　剩餘 00:25 left`。
+
+### 4. 程式訊息改成英文
+
+`build_playlist.py`、`build_local_content.py`、`mode_build.py`、`build_transitions.py`、
+`gapwatch.py`、`loopwatch.py`、`refreshwatch.py`、`healthcheck.py`、`playout.sh`、
+`yt_publish.sh`、`switch_edition.sh` 的 log／錯誤／`--help` 都改成英文。
+
+其中一個**有耦合**的地方：`playout.sh` 的「第 N 次啟動」是四個程式在解析的日誌格式
+（`loopwatch.py`、`healthcheck.py`、`refreshwatch.py`、`webui.py`）。改成 `start #N` 之後，
+四個解析器同時改成**新舊格式都認**，否則正在跑的那一輪會算不出循環點：
+
+    (d{4}-d{2}-d{2} d{2}:d{2}:d{2}) (?:start #(d+)|第 (d+) 次啟動)

@@ -69,15 +69,15 @@ def main():
     flow = windows(stagnated)
     total = sum(w[2] for w in off)
 
-    print("取樣 %d 筆 / 涵蓋 %.2fs (api_fail=%d)" % (len(samples), dur, fails))
+    print("samples %d / span %.2fs (api_fail=%d)" % (len(samples), dur, fails))
     if not off:
-        print("接收端離線時段：0 段（整場連續）")
+        print("receiver offline windows: 0 (continuous)")
     else:
         for (a, b, d) in off:
-            print("  離線 %s -> %s = %.3fs" % (stamp(a), stamp(b), d))
-        print("接收端離線總計 %.3fs（%d 段）" % (total, len(off)))
+            print("  offline %s -> %s = %.3fs" % (stamp(a), stamp(b), d))
+        print("receiver offline total %.3fs (%d windows)" % (total, len(off)))
     longest = max((w[2] for w in flow), default=0.0)
-    print("bytesReceived 零成長區間 %d 段，最長 %.3fs"
+    print("bytesReceived flat windows: %d, longest %.3fs"
           % (len(flow), longest))
     return 0
 

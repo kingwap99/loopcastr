@@ -34,7 +34,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 YTDLP = "/opt/homebrew/bin/yt-dlp"
 PLAYOUT_PLIST = "/Library/LaunchDaemons/com.ytpl.playout.plist"
 START_RE = re.compile(
-    r"([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}) 第 ([0-9]+) 次啟動")
+    r"([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})"
+    r" (?:start #([0-9]+)|第 ([0-9]+) 次啟動)")
 
 
 def log(msg):
@@ -49,7 +50,7 @@ def log(msg):
 
 
 def flat_ids(url, limit):
-    """用 flat 模式快速拿 ID 清單（不逐支抓 metadata，幾秒就好）。"""
+    """fast flat listing of IDs (no per-video metadata, takes seconds)."""
     cmd = [YTDLP, "--no-warnings", "--socket-timeout", "25", "--flat-playlist"]
     if limit:
         cmd += ["-I", "1:%d" % limit]
@@ -75,9 +76,9 @@ def notify(text):
         req = urllib.request.Request(url, data=data,
                                      headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=15).read()
-        log("已發 Telegram 通知")
+        log("Telegram notification sent")
     except Exception as exc:
-        log("Telegram 通知失敗：%r" % exc)
+        log("Telegram notification failed: %r" % exc)
 
 
 def last_start():
@@ -139,7 +140,7 @@ def restart_playout():
         return subprocess.run(cmd, stdin=subprocess.DEVNULL).returncode == 0
     pw = os.environ.get("SUDO_PASS")
     if not pw:
-        log("不是 root 又沒有 SUDO_PASS，無法重啟播出端")
+        log("not root and SUDO_PASS is unset, cannot restart the playout")
         return False
     cv = ["sudo", "-S"] + cmd
     return subprocess.run(cv, input=pw + chr(10), text=True,
@@ -151,7 +152,7 @@ def check(mode, cfg, f, args):
     shorts = (flat_ids(cfg["shorts_url"], cfg.get("shorts_count") or 0)
               if cfg.get("shorts_url") else [])
     if not vids:
-        log("掃不到影片清單，這輪跳過")
+        log("could not list videos, skipping this round")
         return False
     old_vids = []
     if os.path.exists(f["mother"]):
@@ -162,58 +163,58 @@ def check(mode, cfg, f, args):
     if not state:
         json.dump({"shorts": shorts, "videos": vids, "at": int(time.time())},
                   open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-        log("第一次檢查，先記錄基準（影片 %d 支、shorts %d 支）"
+        log("first check, recording the baseline (%d videos, %d shorts)"
             % (len(vids), len(shorts)))
         return False
     old_shorts = state.get("shorts") or []
     new_v = [v for v in vids if v not in old_vids]
     new_s = [s for s in shorts if s not in old_shorts]
     if not new_v and not new_s:
-        log("沒有變化（影片 %d 支、shorts %d 支）" % (len(vids), len(shorts)))
+        log("no change (%d videos, %d shorts)" % (len(vids), len(shorts)))
         return False
-    log("偵測到變化：新影片 %d 支、新 shorts %d 支" % (len(new_v), len(new_s)))
-    notify("[%s] 偵測到新內容：影片 %d 支、shorts %d 支，開始重建"
+    log("change detected: %d new videos, %d new shorts" % (len(new_v), len(new_s)))
+    notify("[%s] new content: %d videos, %d shorts, rebuilding"
            % (mode, len(new_v), len(new_s)))
     tgt = next_boundary(f["local"])
     rc = subprocess.run([sys.executable, os.path.join(HERE, "mode_build.py"),
                          "--mode", mode], stdin=subprocess.DEVNULL).returncode
     if rc != 0:
-        log("重建失敗 rc=%d，播出內容維持不變" % rc)
-        notify("[%s] 重建失敗 rc=%d" % (mode, rc))
+        log("rebuild failed rc=%d, the playout content is unchanged" % rc)
+        notify("[%s] rebuild failed rc=%d" % (mode, rc))
         return False
     json.dump({"shorts": shorts, "videos": vids, "at": int(time.time())},
               open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     if tgt:
         wait = (tgt - datetime.datetime.now()).total_seconds()
         if wait > args.min_wait:
-            log("等 %.0f 秒到下一個換片點（%s）再重啟"
+            log("waiting %.0f s for the next segment boundary (%s) before restarting"
                 % (wait, tgt.strftime("%F %T")))
             time.sleep(wait)
     if restart_playout():
-        log("已重啟播出端，從清單頭開始播")
-        notify("[%s] 已重建完成並切回清單頭" % mode)
+        log("playout restarted, now playing from the top of the list")
+        notify("[%s] rebuilt and switched back to the top of the list" % mode)
     else:
-        log("重啟播出端失敗")
-        notify("[%s] 重建完成但重啟播出端失敗" % mode)
+        log("restarting the playout failed")
+        notify("[%s] rebuilt but restarting the playout failed" % mode)
     return True
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="auto",
-                    help="要監看的模式；auto（預設）＝跟著播出端 plist 目前指到的模式")
+                    help="which mode to watch; auto (default) follows whatever the playout plist points at")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--min-wait", type=float, default=20.0)
     a = ap.parse_args()
     modes = MB.load_modes()
-    log("啟動（--mode=%s，root=%s）" % (a.mode, os.geteuid() == 0))
+    log("starting (--mode=%s, root=%s)" % (a.mode, os.geteuid() == 0))
     while True:
         mode = a.mode
         if mode in ("", "auto"):
             mode = active_mode()
         cfg = modes.get(mode) if mode else None
         if not cfg:
-            log("判斷不出目前模式（讀到 %r），30 秒後再看" % mode)
+            log("cannot tell the current mode (read %r), checking again in 30 s" % mode)
             if a.once:
                 return 2
             time.sleep(30)
@@ -223,9 +224,9 @@ def main():
             try:
                 check(mode, cfg, MB.files_for(mode), a)
             except Exception as exc:
-                log("檢查出錯：%r" % exc)
+                log("check failed: %r" % exc)
         else:
-            log("%s 模式沒有設 refresh_seconds，不掃描" % mode)
+            log("mode %s has no refresh_seconds, not scanning" % mode)
         if a.once:
             return 0
         time.sleep(every or 60)

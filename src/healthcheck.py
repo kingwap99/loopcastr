@@ -88,7 +88,7 @@ def check(youtube_id=None):
     try:
         d = api_path()
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        return False, ["MediaMTX API 查詢失敗：%s" % exc], obs
+        return False, ["MediaMTX API query failed: %s" % exc], obs
     obs["api_ok"] = True
 
     obs["ready"] = bool(d.get("ready"))
@@ -97,9 +97,9 @@ def check(youtube_id=None):
     b1 = int(d.get("bytesReceived") or 0)
     obs["bytes1"] = b1
     if not obs["ready"]:
-        problems.append("MediaMTX 路徑未就緒（沒有發佈端）")
+        problems.append("MediaMTX path not ready (no publisher)")
     if obs["readers"] < 1:
-        problems.append("沒有讀者：推流端（yt_publish.sh）不在線上")
+        problems.append("no readers: the publisher (yt_publish.sh) is not connected")
 
     time.sleep(GROW_WINDOW)
     try:
@@ -107,18 +107,18 @@ def check(youtube_id=None):
         b2 = int(d2.get("bytesReceived") or 0)
     except (urllib.error.URLError, OSError, ValueError) as exc:
         obs["api_ok"] = False
-        return False, problems + ["第二次查詢失敗：%s" % exc], obs
+        return False, problems + ["second query failed: %s" % exc], obs
     obs["bytes2"] = b2
     obs["growth"] = b2 - b1
     if b2 <= b1:
-        problems.append("bytesReceived 在 %.0f 秒內沒有成長（播出端卡住）" % GROW_WINDOW)
+        problems.append("bytesReceived did not grow for %.0f s (the playout is stuck)" % GROW_WINDOW)
     obs["framesInError"] = int(d2.get("inboundFramesInError") or 0)
 
     if youtube_id:
         st = yt_is_live(youtube_id)
         obs["youtube"] = st
         if st != "is_live":
-            problems.append("YouTube 端回報 live_status=%s（非 is_live）" % st)
+            problems.append("YouTube reports live_status=%s (not is_live)" % st)
 
     return (not problems), problems, obs
 
@@ -134,7 +134,8 @@ def playout_uptime_days():
     try:
         with open(path, encoding="utf-8", errors="ignore") as fh:
             for line in fh:
-                m = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) 第 \d+ 次啟動", line)
+                m = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
+                              r" (?:start #\d+|第 \d+ 次啟動)", line)
                 if m:
                     last = m.group(1)
     except OSError:
@@ -220,7 +221,7 @@ def tg_send(text):
     cfg = tg_config()
     tok = (cfg.get("token") or "").strip()
     if not tok:
-        return False, "未設定 telegram.json 的 token"
+        return False, "no token in telegram.json"
     cid = str(cfg.get("chat_id") or "").strip()
     if not cid:
         cid = tg_discover_chat_id(tok) or ""
@@ -232,7 +233,7 @@ def tg_send(text):
             except OSError:
                 pass
     if not cid:
-        return False, "還沒有 chat_id：請先對 bot 傳一次 /start"
+        return False, "no chat_id yet: send /start to the bot once"
     body = json.dumps({"chat_id": cid, "text": text,
                        "disable_web_page_preview": True},
                       ensure_ascii=False).encode("utf-8")
@@ -250,21 +251,21 @@ def tg_send(text):
 def notify(payload):
     status = payload.get("status")
     if status == "DOWN":
-        text = ("🔴 ytpl 播出中斷\n%s\n問題：%s"
+        text = ("🔴 ytpl stream down\n%s\nproblems: %s"
                 % (payload.get("wall"),
-                   "；".join(payload.get("problems") or [])))
+                   "; ".join(payload.get("problems") or [])))
         obs = payload.get("obs") or {}
         if obs:
-            text += "\n觀測：" + ", ".join(
+            text += "\nobserved: " + ", ".join(
                 "%s=%s" % (k, v) for k, v in obs.items())
     elif status == "UP":
-        text = "🟢 ytpl 已恢復\n%s" % payload.get("wall")
+        text = "🟢 ytpl recovered\n%s" % payload.get("wall")
     else:
         text = json.dumps(payload, ensure_ascii=False)
 
     ok, info = tg_send(text)
     if not ok:
-        print("[health] Telegram 未送出：%s" % info, file=sys.stderr)
+        print("[health] Telegram not sent: %s" % info, file=sys.stderr)
 
     url = ""
     if os.path.exists(WEBHOOK_FILE):
@@ -279,7 +280,7 @@ def notify(payload):
         with urllib.request.urlopen(req, timeout=10) as r:
             r.read(64)
     except (urllib.error.URLError, OSError) as exc:
-        print("[health] webhook 送出失敗：%s" % exc, file=sys.stderr)
+        print("[health] webhook failed: %s" % exc, file=sys.stderr)
 
 
 def main():
@@ -287,28 +288,28 @@ def main():
     ap.add_argument("--check-youtube", action="store_true")
     ap.add_argument("--youtube-id", default=os.environ.get("YT_VIDEO_ID", ""))
     ap.add_argument("--youtube-every", type=float, default=900.0,
-                    help="YouTube 端最多多久查一次（秒）。公開查詢很貴，"
-                         "而且密集查會被 bot 檢查盯上，預設 15 分鐘")
+                    help="how often to poll the YouTube side (seconds). Public queries are expensive,"
+                         "and frequent polling attracts bot checks; default 15 minutes")
     ap.add_argument("--heal", action="store_true",
-                    help="連續失敗達門檻就自動重啟對應服務")
+                    help="restart the failing service after this many consecutive failures")
     ap.add_argument("--heal-after", type=int, default=3,
-                    help="連續失敗幾次後才動手（預設 3 次，約 3 分鐘）")
+                    help="consecutive failures before acting (default 3, about 3 minutes)")
     ap.add_argument("--heal-cooldown", type=float, default=300.0,
-                    help="兩次自動修復之間至少間隔幾秒")
+                    help="minimum seconds between two auto-repairs")
     ap.add_argument("--recycle-after-days", type=float, default=0.0,
-                    help="播出端連跑超過幾天就主動重啟一次（0＝停用）。"
-                         "用來避開 FLV 32 位元時間戳約 49.7 天的回繞")
+                    help="proactively restart the playout after this many days (0 = off)."
+                         "avoids the FLV 32-bit timestamp wrap at about 49.7 days")
     ap.add_argument("--alert-after", type=int, default=2,
-                    help="連續失敗幾次才發第一次告警（預設 2）。"
-                         "推流端重連只要幾秒，若一失敗就發，會為了自癒的抖動洗版")
+                    help="consecutive failures before the first alert (default 2)."
+                         "the publisher reconnects within seconds, so alerting on the first failure would spam for a self-healing hiccup")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--test-alert", action="store_true",
-                    help="送一則測試訊息到 Telegram 後結束")
+                    help="send one test message to Telegram and exit")
     args = ap.parse_args()
 
     if args.test_alert:
-        okk, info = tg_send("✅ ytpl 告警測試（%s）" % time.strftime("%F %T"))
-        print("Telegram：%s  %s" % ("OK" if okk else "失敗", info))
+        okk, info = tg_send("✅ ytpl alert test (%s)" % time.strftime("%F %T"))
+        print("Telegram：%s  %s" % ("OK" if okk else "failed", info))
         return 0 if okk else 1
 
     now = time.time()
@@ -349,7 +350,7 @@ def main():
 
     if not ok:
         overdue = (now - last_alert) > RE_ALERT_SEC
-        # 第一次告警要連續失敗達門檻；已經在告警狀態中則照原本的 30 分鐘重提醒。
+        # 第一次告警要連續failed達門檻；已經在告警狀態中則照原本的 30 分鐘重提醒。
         due = ((was_ok and streak >= args.alert_after)
                or ((not was_ok) and overdue))
         # 只有真的發過中斷通知，之後才發恢復通知。否則像「抖一下 30 秒自己好」
@@ -390,14 +391,14 @@ def main():
             bad = ["%s(%s)" % (a["service"], a.get("detail"))
                    for a in record["healed"] if not a.get("ok")]
             if done:
-                extra = "｜已自動重啟：" + ", ".join(done)
+                extra = "| auto-restarted: " + ", ".join(done)
             if bad:
-                extra += "｜重啟失敗：" + "; ".join(bad)
+                extra += "| restart failed: " + "; ".join(bad)
         if record.get("recycled"):
-            extra += "｜預防性重啟播出端（已連跑 %.1f 天）" % record["recycled"]["uptime_days"]
+            extra += "| preventive playout restart (up %.1f days)" % record["recycled"]["uptime_days"]
         print("[health %s] %s %s"
               % (record["wall"], tag,
-                 ("全鏈路正常（流量 %+d bytes / %.0fs）"
+                 ("all links OK (traffic %+d bytes / %.0fs)"
                   % (obs.get("growth", 0), GROW_WINDOW)) + extra
                  if ok else "；".join(problems) + extra))
     return 0 if ok else 1

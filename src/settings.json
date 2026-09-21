@@ -1,5 +1,9 @@
 {
   "_comment": "ytpl 通用設定。程式與 WebUI 都讀這一份當預設值；命令列參數可以逐次覆寫。要改「播什麼」（來源頻道、最多幾支、長度上限）請改 modes.json，這裡只管編碼與版面。",
+  "ui": {
+    "_comment": "lang: zh＝全中文、en＝全英文、both＝雙語。影響後台介面與畫面上的字樣。",
+    "lang": "both"
+  },
   "media": {
     "target": "720",
     "fps": 30,
@@ -17,6 +21,7 @@
   },
   "overlay": {
     "date_label": "首播日期：",
+    "date_label_en": "First aired: ",
     "overlay_y": 40,
     "overlay_margin": 40,
     "marquee_speed": 120,
@@ -28,10 +33,17 @@
     "qr_px": 120,
     "link_button": true,
     "link_caption": "▶ 看原片",
+    "link_caption_en": "▶ Watch original",
     "countdown": true,
+    "countdown_prefix": "剩餘 ",
+    "countdown_prefix_en": "",
+    "countdown_suffix": "",
+    "countdown_suffix_en": " left",
     "transition_caption": "去追劇",
+    "transition_caption_en": "Watch more",
     "sponsor_url": "",
     "sponsor_caption": "贊助",
+    "sponsor_caption_en": "Support",
     "sponsor_code": ""
   },
   "content": {

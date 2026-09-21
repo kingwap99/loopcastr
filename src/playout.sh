@@ -24,7 +24,7 @@ AENC="${AENC:--c:a aac -b:a 128k -ar 48000 -ac 2}"
 mkdir -p "$(dirname "$LOG")"
 
 if ! python3 "$HERE/make_concat_list.py" "$PLAYLIST" -o "$LIST" --base-dir "$HERE"; then
-  echo "[playout] $(date '+%F %T') concat 清單建立失敗，中止" >>"$LOG"
+  echo "[playout] $(date '+%F %T') could not build the concat list, stopping" >>"$LOG"
   exit 78
 fi
 
@@ -54,7 +54,7 @@ except Exception:
 n=0
 while :; do
   n=$((n + 1))
-  echo "[playout] $(date '+%F %T') 第 $n 次啟動" >>"$LOG"
+  echo "[playout] $(date '+%F %T') start #$n" >>"$LOG"
   ffmpeg -hide_banner -nostdin -loglevel warning -nostats \
     "${SRC[@]}" "${ENC[@]}" \
     -f flv -flvflags no_duration_filesize "$DEST" >>"$LOG" 2>&1 &
@@ -73,7 +73,7 @@ while :; do
       fi
       last="$b"
       if [ "$stall" -ge "$READ_STALL" ]; then
-        echo "[playout] $(date '+%F %T') 連續 $stall 秒沒有新資料，砍掉 ffmpeg 重連" >>"$LOG"
+        echo "[playout] $(date '+%F %T') no new data for $stall s, killing ffmpeg to reconnect" >>"$LOG"
         kill -9 "$FF" 2>/dev/null
         break
       fi
@@ -81,6 +81,6 @@ while :; do
   done
   wait "$FF" 2>/dev/null
   rc=$?
-  echo "[playout] $(date '+%F %T') ffmpeg 結束 rc=${rc}，3 秒後重啟" >>"$LOG"
+  echo "[playout] $(date '+%F %T') ffmpeg exited rc=${rc}, restarting in 3 s" >>"$LOG"
   sleep 3
 done

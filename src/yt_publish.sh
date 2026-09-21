@@ -26,7 +26,7 @@ WATCH_MISSES="${WATCH_MISSES:-2}"
 mkdir -p "$(dirname "$LOG")"
 
 if [ ! -s "$KEYFILE" ]; then
-  echo "[publish] 找不到串流金鑰檔：$KEYFILE" >&2
+  echo "[publish] stream key file not found: $KEYFILE" >&2
   exit 78
 fi
 KEY="$(tr -d ' \t\r\n' < "$KEYFILE")"
@@ -63,7 +63,7 @@ while :; do
   wait_ready
   n=$((n + 1))
   reap_orphans
-  echo "[publish] $(date '+%F %T') 第 $n 次連線：$SRC -> YouTube ingest" >> "$LOG"
+  echo "[publish] $(date '+%F %T') connect #$n: $SRC -> YouTube ingest" >> "$LOG"
   ffmpeg -hide_banner -nostdin -loglevel warning -nostats \
     -re -i "$SRC" -c copy -f flv -flvflags no_duration_filesize "$DEST" \
     >>"$LOG" 2>&1 &
@@ -76,7 +76,7 @@ while :; do
     if [ "$r" = "0" ]; then
       misses=$((misses + 1))
       if [ "$misses" -ge "$WATCH_MISSES" ]; then
-        echo "[publish] $(date '+%F %T') 連續 $misses 次看不到自己的 reader（約 $((WATCH_EVERY * WATCH_MISSES)) 秒），判定卡住，砍掉重連" >> "$LOG"
+        echo "[publish] $(date '+%F %T') our own reader was missing $misses times in a row (about $((WATCH_EVERY * WATCH_MISSES)) s), treating it as stuck and reconnecting" >> "$LOG"
         kill -TERM "$FF" 2>/dev/null
         sleep 3
         kill -KILL "$FF" 2>/dev/null
@@ -88,6 +88,6 @@ while :; do
   done
   wait "$FF" 2>/dev/null
   rc=$?
-  echo "[publish] $(date '+%F %T') ffmpeg 結束 rc=${rc}，3 秒後重連" >> "$LOG"
+  echo "[publish] $(date '+%F %T') ffmpeg exited rc=${rc}, reconnecting in 3 s" >> "$LOG"
   sleep 3
 done

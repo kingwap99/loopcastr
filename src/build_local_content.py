@@ -81,7 +81,47 @@ TARGETS = {"1080": (1920, 1080), "720": (1280, 720), "480": (854, 480)}
 BLACK_TAIL_MIN = float(cfg("content", "black_tail_min", 5.0))   # 片尾黑畫面幾秒算黑尾
 BLACK_TAIL_SLACK = float(cfg("content", "black_tail_slack", 2.5))  # 黑尾結束點要落在片尾幾秒內
 
-DATE_LABEL = cfg("overlay", "date_label", "首播日期：")   # 日期浮水印的前綴
+# ── 語言（後台介面與畫面上的字樣）──────────────────────────────────
+# zh＝全中文、en＝全英文、both＝雙語。畫面空間有限，所以雙語一律用「／」串起來，
+# 共用的開頭符號（▶）只留一個，冒號也只留最後一個。
+UI_LANG = str(cfg("ui", "lang", "both")).strip().lower()
+
+
+def L(zh, en):
+    """依 UI_LANG 挑字串。"""
+    zh, en = (zh or ""), (en or "")
+    if UI_LANG == "en":
+        return en or zh
+    if UI_LANG == "zh":
+        return zh or en
+    z, e = zh.strip(), en.strip()
+    if not z or not e:
+        return z or e
+    colon = z.endswith(("：", ":")) or e.endswith(("：", ":"))
+    z, e = z.rstrip("：: 　"), e.rstrip("：: 　")
+    for sym in ("▶", "►"):
+        if z.startswith(sym) and e.startswith(sym):
+            e = e[len(sym):].strip()
+    return "%s／%s%s" % (z, e, "：" if colon else "")
+
+
+DATE_LABEL = L(cfg("overlay", "date_label", "首播日期："),
+               cfg("overlay", "date_label_en", "First aired: "))
+LINK_CAPTION = L(cfg("overlay", "link_caption", "▶ 看原片"),
+                 cfg("overlay", "link_caption_en", "▶ Watch original"))
+TRANSITION_CAPTION = L(cfg("overlay", "transition_caption", "去追劇"),
+                       cfg("overlay", "transition_caption_en", "Watch more"))
+# 倒數的文字：中文放前面（「剩餘 02:57」）、英文放後面（「02:57 left」），
+# 雙語就是「剩餘 02:57 left」。
+_CD_PRE, _CD_SUF = cfg("overlay", "countdown_prefix", "剩餘 "), cfg("overlay", "countdown_suffix", "")
+_CD_PRE_EN = cfg("overlay", "countdown_prefix_en", "")
+_CD_SUF_EN = cfg("overlay", "countdown_suffix_en", " left")
+if UI_LANG == "zh":
+    CD_PRE, CD_SUF = _CD_PRE, _CD_SUF
+elif UI_LANG == "en":
+    CD_PRE, CD_SUF = _CD_PRE_EN, _CD_SUF_EN
+else:
+    CD_PRE, CD_SUF = _CD_PRE, _CD_SUF_EN
 AUDIO_FADE = float(cfg("media", "audio_fade", 2.5))       # 開頭淡入／結尾淡出幾秒
 OVERLAY_Y = int(cfg("overlay", "overlay_y", 40))          # 浮水印距離畫面頂端
 MARQUEE_Y = OVERLAY_Y - 30                                # 跑馬燈再往上位移半行
@@ -105,7 +145,8 @@ QR_PX = int(cfg("overlay", "qr_px", 120))
 
 # 贊助／抖內 QR：只畫在過場影片上（集數不畫），固定放右下角。
 SPONSOR_URL = cfg("overlay", "sponsor_url", "")
-SPONSOR_CAPTION = cfg("overlay", "sponsor_caption", "贊助")
+SPONSOR_CAPTION = L(cfg("overlay", "sponsor_caption", "贊助"),
+                    cfg("overlay", "sponsor_caption_en", "Support"))
 # 贊助碼：填這個值就整個關掉贊助 QR（後台設定的緊急開關）
 SPONSOR_CODE = cfg("overlay", "sponsor_code", "")
 if SPONSOR_CODE.strip() == "kingwap99":
@@ -156,7 +197,7 @@ def check_duration(got, expect, tol=0.05, min_abs=10.0):
     expect = float(expect)
     diff = abs(got - expect)
     if diff > max(min_abs, tol * expect):
-        return "長度不符：抓到 %.1fs，清單宣稱 %.1fs" % (got, expect)
+        return "duration mismatch: got %.1fs, the list claims %.1fs" % (got, expect)
     return None
 
 
@@ -314,8 +355,8 @@ def make_countdown_frames(total, out_dir, size=28, prefix=""):
     os.makedirs(out_dir, exist_ok=True)
     for k in range(n):
         remain = n - k
-        wmtext.render_badge("%s剩餘 %02d:%02d"
-                            % (prefix, remain // 60, remain % 60),
+        wmtext.render_badge("%s%s%02d:%02d%s"
+                            % (prefix, CD_PRE, remain // 60, remain % 60, CD_SUF),
                             os.path.join(out_dir, "%05d.png" % k), size=size)
     return n
 
@@ -354,71 +395,71 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--playlist", default=os.path.join(HERE, "playlist.json"))
     ap.add_argument("--cookies", default=None)
-    ap.add_argument("--status", action="store_true", help="只回報缺哪些，不下載")
-    ap.add_argument("--force", action="store_true", help="已存在的也重抓")
-    ap.add_argument("--limit", type=int, default=0, help="這次最多抓幾支（0=不限）")
-    ap.add_argument("--format", default=DEFAULT_FMT, help="yt-dlp 格式選擇")
+    ap.add_argument("--status", action="store_true", help="only report what is missing, do not download")
+    ap.add_argument("--force", action="store_true", help="re-download files that already exist")
+    ap.add_argument("--limit", type=int, default=0, help="max videos to fetch this run (0 = no limit)")
+    ap.add_argument("--format", default=DEFAULT_FMT, help="yt-dlp format selector")
     ap.add_argument("--no-fallback-client", action="store_true",
-                    help="停用 android client 備援")
+                    help="disable the android client fallback")
     ap.add_argument("--no-normalize", action="store_true",
-                    help="不做正規化，保留原始參數（concat 會壞）")
+                    help="skip normalization, keep the source parameters (concat will break)")
     ap.add_argument("--target", default=cfg("media", "target", "720"),
-                    choices=sorted(TARGETS), help="正規化目標解析度")
+                    choices=sorted(TARGETS), help="normalization target resolution")
     ap.add_argument("--venc", default=cfg("media", "venc", "libx264"),
                     choices=["libx264", "h264_videotoolbox"])
     ap.add_argument("--abr", default=cfg("media", "abr", "128k"),
-                    help="音訊位元率")
+                    help="audio bitrate")
     ap.add_argument("--fps", type=int, default=int(cfg("media", "fps", 30)))
     ap.add_argument("--audio-fade", type=float, default=AUDIO_FADE,
-                    help="每段開頭淡入、結尾淡出幾秒（預設讀 settings.json）")
+                    help="audio fade in/out seconds per segment (default: settings.json)")
     ap.add_argument("--respect-playlist-format", action="store_true",
-                    help="沿用清單每段的 format（預設忽略，改用 --format）")
+                    help="use the per-segment format from the list (default: ignore, use --format)")
     ap.add_argument("--rescan", action="store_true",
-                    help="不對外抓取，只重掃已落地檔案的黑尾並重建 playlist-local.json")
+                    help="no fetching; rescan black tails of local files and rebuild the playout list")
     ap.add_argument("--black-tail-min", type=float, default=BLACK_TAIL_MIN,
-                    help="片尾黑畫面超過幾秒就視為黑尾（預設 5.0）")
+                    help="seconds of black at the tail to count as a black tail (default 5.0)")
     ap.add_argument("--no-auto-trim", action="store_true",
-                    help="只標出黑尾，不自動截掉")
+                    help="only mark black tails, do not trim them")
     ap.add_argument("--transition", default="",
-                    help="過場影片（YouTube URL／video id／本機檔案路徑）。"
-                         "已落地就不再抓，要重抓加 --force")
+                    help="transition video (YouTube URL / video id / local file path)."
+                         "kept once landed; add --force to fetch it again")
     ap.add_argument("--no-transition", action="store_true",
-                    help="停用過場，即使 media/_transition.mp4 存在")
+                    help="disable transitions even if the shared _transition.mp4 exists")
     ap.add_argument("--no-date-overlay", action="store_true",
-                    help="不要燒上首播日期浮水印（清單有 air_date 時預設會畫在右上角）")
+                    help="do not burn in the first-air watermark (drawn top-right when the list has air_date)")
     ap.add_argument("--out-playlist", default=os.path.join(HERE, "playlist-local.json"),
-                    help="產生的播出清單路徑（預設 playlist-local.json）。"
-                         "試跑時指定別的路徑，才不會蓋掉正在用的那份")
+                    help="output playout list path (default playlist-local.json)."
+                         "point it elsewhere for a trial run so the live one is untouched")
     # 播出中要換檔時，先寫到暫存目錄、驗完再 mv 進 media/：mv 是原子置換，
     # 播出端（每個循環重開檔案）只會拿到完整的舊檔或新檔。要搭配 --force。
     ap.add_argument("--out-dir", default="",
-                    help="正規化後的檔案要寫到哪個目錄（預設 media/）。"
-                         "播出中換檔請指到暫存目錄，驗完再 mv 進去")
+                    help="directory for normalized files (default media/)."
+                         "for live replacement point it at a staging dir, then mv the verified files in")
     ap.add_argument("--max-seconds", type=int,
                     default=int(cfg("media", "max_seconds", 0)),
-                    help="每支最多保留幾秒（0＝完整）。做縮短的測試版用")
+                    help="keep at most this many seconds per video (0 = full length); used for short test editions")
     ap.add_argument("--keep-raw", action="store_true",
-                    help="保留原始下載檔（media/.raw/）。調整浮水印時可以重複"
-                         "轉檔而不用重新下載，也不會多一次畫質損失")
+                    help="keep the downloaded originals (media/.raw/) so you can re-encode"
+                         "without downloading again and without another quality loss")
     ap.add_argument("--no-link-button", action="store_true",
                     default=not bool(cfg("overlay", "link_button", True)),
-                    help="不要疊上「看原片」連結按鈕（QR ＋ 短網址）")
+                    help="do not overlay the link button (QR + short URL)")
     ap.add_argument("--no-countdown", action="store_true",
                     default=not bool(cfg("overlay", "countdown", True)),
-                    help="不要在 QR 下方顯示剩餘播放時間的倒數")
-    ap.add_argument("--link-caption", default=cfg("overlay", "link_caption", "▶ 看原片"),
-                    help="集數連結按鈕的說明文字")
+                    help="do not show the remaining-time countdown under the QR")
+    ap.add_argument("--link-caption", default=LINK_CAPTION,
+                    help="caption on the episode link button (zh/en/both per ui.lang)")
     ap.add_argument("--band-left", type=int, default=int(cfg("overlay", "band_left", 0)),
-                    help="跑馬燈左界的像素值（預設 0＝自動用畫面寬度的 1/7）。"
-                         "這是留給原片左上角 logo 的空間；要更寬就給更大的值")
+                    help="marquee left bound in pixels (0 = use 1/7 of the width)."
+                         "that space is reserved for the original video's top-left logo; use a larger value for more")
     # 內容改成「每個模式一份」：media/<模式>/。同一支影片在不同模式有不同長度
     # 上限時才不會互相蓋掉，manifest 也各自一份（原始檔 media/.raw 仍共用）。
     ap.add_argument("--media-dir", default="",
-                    help="內容目錄（預設 media/）。多模式並存時給 media/<模式>")
+                    help="content directory (default media/); use media/<mode> when several modes coexist")
     # 過場是「第 i 支影片配第 i 支 short」，一輪只用到池子前 N 支。--passes 讓
     # 一輪播出包含多趟影片，shorts 接著往下輪（第 2 趟從第 31 支起）。
     ap.add_argument("--passes", type=int, default=int(cfg("media", "passes", 1)),
-                    help="一輪裡影片重複幾趟（預設 1）。讓 shorts 池全部輪到")
+                    help="how many passes of videos per round (default 1) so the whole shorts pool gets used")
     args = ap.parse_args()
 
     if args.media_dir:
@@ -429,7 +470,7 @@ def main():
     os.makedirs(MEDIA_DIR, exist_ok=True)
     pl = load_json(args.playlist, None)
     if not pl:
-        raise SystemExit("找不到清單：%s" % args.playlist)
+        raise SystemExit("playlist not found: %s" % args.playlist)
 
     cookies = args.cookies
     if cookies is None:
@@ -445,16 +486,16 @@ def main():
         if args.force or not os.path.exists(path):
             missing.append(seg)
 
-    mode = "原始參數（不建議）" if args.no_normalize else "%dx%d" % TARGETS[args.target]
-    log("清單 %d 段，已有 %d 段，缺 %d 段；輸出格式 %s"
+    mode = "source parameters (not recommended)" if args.no_normalize else "%dx%d" % TARGETS[args.target]
+    log("list has %d segments, %d present, %d missing; output format %s"
         % (len(segs), len(segs) - len(missing), len(missing), mode))
 
     if args.status:
         for seg in missing:
-            log("  缺 %s" % seg["id"])
+            log("  missing %s" % seg["id"])
         have = [m for m in manifest.values() if m.get("seconds")]
         total = sum(m.get("seconds") or 0 for m in have)
-        log("manifest：%d 段已量測，總長 %.0fs（%.2f 小時）"
+        log("manifest: %d segments measured, %.0fs total (%.2f h)"
             % (len(have), total, total / 3600.0))
         return 0 if not missing else 2
 
@@ -476,19 +517,19 @@ def main():
                 if not args.no_auto_trim:
                     rec["outpoint"] = round(cut, 3)
                 hits += 1
-                log("WARN %-13s 片尾黑畫面 %.1fs（起點 %.2fs）%s"
+                log("WARN %-13s black tail %.1fs (starts %.2fs)%s"
                     % (seg["id"], rec["black_tail_len"], cut,
-                       "" if args.no_auto_trim else " → 已截掉"))
+                       "" if args.no_auto_trim else " -> trimmed"))
             else:
                 for k in ("outpoint", "black_tail_start", "black_tail_len"):
                     rec.pop(k, None)
             manifest[seg["id"]] = rec
         save_json(MANIFEST, manifest)
-        log("重掃完成：掃描 %d 段，%d 段有黑尾" % (len(segs), hits))
+        log("rescan done: %d segments scanned, %d with a black tail" % (len(segs), hits))
         missing = []
 
     if not missing:
-        log("沒有要抓的，直接重建 playlist-local.json")
+        log("nothing to fetch; rebuilding the playout list")
 
     w, h = TARGETS[args.target]
     done = fail = 0
@@ -505,13 +546,13 @@ def main():
         kept = os.path.join(RAW_DIR, sid + ".mp4")
         if args.keep_raw and os.path.exists(kept):
             raw = kept
-            log("     %s 沿用已保留的原始檔（--keep-raw）" % sid)
+            log("     %s reusing the kept original (--keep-raw)" % sid)
         else:
             for (afmt, aclient) in attempts:
                 tag = aclient or "default"
                 raw, err = fetch_raw(seg, cookies, afmt, aclient)
                 if not raw:
-                    log("     %s [%s] 下載失敗" % (sid, tag))
+                    log("     %s [%s] download failed" % (sid, tag))
                     continue
                 bad = check_duration(probe_seconds(raw), seg.get("seconds"))
                 if not bad:
@@ -549,7 +590,7 @@ def main():
                         caption=args.link_caption)
                     overlays.append((btn, None, "x=W-w:y=0"))
                 except Exception as exc:
-                    log("      %s 連結按鈕失敗，改為不疊：%s" % (sid, exc))
+                    log("      %s link button failed, skipping the overlay: %s" % (sid, exc))
                     btn_w = btn_h = 0
 
             # 倒數：QR 按鈕下方顯示這支影片的剩餘播放時間。
@@ -567,7 +608,7 @@ def main():
                                                   len(segs))
                         strip = os.path.join(RAW_DIR, "cd-%s.png" % sid)
                         bw, bh = wmtext.render_countdown_strip(
-                            prefix, total, strip)
+                            prefix, total, strip, pre=CD_PRE, suf=CD_SUF)
                         # 用時間裁切挑出當下那一格（跟跑馬燈同一套機制）。
                         # 不能用 1 fps 的序列輸入：跟 30 fps 主畫面在 overlay
                         # 裡對不起來，整層會消失而且不會報錯（實測）。
@@ -575,11 +616,11 @@ def main():
                                % (bw, bh, bh))
                         overlays.append((strip, pre,
                                          "x=W-w:y=%d" % btn_h))
-                        log("      %s 倒數長條 %dx%d（%d 秒，從「%s剩餘 %02d:%02d」開始）"
-                            % (sid, bw, bh * int(total), int(total), prefix,
-                               int(total) // 60, int(total) % 60))
+                        log("      %s countdown strip %dx%d (%d s, starts at '%s%s%02d:%02d%s')"
+                            % (sid, bw, bh * int(total), int(total), prefix, CD_PRE,
+                               int(total) // 60, int(total) % 60, CD_SUF))
                 except Exception as exc:
-                    log("      %s 倒數產生失敗，改為不疊：%s" % (sid, exc))
+                    log("      %s countdown failed, skipping the overlay: %s" % (sid, exc))
 
             # 標題列的可視範圍：[原片 logo 讓出的左界, 按鈕的左緣]
             # 左界固定留畫面寬度的 1/7 給原片左上角的 logo（自動判定容易誤判，
@@ -602,22 +643,22 @@ def main():
                             text, strip, tile_gap=MARQUEE_GAP, size=TEXT_SIZE,
                             stroke=TEXT_STROKE)
                         if not res:
-                            raise RuntimeError("跑馬燈長條圖產生失敗")
+                            raise RuntimeError("marquee strip generation failed")
                         sw, sh, tile = res
                         cw = min(span, sw)
                         pre = ("crop=w=%d:h=%d:x='mod(t*%d,%d)':y=0"
                                % (cw, sh, MARQUEE_SPEED, tile))
                         overlays.append((strip, pre,
                                          "x=%d:y=%d" % (band_left, MARQUEE_Y)))
-                        log("      %s 標題 %dpx > 可用 %dpx，跑馬燈（視窗 "
-                            "%d~%d，裁切寬 %d）"
+                        log("      %s title %dpx > %dpx available, marquee (window "
+                            "%d~%d, crop width %d)"
                             % (sid, ow, span, band_left, band_right, cw))
                     else:
                         overlays.append((label, None,
                                          "x=%d-w:y=%d"
                                          % (band_right, OVERLAY_Y)))
                 except Exception as exc:
-                    log("      %s 浮水印失敗，改為不疊：%s" % (sid, exc))
+                    log("      %s watermark failed, skipping the overlay: %s" % (sid, exc))
             nerr = normalize(raw, out, w, h, args.venc, args.abr, args.fps,
                              overlays, args.max_seconds,
                              fade_sec=args.audio_fade)
@@ -628,7 +669,7 @@ def main():
                     pass
         if nerr:
             fail += 1
-            log("FAIL %-13s 正規化失敗：%s" % (sid, nerr))
+            log("FAIL %-13s normalization failed: %s" % (sid, nerr))
             save_json(MANIFEST, manifest)
             continue
 
@@ -647,9 +688,9 @@ def main():
             mrec["black_tail_len"] = round((seconds or 0) - cut, 3)
             if not args.no_auto_trim:
                 mrec["outpoint"] = round(cut, 3)
-            log("WARN %-13s 片尾黑畫面 %.1fs（起點 %.2fs）%s"
+            log("WARN %-13s black tail %.1fs (starts %.2fs)%s"
                 % (sid, mrec["black_tail_len"], cut,
-                   "" if args.no_auto_trim else " → 已截掉"))
+                   "" if args.no_auto_trim else " -> trimmed"))
         manifest[sid] = mrec
         save_json(MANIFEST, manifest)
         log("OK   %-13s %.1fs / %s  (%.1fs)"
@@ -666,23 +707,23 @@ def main():
         else:
             if "://" not in src and not src.startswith("www."):
                 src = "https://www.youtube.com/watch?v=" + src
-            log("抓取過場影片…")
+            log("fetching the transition video...")
             raw, err = fetch_raw({"id": TRANSITION_ID, "url": src},
                                  cookies, args.format)
             if not raw:
-                log("過場下載失敗：%s" % err)
+                log("transition download failed: %s" % err)
         if raw and os.path.exists(raw):
             nerr = normalize(raw, TRANSITION_FILE, w, h, args.venc,
                              args.abr, args.fps, fade_sec=args.audio_fade)
             if nerr:
-                log("過場正規化失敗：%s" % nerr)
+                log("transition normalization failed: %s" % nerr)
             else:
                 if os.path.abspath(raw) != os.path.abspath(TRANSITION_FILE):
                     try:
                         os.remove(raw)
                     except OSError:
                         pass
-                log("過場已就緒：%.1fs" % (probe_seconds(TRANSITION_FILE) or -1))
+                log("transition ready: %.1fs" % (probe_seconds(TRANSITION_FILE) or -1))
 
     # 重新產生離線播出清單：只納入真的在磁碟上、也量得到長度的檔案。
     def transition_for(episode_id, p=0):
@@ -728,7 +769,7 @@ def main():
                 continue
             seconds = m.get("seconds") or probe_seconds(full)
             if not seconds:
-                log("跳過 %s：量不到長度" % seg["id"], file=sys.stderr)
+                log("skipping %s: no duration" % seg["id"], file=sys.stderr)
                 continue
             rec = {"id": seg["id"], "type": "file", "path": path,
                    "mode": "copy", "seconds": round(seconds, 3)}
@@ -749,7 +790,7 @@ def main():
         os.rmdir(RAW_DIR)
 
     total = sum(s.get("outpoint") or s["seconds"] for s in out_segs)
-    log("本次下載 OK=%d FAIL=%d；%s 共 %d 段、總長 %.0fs（%.2f 小時）"
+    log("this run: OK=%d FAIL=%d; %s has %d segments, %.0fs total (%.2f h)"
         % (done, fail, os.path.basename(args.out_playlist),
            len(out_segs), total, total / 3600.0))
     return 0 if fail == 0 else 1
