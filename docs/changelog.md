@@ -711,3 +711,56 @@ repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU�
     JS 錯誤 0
     儲存路徑：POST /api/config 改 test.shorts_seconds 90 → 91 → 還原 90，
               每次都回 ok、wrote modes.json、舊版留 .bak
+
+## 控制台全面回歸測試（2026-09-22，.22）
+
+使用者要求「都測過一遍」。這次不只掃 API，也用**真實瀏覽器把每一顆按鈕點過**。
+
+### API 層（18 項）
+
+| 項目 | 結果 |
+|---|---|
+| 不帶 token → 401／帶 token → 200 | OK |
+| POST 缺 `X-Ytpl` → 400（CSRF） | OK |
+| `/api/status` 欄位齊全（now/prefix/lang/proc/mtx/round/content/ready/preview/services/logs） | OK |
+| `/api/config`（modes＋settings）、`/api/schema`、`/api/task` | OK |
+| `/api/probe` 實際解析（臣心報報清單＋ shorts 都 OK） | OK |
+| `/api/lang` zh／en 切換、非法值擋掉 | OK |
+| `/api/config` 寫入 modes → 生效 → 還原（留 .bak） | OK |
+
+### UI 層（用瀏覽器真的點）
+
+| 動作 | 結果 |
+|---|---|
+| 語言切換 中文 ↔ English | 標題、區塊、狀態列都跟著換 |
+| 「驗證網址」（test 卡片） | `頻道／清單：OK 第一支 Ig3vtqtXowY（臣心報報#52）｜shorts：OK` |
+| 「只掃描來源」＋「停止建置」 | 掃 news 55 支時按停止 → `sent SIGTERM to pid …×3`、按鈕狀態正確切換 |
+| 「只建置」 | 跑完整條鏈：落地 → 過場 → 部署 → concat → `6 segments, 1080s` |
+| 「儲存這個模式」 | 改 `shorts_seconds` 90→91→90，兩次都回 ok |
+| 「儲存原始 JSON」 | 回 `wrote modes.json`（也證明 textarea 有被填內容） |
+| 服務「重啟」（playout） | pid 由 50106 → 53690 |
+| 服務「啟動」（refresh） | `bootstrap gui/501 …`、狀態由 not loaded → running |
+| 直播金鑰「寫入」 | 合法值寫入成功；`bad key with spaces!` 被擋（格式檢查） |
+| 「▶ 看直播畫面」 | 新分頁開 `192.168.31.22:8888/live/main/` |
+
+### 這輪又修掉兩個
+
+1. **`loadCfg()` 多一次 `.then(r => r.json())`**（見上一節）：整個設定介面消失。
+2. **「重建 concat 清單」「檢查缺哪些檔案」寫死正式版**：它們固定用
+   `playlist-local.json`／`playlist.json`，所以在只建過 `test` 的機器上直接爆
+   `FileNotFoundError` 並把 Python traceback 倒進進度框。改成用**目前選的模式**
+   （`playlist-<mode>-local.json` → `concat-<mode>.txt`），而且檔案不存在時回
+   一句清楚的話（`playlist-news-local.json 不存在；這個模式要先建置過`）而不是 traceback。
+
+### 一個還沒動的發現：每次建置都重新編碼全部影片
+
+【實測】只建置 test 時，log 出現 `list has 3 segments, 0 present, 3 missing` ——
+明明 `media/test/` 裡三支都在，還是全部重編。原因是落地一律寫到
+`/tmp/stage-ep-<mode>/`（暫存 → 驗證 → mv 的原子置換設計），而「已完成就跳過」是看
+**暫存目錄**有沒有那個檔案；部署後暫存目錄被搬空，所以下一輪又是 0 present。
+
+影響：`test`（3 支 × 180 秒）大約 1 分鐘，可接受；**`news`（55 支全長）每次重建都要好幾小時**。
+
+要修的話方向是「記下每支的編碼參數指紋（畫質／浮水印／長度上限…），沒變就跳過，
+`--force` 才全部重做」—— 這會改變建置語意（目前「存檔後重新建置就會套用新設定」是
+靠每次重編在保證的），所以先提出來等決定，沒有直接動。
