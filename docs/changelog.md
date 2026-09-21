@@ -614,3 +614,25 @@ brew 是他裝的）。`/opt/homebrew/bin` 可以寫入，所以手動放執行�
 
 用 symlink 而不是複製，是為了讓 pip 升級直接生效（複製的話 `/opt/homebrew/bin` 那份會變舊）。
 要改成 brew 管理，就得跑上面那個 `chown`（等於把 brew 收給 `yangqingyuan`）。
+
+#### 後續：brew 處理好了，三個套件改回 brew 管理
+
+使用者把 `/opt/homebrew` 收給 `yangqingyuan`（`brew 7.0.6`，可寫）。之後：
+
+    brew install yt-dlp mediamtx pillow     # INSTALL_RC=1：link 步驟被既有檔案擋住
+    brew link --overwrite yt-dlp mediamtx   # LINK_RC=0
+    python3 -m pip uninstall -y --break-system-packages yt-dlp pillow
+
+【實測】最終來源：
+
+| 工具 | 來源 |
+|---|---|
+| yt-dlp | `/opt/homebrew/Cellar/yt-dlp/2026.8.19_1/bin/yt-dlp` |
+| mediamtx | `/opt/homebrew/Cellar/mediamtx/1.21.1/bin/mediamtx`（重啟後確認跑在這份） |
+| Pillow | `/opt/homebrew/lib/python3.14/site-packages/PIL` |
+| qrcode | 仍是 pip --user（**brew 沒有這個 formula**，`brew info qrcode` 會建議 qrencode） |
+
+**教訓（踩過）**：第一次是先刪掉 `/opt/homebrew/bin` 裡的檔案才跑 `brew install`，
+結果 install 失敗 → 那兩個指令一度消失（mediamtx 還靠已刪除的 inode 在跑，重啟就會掛）。
+正確順序是「**先 install（Cellar 裝好就好）、再 `brew link --overwrite`**」——
+link 之前原本的檔案都還在，install 失敗也不會斷。
