@@ -83,6 +83,11 @@ def passes_for(cfg, f):
     n = 0
     if os.path.exists(f["mother"]):
         n = len(json.load(open(f["mother"], encoding="utf-8"))["segments"])
+    if n <= 1:
+        # 只有一支影片時不要跑多趟：那會變成同一支播 5 次（實測 .22 的 news：
+        # 母清單 1 支 → passes=5 → 一輪是同一支影片 ×5 ＋ 5 段不同過場，
+        # 看起來就像「只有一支影片、過場幾乎看不到」）。
+        return 1
     if pool and n:
         return max(1, min(5, -(-pool // n)))
     return 1
