@@ -25,7 +25,7 @@
 | `install.sh` | **安裝／升級**：複製程式、代入 plist 佔位符、產生 `mediamtx.yml`、註冊 launchd 服務 |
 | `src/settings.json` | 通用設定：畫質、fps、位元率、淡化秒數、浮水印與跑馬燈、黑尾門檻。程式讀它當**預設值**，命令列可覆寫 |
 | `src/modes.json` | 播出模式定義：各模式的來源頻道、長度上限、shorts 池、重新掃描頻率 |
-| `src/settings.json` 的 `ui.lang` | 語言：`zh`／`en`／`both`，同時影響後台介面與畫面字樣 |
+| `src/settings.json` 的 `ui.lang` | 語言：`zh`／`en`（後台右上角可切換），同時影響後台介面與畫面字樣 |
 | `src/playlist.example.json` | 母清單**範例**（3 筆假 id）。實際的 `playlist.json` 由 `build_playlist.py` 產生，已列入 `.gitignore` |
 | `mediamtx.example.yml` | MediaMTX 範例設定。刻意用**路徑白名單**（只開 `live/main`），不是 MediaMTX 預設的全開 |
 
@@ -266,8 +266,8 @@ LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Lib
 | 區塊 | 內容 |
 |---|---|
 | `media` | `target`（720／1080／480）、`fps`、`venc`、`abr`、`audio_fade`（換片淡入淡出秒數）、`max_seconds` |
-| `overlay` | `date_label`、位置（`overlay_y`／`overlay_margin`／`band_left`）、跑馬燈（`marquee_speed`／`marquee_gap`）、按鈕（`link_button`／`link_caption`）、`countdown`、`transition_caption`。**每個字樣都有一個 `_en` 對應值**（例如 `date_label_en`），`both` 時兩個一起顯示 |
-| `ui` | `lang`：`zh`（全中文）／`en`（全英文）／`both`（雙語）。後台介面與畫面字樣都看這個 |
+| `overlay` | `date_label`、位置（`overlay_y`／`overlay_margin`／`band_left`）、跑馬燈（`marquee_speed`／`marquee_gap`）、按鈕（`link_button`／`link_caption`）、`countdown`、`transition_caption`。**每個字樣都有一個 `_en` 對應值**（例如 `date_label_en`），`ui.lang=en` 時用那一組 |
+| `ui` | `lang`：`zh`（中文）／`en`（英文）。後台介面與畫面字樣都看這個，**一次只顯示一種**；控制台右上角的「中文／English」就是改它 |
 | `content` | `black_tail_min`（片尾黑畫面幾秒算黑尾） |
 
 要改「播什麼」請改 `modes.json`，不要在 `settings.json` 裡塞來源資訊 —— 兩份真值會互相打架。

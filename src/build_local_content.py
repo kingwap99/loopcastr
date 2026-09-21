@@ -82,27 +82,14 @@ BLACK_TAIL_MIN = float(cfg("content", "black_tail_min", 5.0))   # 片尾黑畫�
 BLACK_TAIL_SLACK = float(cfg("content", "black_tail_slack", 2.5))  # 黑尾結束點要落在片尾幾秒內
 
 # ── 語言（後台介面與畫面上的字樣）──────────────────────────────────
-# zh＝全中文、en＝全英文、both＝雙語。畫面空間有限，所以雙語一律用「／」串起來，
-# 共用的開頭符號（▶）只留一個，冒號也只留最後一個。
-UI_LANG = str(cfg("ui", "lang", "both")).strip().lower()
+# zh＝中文、en＝英文。一次只顯示一種語言（後台右上角可以切換）。
+UI_LANG = str(cfg("ui", "lang", "zh")).strip().lower()
 
 
 def L(zh, en):
     """依 UI_LANG 挑字串。"""
     zh, en = (zh or ""), (en or "")
-    if UI_LANG == "en":
-        return en or zh
-    if UI_LANG == "zh":
-        return zh or en
-    z, e = zh.strip(), en.strip()
-    if not z or not e:
-        return z or e
-    colon = z.endswith(("：", ":")) or e.endswith(("：", ":"))
-    z, e = z.rstrip("：: 　"), e.rstrip("：: 　")
-    for sym in ("▶", "►"):
-        if z.startswith(sym) and e.startswith(sym):
-            e = e[len(sym):].strip()
-    return "%s／%s%s" % (z, e, "：" if colon else "")
+    return (en or zh) if UI_LANG == "en" else (zh or en)
 
 
 DATE_LABEL = L(cfg("overlay", "date_label", "首播日期："),
@@ -111,17 +98,14 @@ LINK_CAPTION = L(cfg("overlay", "link_caption", "▶ 看原片"),
                  cfg("overlay", "link_caption_en", "▶ Watch original"))
 TRANSITION_CAPTION = L(cfg("overlay", "transition_caption", "去追劇"),
                        cfg("overlay", "transition_caption_en", "Watch more"))
-# 倒數的文字：中文放前面（「剩餘 02:57」）、英文放後面（「02:57 left」），
-# 雙語就是「剩餘 02:57 left」。
+# 倒數的文字：中文放前面（「剩餘 02:57」）、英文放後面（「02:57 left」）。
 _CD_PRE, _CD_SUF = cfg("overlay", "countdown_prefix", "剩餘 "), cfg("overlay", "countdown_suffix", "")
 _CD_PRE_EN = cfg("overlay", "countdown_prefix_en", "")
 _CD_SUF_EN = cfg("overlay", "countdown_suffix_en", " left")
-if UI_LANG == "zh":
-    CD_PRE, CD_SUF = _CD_PRE, _CD_SUF
-elif UI_LANG == "en":
+if UI_LANG == "en":
     CD_PRE, CD_SUF = _CD_PRE_EN, _CD_SUF_EN
 else:
-    CD_PRE, CD_SUF = _CD_PRE, _CD_SUF_EN
+    CD_PRE, CD_SUF = _CD_PRE, _CD_SUF
 AUDIO_FADE = float(cfg("media", "audio_fade", 2.5))       # 開頭淡入／結尾淡出幾秒
 OVERLAY_Y = int(cfg("overlay", "overlay_y", 40))          # 浮水印距離畫面頂端
 MARQUEE_Y = OVERLAY_Y - 30                                # 跑馬燈再往上位移半行
@@ -448,7 +432,7 @@ def main():
                     default=not bool(cfg("overlay", "countdown", True)),
                     help="do not show the remaining-time countdown under the QR")
     ap.add_argument("--link-caption", default=LINK_CAPTION,
-                    help="caption on the episode link button (zh/en/both per ui.lang)")
+                    help="caption on the episode link button (picked by ui.lang)")
     ap.add_argument("--band-left", type=int, default=int(cfg("overlay", "band_left", 0)),
                     help="marquee left bound in pixels (0 = use 1/7 of the width)."
                          "that space is reserved for the original video's top-left logo; use a larger value for more")

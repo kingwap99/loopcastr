@@ -1,8 +1,8 @@
 {
   "_comment": "ytpl 通用設定。程式與 WebUI 都讀這一份當預設值；命令列參數可以逐次覆寫。要改「播什麼」（來源頻道、最多幾支、長度上限）請改 modes.json，這裡只管編碼與版面。",
   "ui": {
-    "_comment": "lang: zh＝全中文、en＝全英文、both＝雙語。影響後台介面與畫面上的字樣。",
-    "lang": "both"
+    "_comment": "lang: zh＝中文、en＝英文。影響後台介面與畫面上的字樣（一次只顯示一種）。",
+    "lang": "zh"
   },
   "media": {
     "target": "720",

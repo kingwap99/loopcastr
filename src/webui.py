@@ -196,8 +196,8 @@ SETTINGS_SCHEMA = [
     # 「預設值」是 settings.json 沒有這個 key 時表單要顯示什麼，也是程式的內建預設
     # （兩邊必須一致，否則表單會顯示一個跟實際行為不同的數字）。
     ("ui", "語言", [
-        ("lang", "介面與畫面語言", "choice", ["zh", "en", "both"], None,
-         "zh＝全中文、en＝全英文、both＝雙語（畫面字樣用「／」串起來）", "both"),
+        ("lang", "介面與畫面語言", "choice", ["zh", "en"], None,
+         "後台右上角的切換鈕就是改這個；畫面字樣（首播日期、QR 說明）也跟著換", "zh"),
     ]),
     ("media", "畫質與流量", [
         ("target", "解析度", "choice", ["1080", "720", "480"], None,
@@ -225,7 +225,7 @@ SETTINGS_SCHEMA = [
         ("date_label", "日期前綴", "text", None, None,
          "浮水印上「首播日期：」那段文字，換語系改這裡", "首播日期："),
         ("date_label_en", "日期前綴（英文）", "text", None, None,
-         "en 模式只用這個；both 模式兩個一起顯示", "First aired: "),
+         "ui.lang=en 時用這一個", "First aired: "),
         ("overlay_y", "浮水印距頂端（px）", "int", None, (0, 400), "", 40),
         ("overlay_margin", "左右邊界（px）", "int", None, (0, 400), "", 40),
         ("band_left", "跑馬燈左界（px）", "int", None, (0, 640),
@@ -245,7 +245,7 @@ SETTINGS_SCHEMA = [
         ("countdown_prefix", "倒數前綴（中文）", "text", None, None,
          "中文放在秒數前面（剩餘 02:57）", "剩餘 "),
         ("countdown_suffix_en", "倒數後綴（英文）", "text", None, None,
-         "英文放在秒數後面（02:57 left）；both 模式＝中文前綴 ＋ 英文後綴", " left"),
+         "英文放在秒數後面（02:57 left）", " left"),
         ("transition_caption", "按鈕文字（過場）", "text", None, None,
          "過場的按鈕說明", "去追劇"),
         ("transition_caption_en", "按鈕文字（過場，英文）", "text", None, None, "", "Watch more"),
@@ -422,6 +422,7 @@ def status(api, path_name):
     return {
         "now": time.strftime("%Y-%m-%d %H:%M:%S"),
         "prefix": PREFIX,
+        "lang": ui_lang(),
         "proc": procs(),
         "mtx": mtx(api, path_name),
         "preview": hls_preview(path_name),
@@ -1077,6 +1078,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"error": "寫入失敗：%s" % exc})
             return self._send(200, {"ok": True, "bytes": len(key),
                                     "note": "要重啟 publish 服務才會生效"})
+        if path == "/api/lang":
+            lang = (body.get("lang") or "").strip().lower()
+            if lang not in ("zh", "en"):
+                return self._send(400, {"error": "語系只能是 zh 或 en"})
+            cfg = read_json(SETTINGS, {}) or {}
+            cfg.setdefault("ui", {})["lang"] = lang
+            try:
+                write_json(SETTINGS, cfg)
+            except OSError as exc:
+                return self._send(500, {"error": "寫入失敗：%s" % exc})
+            return self._send(200, {"ok": True, "lang": lang})
         return self._send(404, {"error": "not found"})
 
 
@@ -1177,6 +1189,7 @@ UI_TEXT = {
     "儲存這個模式": "Save this mode",
     "儲存這一段": "Save this section",
     "儲存原始 JSON": "Save raw JSON",
+    "▶ 看直播畫面": "▶ Live preview",
     "儲存": "Save",
     "寫入": "Write",
     "驗證網址": "Check URLs",
@@ -1194,6 +1207,7 @@ UI_TEXT = {
     "只收首播時間在 N 小時內的影片（0＝不限；先用上面的支數取前 N 支再過濾）":
         "keep only videos first aired within N hours (0 = no limit; applied after the video limit)",
     "只播幾小時內首播的（0＝不限）": "only videos first aired within N hours (0 = no limit)",
+    "語系只能是 zh 或 en": "the language must be zh or en",
     "新聞模式": "News mode",
     "（modes.json 裡沒有可編輯的模式）": "(no editable modes in modes.json)",
     # ── 狀態與訊息
@@ -1400,46 +1414,27 @@ UI_TEXT = {
 
 def ui_lang():
     cfg = read_json(SETTINGS, {}) or {}
-    return str((cfg.get("ui") or {}).get("lang", "both")).strip().lower()
+    return str((cfg.get("ui") or {}).get("lang", "zh")).strip().lower()
 
 
 def T(zh, lang=None):
-    """中文原文 -> 依語系挑字串。both 用「／」串起來（冒號只留最後一個）。"""
+    """中文原文 -> 依語系挑字串。一次只顯示一種語言（zh／en 切換）。"""
     lang = lang or ui_lang()
     en = UI_TEXT.get(zh)
     if not en:
         return zh
-    if lang == "en":
-        return en
-    if lang == "zh":
-        return zh
-    z, e = zh.strip(), en.strip()
-    colon = z.endswith(("：", ":")) or e.endswith(("：", ":"))
-    # 英文那半段的 %s 改成位置參數：雙語模板會有兩組 %s，順序替換會把參數吃掉兩次。
-    k = [0]
-
-    def _num(_m):
-        k[0] += 1
-        return "%%%d$s" % k[0]
-
-    return "%s／%s%s" % (z.rstrip("：: 　"),
-                         re.sub("%s", _num, e).rstrip("：: 　"),
-                         "：" if colon else "")
+    return en if lang == "en" else zh
 
 
 _LOC_RE = None
 
 
 def localize(text, lang=None):
-    """把整份文字裡的中文原文換成該語系的字串。
-
-    用「一次掃描、最長優先」的替換：逐條 replace 的話，雙語模式下換出來的結果
-    裡還留著中文原文，會被後面的短字串再咬一次（實測：「%s（%s 秒後）」會變成
-    「%s（%s秒／s後）／…」）。
-    """
+    """中文原文換成英文。用「一次掃描、最長優先」的替換，避免短字串先咬到長字串
+    （實測：「%s（%s 秒後）」會被「 秒」先咬掉一半）。"""
     global _LOC_RE
     lang = lang or ui_lang()
-    if lang == "zh":
+    if lang != "en":
         return text
     if _LOC_RE is None:
         keys = sorted(UI_TEXT, key=len, reverse=True)
@@ -1491,6 +1486,9 @@ body{font:14px/1.6 -apple-system,Helvetica,Arial,sans-serif;margin:0;padding:20p
 h1{font-size:20px;margin:0 0 4px}
 h1 a{color:inherit;text-decoration:none;border-bottom:1px dotted #8888}
 h1 a:hover{border-bottom-style:solid}
+#langsw{float:right;font-size:13px}
+#langsw a{margin-left:10px;color:inherit;opacity:.55;text-decoration:none}
+#langsw a.on{opacity:1;font-weight:700;border-bottom:2px solid currentColor}
 h2{font-size:15px;margin:26px 0 8px;padding-bottom:4px;border-bottom:1px solid #8884}
 table{border-collapse:collapse;width:100%}
 td,th{text-align:left;padding:3px 8px 3px 0;vertical-align:top}
@@ -1524,6 +1522,7 @@ border:1px solid;line-height:1.5}
 .chip-bad{background:#c001;border-color:#c006}
 button.primary{font-weight:700;border-color:#0a0}
 </style></head><body>
+<div id="langsw"></div>
 <h1><a href="__REPO_URL__" target="_blank" rel="noopener" title="GitHub：__PROJECT__">__PROJECT__</a> 控制台</h1>
 <div class="dim" id="head"></div>
 <div class="row" id="quick"></div>
@@ -1581,8 +1580,8 @@ button.primary{font-weight:700;border-color:#0a0}
 按「啟動」會把資料目錄裡的 plist 複製到 ~/Library/LaunchAgents 再 bootstrap。
 系統 domain 的服務需要非互動 sudo；失敗時會顯示要加哪一條 sudoers。</p>
 <script>
-// 組合字串用：fmt("已儲存 %s：%s", a, b)。整句才翻得乾淨（雙語時不會出現半中半英）。
-// 雙語模板會混用「順序 %s」與「位置 %1$s」（後者是英文那半段，避免參數被吃掉兩次）。
+// 組合字串用：fmt("已儲存 %s：%s", a, b)。整句才翻得乾淨。
+// 也支援位置參數（%1$s），翻譯時要調換順序才不會卡住。
 function fmt(tpl, a, b, c){
   var all = [a, b, c];
   var i = 0;
@@ -1621,7 +1620,29 @@ function renderQuick(s){
   LAST_LIVE_URL = url;
   html("quick", url
     ? ('<a class="btn live" href="' + esc(url) + '" target="_blank" rel="noopener">▶ 看直播畫面</a>')
-    : ('<span class="dim">沒有直播畫面預覽：' + esc(p.why || "") + "</span>"));
+    : ('<span class="dim">' + fmt("沒有直播畫面預覽：%s", esc(p.why || "")) + "</span>"));
+}
+
+// 語系切換：兩顆永遠都是「中文」「English」，切到哪個就寫進 settings.json 再重載。
+// 這一段由 JS 產生（不是伺服器端的字串），所以不會被語系替換影響。
+function renderLang(s){
+  var d = document.getElementById("langsw");
+  if (!d || d.getAttribute("data-lang") === s.lang) { return; }
+  d.setAttribute("data-lang", s.lang);
+  d.innerHTML = "";
+  [["zh", "中文"], ["en", "English"]].forEach(function(pair){
+    var a = document.createElement("a");
+    a.href = "#";
+    a.textContent = pair[1];
+    a.className = (s.lang === pair[0]) ? "on" : "";
+    a.onclick = function(){
+      post("/api/lang", { lang: pair[0] }).then(function(r){
+        if (r.ok) { location.reload(); } else { msg(r.error || ""); }
+      });
+      return false;
+    };
+    d.appendChild(a);
+  });
 }
 
 // 服務狀態：分清楚「沒載入」「載入了沒在跑」「在跑」。沒載入的可以按「啟動」。
@@ -1669,6 +1690,7 @@ function refresh(){
     STAT_FAIL = 0;
     text("head", s.now + "　目錄 " + s.prefix);
     renderQuick(s);
+    renderLang(s);
     renderServices(s);
     var selEl = document.getElementById("mode");
     var selMode = (selEl && selEl.value) || "";
