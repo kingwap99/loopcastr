@@ -2,8 +2,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <img src="assets/logo-light.svg" alt="loopcastr" width="340">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg?v=2">
+    <img src="assets/logo-light.svg?v=2" alt="loopcastr" width="340">
   </picture>
 </p>
 
