@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.ytpl.health</string>
+    <string>com.loopcastr.health</string>
 
     <!-- 每 60 秒檢查一次鏈路。YouTube 端受限於 --youtube-every，最多 15 分鐘查一次。 -->
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/python3</string>
-        <string>__HOME__/ytpl/healthcheck.py</string>
+        <string>__HOME__/loopcastr/healthcheck.py</string>
         <string>--check-youtube</string>
         <string>--youtube-every</string>
         <string>900</string>
@@ -36,8 +36,8 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>__HOME__/ytpl/logs/health.log</string>
+    <string>__HOME__/loopcastr/logs/health.log</string>
     <key>StandardErrorPath</key>
-    <string>__HOME__/ytpl/logs/health-err.log</string>
+    <string>__HOME__/loopcastr/logs/health-err.log</string>
 </dict>
 </plist>

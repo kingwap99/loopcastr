@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.ytpl.playout</string>
+    <string>com.loopcastr.playout</string>
 
     <!-- 播出端：單一行程 concat 餵 MediaMTX。實測換片與繞回清單開頭皆 0 縫。 -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>__HOME__/ytpl/playout.sh</string>
+        <string>__HOME__/loopcastr/playout.sh</string>
     </array>
 
     <key>EnvironmentVariables</key>
@@ -17,13 +17,13 @@
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>PLAYLIST</key>
-        <string>__HOME__/ytpl/playlist-local.json</string>
+        <string>__HOME__/loopcastr/playlist-local.json</string>
         <key>LIST</key>
-        <string>__HOME__/ytpl/concat.txt</string>
+        <string>__HOME__/loopcastr/concat.txt</string>
         <key>DEST</key>
         <string>rtmp://127.0.0.1:1935/live/main</string>
         <key>LOG</key>
-        <string>__HOME__/ytpl/logs/playout.log</string>
+        <string>__HOME__/loopcastr/logs/playout.log</string>
     </dict>
 
     <key>RunAtLoad</key>
@@ -38,8 +38,8 @@
     <string>Interactive</string>
 
     <key>StandardOutPath</key>
-    <string>__HOME__/ytpl/logs/playout-stdout.log</string>
+    <string>__HOME__/loopcastr/logs/playout-stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>__HOME__/ytpl/logs/playout-stderr.log</string>
+    <string>__HOME__/loopcastr/logs/playout-stderr.log</string>
 </dict>
 </plist>

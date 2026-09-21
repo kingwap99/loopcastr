@@ -65,7 +65,7 @@ Liquidsoap 並未被排除為**選配引擎**，見 FR-11 與第 13 節 D3。
 | 元件 | 實作 | 角色 |
 |---|---|---|
 | 播放清單 | `playlist.json` | 描述要播什麼、順序、每段長度 |
-| 播放引擎 | `ytpl/relay.py`（Python 3） | 解析來源、排程、換手、看門狗、事件記錄 |
+| 播放引擎 | `loopcastr/relay.py`（Python 3） | 解析來源、排程、換手、看門狗、事件記錄 |
 | 解析器 | `yt-dlp` | 把 watch URL 轉成直連媒體 URL |
 | 本地媒體樞紐 | `MediaMTX` | 接收 RTMP、**提供接管換手（takeover）讓換手零斷點**、提供 HLS 給驗收、提供 HTTP API 給觀測 |
 | 編碼／封裝 | `ffmpeg` | 必要時轉碼或 remux |
@@ -286,8 +286,8 @@ Liquidsoap 並未被排除為**選配引擎**，見 FR-11 與第 13 節 D3。
 | `streamlink` | **不需要**（【實測】`relay.py` 完全沒用到 streamlink） |
 | `mediamtx` | **未安裝**（M1 必須補；見 3.4，它是零斷點換手的必要元件） |
 | `liquidsoap` | 未安裝；`brew install --dry-run` 顯示只裝 1 個 formula、不動既有套件 |
-| 既有檔案 | `~/ytpl/relay.py`（34,828 bytes） |
-| 墊片素材 | `~/ytpl/assets/transition.mp4` **不存在**（FR-05／T-05 需先補上） |
+| 既有檔案 | `~/loopcastr/relay.py`（34,828 bytes） |
+| 墊片素材 | `~/loopcastr/assets/transition.mp4` **不存在**（FR-05／T-05 需先補上） |
 | 對外公網 IP | `<PUBLIC_IP>`（動態；同日稍早為 `<PUBLIC_IP>`） |
 | `launchd` 注意 | 非互動式 shell 的 `PATH` 只有 `/usr/bin:/bin:/usr/sbin:/sbin`，**`/opt/homebrew/bin` 不在裡面**；`launchd` 同理，所有指令必須寫絕對路徑 |
 

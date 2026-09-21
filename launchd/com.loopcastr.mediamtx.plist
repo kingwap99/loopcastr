@@ -10,11 +10,11 @@
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
-	<string>com.ytpl.mediamtx</string>
+	<string>com.loopcastr.mediamtx</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>/opt/homebrew/bin/mediamtx</string>
-		<string>__HOME__/ytpl/mediamtx.yml</string>
+		<string>__HOME__/loopcastr/mediamtx.yml</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -24,12 +24,12 @@
 		<integer>8192</integer>
 	</dict>
 	<key>StandardErrorPath</key>
-	<string>__HOME__/ytpl/logs/mediamtx.err.log</string>
+	<string>__HOME__/loopcastr/logs/mediamtx.err.log</string>
 	<key>StandardOutPath</key>
-	<string>__HOME__/ytpl/logs/mediamtx.out.log</string>
+	<string>__HOME__/loopcastr/logs/mediamtx.out.log</string>
 	<key>UserName</key>
 	<string>__USER__</string>
 	<key>WorkingDirectory</key>
-	<string>__HOME__/ytpl</string>
+	<string>__HOME__/loopcastr</string>
 </dict>
 </plist>

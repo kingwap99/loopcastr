@@ -1,0 +1,18 @@
+<!-- loopcastr 主視覺（深色底）：Infinite Broadcast -->
+<svg viewBox="0 0 340 160" width="100%" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="lcgrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#40E0D0" />
+      <stop offset="100%" stop-color="#6C63FF" />
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="144" height="144" rx="36" fill="#151D35" />
+  <path d="M111 55 A43 43 0 0 0 40 53" fill="none" stroke="url(#lcgrad)" stroke-width="11" stroke-linecap="round" />
+  <path d="M40 53 L40 30 L62 39 Z" fill="#40E0D0" />
+  <path d="M49 105 A43 43 0 0 0 120 107" fill="none" stroke="url(#lcgrad)" stroke-width="11" stroke-linecap="round" />
+  <path d="M120 107 L120 130 L98 121 Z" fill="#6C63FF" />
+  <path d="M69 58 Q69 54 74 57 L101 77 Q106 80 101 83 L74 103 Q69 106 69 100 Z" fill="#FFFFFF" />
+  <text x="170" y="87" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.4" fill="#F8FAFC">loop</text>
+  <text x="238" y="87" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.4" fill="#40E0D0">castr</text>
+  <text x="172" y="111" font-family="Inter,Arial,sans-serif" font-size="9" font-weight="600" letter-spacing="3" fill="#8D9AB8">ALWAYS ON. ALWAYS PLAYING.</text>
+</svg>

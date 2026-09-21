@@ -1,5 +1,5 @@
 #!/bin/bash
-# ytpl 安裝／升級
+# loopcastr 安裝／升級
 #
 # 把 src/ 與 launchd/ 佈署到安裝目錄，並（可選）把 launchd 服務裝起來。
 # plist 內的路徑由 __HOME__／__USER__ 佔位符代入，所以不需要手改任何檔案。
@@ -10,7 +10,7 @@ set -eu
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOME_DIR="$HOME"
 USER_NAME="$(id -un)"
-PREFIX="$HOME/ytpl"
+PREFIX="$HOME/loopcastr"
 SCOPE="daemon"        # daemon | agents
 DO_SERVICES=1
 FORCE_SERVICES=0
@@ -22,7 +22,7 @@ usage() {
   ./install.sh [選項]
 
 選項
-  --prefix DIR       安裝目錄（預設 $HOME/ytpl）
+  --prefix DIR       安裝目錄（預設 $HOME/loopcastr）
   --agents           裝成 LaunchAgent（不需 root，但需要有圖形登入才會跑）
   --no-services      只放檔案，不動 launchd
   --force-services   即使還沒有播出內容，也把服務裝起來
@@ -127,7 +127,7 @@ for f in "$SRC_DIR"/launchd/*.plist; do
 import sys
 src, dst, prefix, home, user, vid = sys.argv[1:7]
 t = open(src, encoding="utf-8").read()
-t = (t.replace("__HOME__/ytpl", prefix).replace("__HOME__", home)
+t = (t.replace("__HOME__/loopcastr", prefix).replace("__HOME__", home)
       .replace("__YT_VIDEO_ID__", vid).replace("__USER__", user))
 open(dst, "w", encoding="utf-8").write(t)
 PYGEN
@@ -141,7 +141,7 @@ if [ "$DRY" = 0 ]; then
   if [ -z "${YT_VIDEO_ID:-}" ]; then
     say "  （未設定 YT_VIDEO_ID：health 的 YouTube 端 is_live 檢查會略過）"
   fi
-  leftover="$(grep -l '__HOME__\|__USER__\|__YT_VIDEO_ID__' "$PREFIX"/com.ytpl.*.plist 2>/dev/null || true)"
+  leftover="$(grep -l '__HOME__\|__USER__\|__YT_VIDEO_ID__' "$PREFIX"/*.plist 2>/dev/null || true)"
   [ -z "$leftover" ] || { say "  ⚠ 仍有未代入的佔位符：$leftover"; exit 4; }
 fi
 
@@ -193,7 +193,7 @@ if [ "$DO_SERVICES" = 1 ]; then
     fi
   fi
   for s in mediamtx playout publish health refresh; do
-    label="com.ytpl.$s"
+    label="com.loopcastr.$s"
     if [ "$SCOPE" = "daemon" ]; then
       run sudo cp -f "$PREFIX/$label.plist" "/Library/LaunchDaemons/$label.plist"
       run sudo chown root:wheel "/Library/LaunchDaemons/$label.plist"
@@ -220,7 +220,7 @@ say "  服務範圍：$SCOPE"
 say "  看狀態：  tail -3 $PREFIX/logs/health.log"
 say "  看告警：  tail -3 $PREFIX/logs/alerts.jsonl"
 if [ "$SCOPE" = "daemon" ]; then
-  say "  重啟播出端：sudo launchctl kickstart -k system/com.ytpl.playout"
+  say "  重啟播出端：sudo launchctl kickstart -k system/com.loopcastr.playout"
 else
-  say "  重啟播出端：launchctl kickstart -k gui/$UID/com.ytpl.playout"
+  say "  重啟播出端：launchctl kickstart -k gui/$UID/com.loopcastr.playout"
 fi

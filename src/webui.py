@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ytpl 本機控制台：狀態、設定、建置動作。
+"""loopcastr 本機控制台：狀態、設定、建置動作。
 
 設計原則
   - 只用標準庫。跟主程式一樣「clone 下來就能跑」，不必先建 venv。
@@ -32,8 +32,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 控制台標題連到專案本身。只有這一份是專案自己的位址，不需要參數化。
-REPO_URL = "https://github.com/kingwap99/ytpl2ytstream"
-PROJECT = "ytpl2ytstream"
+REPO_URL = "https://github.com/kingwap99/loopcastr"
+PROJECT = "loopcastr"
 
 # 程式碼放哪裡（HERE）與資料放哪裡（PREFIX）分開。
 #   安裝後：src/ 會攤平到安裝目錄，兩者相同，一切都在 PREFIX 底下。
@@ -305,8 +305,23 @@ def mtx(api, path_name):
 
 
 # 服務（launchd job）清單。前端不再自己列一份，一律用 /api/status 回傳的。
-SERVICE_LABELS = ["com.ytpl.mediamtx", "com.ytpl.playout", "com.ytpl.publish",
-                  "com.ytpl.health", "com.ytpl.refresh"]
+# label 前綴不寫死：改名前（loopcastr 之前叫 ytpl）的安裝是 com.ytpl.*，
+# 所以看這個目錄裡實際存在的 plist 決定用哪個前綴。
+SERVICE_NAMES = ["mediamtx", "playout", "publish", "health", "refresh"]
+DEFAULT_PREFIX = "com.loopcastr."
+
+
+def service_prefix():
+    for base in (PREFIX, HERE):
+        try:
+            for name in sorted(os.listdir(base)):
+                if name.startswith("com.") and name.endswith(".playout.plist"):
+                    return name[: -len("playout.plist")]
+        except OSError:
+            continue
+    return DEFAULT_PREFIX
+
+
 LAUNCH_AGENTS = os.path.expanduser("~/Library/LaunchAgents")
 
 
@@ -346,7 +361,8 @@ def service_state(label, jobs):
 
 def services():
     jobs = launchctl_jobs()
-    return [service_state(l, jobs) for l in SERVICE_LABELS]
+    prefix = service_prefix()
+    return [service_state(prefix + s, jobs) for s in SERVICE_NAMES]
 
 
 def hls_preview(path_name):
@@ -453,9 +469,9 @@ EDITION = {
 def loaded_edition():
     """播出端「實際載入」的那一版。讀 launchctl 而不是讀檔案：
     編輯過 plist 但沒重啟時，檔案的內容會騙人。"""
-    rc, txt = sh(["launchctl", "print", "gui/%d/com.ytpl.playout" % os.getuid()], timeout=5)
+    rc, txt = sh(["launchctl", "print", "gui/%d/com.loopcastr.playout" % os.getuid()], timeout=5)
     if rc != 0:
-        rc, txt = sh(["sudo", "-n", "launchctl", "print", "system/com.ytpl.playout"], timeout=5)
+        rc, txt = sh(["sudo", "-n", "launchctl", "print", "system/com.loopcastr.playout"], timeout=5)
     out = {"list": "", "playlist": "", "ok": False}
     for line in (txt or "").splitlines():
         s = line.strip()
@@ -946,14 +962,14 @@ def restart_service(label):
                 "how": "launchctl kickstart -k gui/%d/%s" % (os.getuid(), label)}
     return {"ok": False,
             "error": "兩個 domain 都失敗（" + txt.strip()[-200:] + "）",
-            "hint": "system domain 需要非互動 sudo，請在 /etc/sudoers.d/ytpl-webui 加："
+            "hint": "system domain 需要非互動 sudo，請在 /etc/sudoers.d/loopcastr-webui 加："
                     "  <你的帳號> ALL=(root) NOPASSWD: /bin/launchctl kickstart -k system/"
                     + label}
 
 
 # ── HTTP ────────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ytpl-webui"
+    server_version = "loopcastr-webui"
     protocol_version = "HTTP/1.1"
     api = "http://127.0.0.1:9997"
     path_name = "live/main"
@@ -1480,12 +1496,14 @@ PAGE = r"""<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__PROJECT__ 控制台</title>
+<link rel="icon" href="data:image/svg+xml;utf8,<svg viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'><rect x='4' y='4' width='92' height='92' rx='25' fill='%230B1020'/><path d='M74 34 A29 29 0 0 0 25 36' fill='none' stroke='%2340DCCD' stroke-width='8' stroke-linecap='round'/><path d='M25 36 L24 19 L41 26Z' fill='%2340DCCD'/><path d='M26 66 A29 29 0 0 0 75 64' fill='none' stroke='%237567FF' stroke-width='8' stroke-linecap='round'/><path d='M75 64 L76 81 L59 74Z' fill='%237567FF'/><path d='M42 34 L42 66 L68 50Z' fill='%23fff'/></svg>">
 <style>
 :root{color-scheme:light dark}
 body{font:14px/1.6 -apple-system,Helvetica,Arial,sans-serif;margin:0;padding:20px;max-width:1000px}
 h1{font-size:20px;margin:0 0 4px}
 h1 a{color:inherit;text-decoration:none;border-bottom:1px dotted #8888}
 h1 a:hover{border-bottom-style:solid}
+svg.mark{width:24px;height:24px;vertical-align:-5px;margin-right:6px}
 #langsw{float:right;font-size:13px}
 #langsw a{margin-left:10px;color:inherit;opacity:.55;text-decoration:none}
 #langsw a.on{opacity:1;font-weight:700;border-bottom:2px solid currentColor}
@@ -1523,7 +1541,7 @@ border:1px solid;line-height:1.5}
 button.primary{font-weight:700;border-color:#0a0}
 </style></head><body>
 <div id="langsw"></div>
-<h1><a href="__REPO_URL__" target="_blank" rel="noopener" title="GitHub：__PROJECT__">__PROJECT__</a> 控制台</h1>
+<h1><svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><path d="M74 34 A29 29 0 0 0 25 36" fill="none" stroke="#40DCCD" stroke-width="8" stroke-linecap="round"/><path d="M25 36 L24 19 L41 26Z" fill="#40DCCD"/><path d="M26 66 A29 29 0 0 0 75 64" fill="none" stroke="#7567FF" stroke-width="8" stroke-linecap="round"/><path d="M75 64 L76 81 L59 74Z" fill="#7567FF"/><path d="M42 34 L42 66 L68 50Z" fill="currentColor"/></svg><a href="__REPO_URL__" target="_blank" rel="noopener" title="GitHub：__PROJECT__">__PROJECT__</a> 控制台</h1>
 <div class="dim" id="head"></div>
 <div class="row" id="quick"></div>
 <div id="msg"></div>
@@ -1650,7 +1668,7 @@ function renderServices(s){
   var d = document.getElementById("svc");
   d.innerHTML = "";
   (s.services || []).forEach(function(x){
-    var name = x.label.replace("com.ytpl.", "");
+    var name = x.label.replace(/^com\.[a-z0-9]+\./, "");   // 前綴可能是舊的（com.ytpl.）
     var wrap = document.createElement("span");
     wrap.style.cssText = "display:inline-block;margin:0 16px 6px 0";
     var b = document.createElement("b");
@@ -1675,7 +1693,7 @@ function renderServices(s){
 }
 
 function svcCall(label, action){
-  var name = label.replace("com.ytpl.", "");
+  var name = label.replace(/^com\.[a-z0-9]+\./, "");
   post("/api/service", { label: label, action: action }).then(function(r){
     msg(r.ok ? fmt(action === "start" ? "已啟動 %s（%s）" : "已重啟 %s（%s）", name, r.how)
              : fmt("%s：%s %s", name, r.error || "", r.hint || ""));

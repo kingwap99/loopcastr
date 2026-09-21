@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""播出鏈路健康檢查。由 launchd 每 60 秒跑一次（com.ytpl.health）。
+"""播出鏈路健康檢查。由 launchd 每 60 秒跑一次（com.loopcastr.health）。
 
 檢查鏈路上「真的有在動」的三個點，而不是只看程序存不存在：
 
@@ -149,6 +149,20 @@ def playout_uptime_days():
     return (time.time() - t) / 86400.0
 
 
+# 服務 label 前綴不寫死：改名前（loopcastr 之前叫 ytpl）的安裝是 com.ytpl.*。
+def service_prefix():
+    try:
+        for name in sorted(os.listdir(HERE)):
+            if name.startswith("com.") and name.endswith(".playout.plist"):
+                return name[: -len("playout.plist")]
+    except OSError:
+        pass
+    return "com.loopcastr."
+
+
+SVC = service_prefix()
+
+
 def kick(label):
     """對指定 launchd 服務做 kickstart -k（等於重啟）。
 
@@ -183,11 +197,11 @@ def heal(obs):
         return []
     acts = []
     if (not obs.get("ready")) or obs.get("readers", 0) < 1:
-        okk, err = kick("com.ytpl.publish")
-        acts.append({"service": "com.ytpl.publish", "ok": okk, "detail": err})
+        okk, err = kick(SVC + "publish")
+        acts.append({"service": SVC + "publish", "ok": okk, "detail": err})
     if (not obs.get("ready")) or obs.get("growth", 0) <= 0:
-        okk, err = kick("com.ytpl.playout")
-        acts.append({"service": "com.ytpl.playout", "ok": okk, "detail": err})
+        okk, err = kick(SVC + "playout")
+        acts.append({"service": SVC + "playout", "ok": okk, "detail": err})
     return acts
 
 
@@ -251,7 +265,7 @@ def tg_send(text):
 def notify(payload):
     status = payload.get("status")
     if status == "DOWN":
-        text = ("🔴 ytpl stream down\n%s\nproblems: %s"
+        text = ("🔴 loopcastr stream down\n%s\nproblems: %s"
                 % (payload.get("wall"),
                    "; ".join(payload.get("problems") or [])))
         obs = payload.get("obs") or {}
@@ -259,7 +273,7 @@ def notify(payload):
             text += "\nobserved: " + ", ".join(
                 "%s=%s" % (k, v) for k, v in obs.items())
     elif status == "UP":
-        text = "🟢 ytpl recovered\n%s" % payload.get("wall")
+        text = "🟢 loopcastr recovered\n%s" % payload.get("wall")
     else:
         text = json.dumps(payload, ensure_ascii=False)
 
@@ -308,7 +322,7 @@ def main():
     args = ap.parse_args()
 
     if args.test_alert:
-        okk, info = tg_send("✅ ytpl alert test (%s)" % time.strftime("%F %T"))
+        okk, info = tg_send("✅ loopcastr alert test (%s)" % time.strftime("%F %T"))
         print("Telegram：%s  %s" % ("OK" if okk else "failed", info))
         return 0 if okk else 1
 
@@ -343,7 +357,7 @@ def main():
     if ok and args.recycle_after_days > 0 and (now - last_recycle) > 86400:
         days = playout_uptime_days()
         if days is not None and days >= args.recycle_after_days:
-            okr, errr = kick("com.ytpl.playout")
+            okr, errr = kick(SVC + "playout")
             record["recycled"] = {"uptime_days": round(days, 2),
                                   "ok": okr, "err": errr}
             last_recycle = now
@@ -362,7 +376,7 @@ def main():
             alerted_down = True
             with open(ALERTS, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(record, ensure_ascii=False) + chr(10))
-            notify({"service": "ytpl", "status": "DOWN",
+            notify({"service": "loopcastr", "status": "DOWN",
                     "wall": record["wall"], "problems": problems, "obs": obs})
         save(STATE, {"ok": False, "last_alert": record.get("last_alert", last_alert),
                      "last_youtube": yt_stamp, "fail_streak": streak,
@@ -374,7 +388,7 @@ def main():
             with open(ALERTS, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(dict(record, recovered=True),
                                     ensure_ascii=False) + chr(10))
-            notify({"service": "ytpl", "status": "UP", "wall": record["wall"]})
+            notify({"service": "loopcastr", "status": "UP", "wall": record["wall"]})
         save(STATE, {"ok": True, "problems": [], "last_youtube": yt_stamp,
                      "fail_streak": 0, "last_heal": int(last_heal),
                      "last_recycle": int(last_recycle),

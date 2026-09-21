@@ -10,7 +10,7 @@
 重來。若在影片播到一半時重啟，觀眾會看到中途被切掉；等到下一個換片點才切，
 體感就是「這支播完之後從頭開始」。
 
-重啟 system domain 的服務需要 root，所以這支建議用 root 跑（跟 com.ytpl.health
+重啟 system domain 的服務需要 root，所以這支建議用 root 跑（跟 com.loopcastr.health
 一樣），才不用把密碼放在環境變數裡；非 root 時會退回用 SUDO_PASS。
 
 用法
@@ -32,7 +32,30 @@ import mode_build as MB
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 YTDLP = "/opt/homebrew/bin/yt-dlp"
-PLAYOUT_PLIST = "/Library/LaunchDaemons/com.ytpl.playout.plist"
+# 服務 label 前綴不寫死：改名前（loopcastr 之前叫 ytpl）的安裝是 com.ytpl.*，
+# 所以看這個目錄裡實際的 plist 決定。plist 的位置也兩種安裝都找。
+def service_prefix():
+    try:
+        for name in sorted(os.listdir(HERE)):
+            if name.startswith("com.") and name.endswith(".playout.plist"):
+                return name[: -len("playout.plist")]
+    except OSError:
+        pass
+    return "com.loopcastr."
+
+
+SVC = service_prefix()
+
+
+def playout_plist():
+    for base in ("/Library/LaunchDaemons", os.path.expanduser("~/Library/LaunchAgents")):
+        p = os.path.join(base, SVC + "playout.plist")
+        if os.path.exists(p):
+            return p
+    return os.path.join("/Library/LaunchDaemons", SVC + "playout.plist")
+
+
+PLAYOUT_PLIST = playout_plist()
 START_RE = re.compile(
     r"([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})"
     r" (?:start #([0-9]+)|第 ([0-9]+) 次啟動)")
@@ -135,7 +158,7 @@ def next_boundary(local_json):
 
 
 def restart_playout():
-    cmd = ["launchctl", "kickstart", "-k", "system/com.ytpl.playout"]
+    cmd = ["launchctl", "kickstart", "-k", "system/" + SVC + "playout"]
     if os.geteuid() == 0:
         return subprocess.run(cmd, stdin=subprocess.DEVNULL).returncode == 0
     pw = os.environ.get("SUDO_PASS")

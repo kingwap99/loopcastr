@@ -1,4 +1,6 @@
-# ytpl — 把 YouTube 播放清單變成 24/7 不中斷的直播頻道
+# loopcastr — 把 YouTube 播放清單變成 24/7 不中斷的直播頻道
+
+<p align="center"><img src="assets/logo-dark.svg" alt="loopcastr" width="340"></p>
 
 [中文](#中文)｜[English](#english)　　雙語文件，**中文為主**
 
@@ -14,7 +16,7 @@
     playlist.json（YouTube 網址）
          │  build_local_content.py —— 落地、正規化、驗證長度、偵測片尾黑畫面
          ▼
-    media/<id>.mp4 ＋ media/_tr_<id>.mp4（每集專屬過場，QR 指向該集）
+    media/<模式>/<id>.mp4 ＋ media/<模式>/_tr_<id>.mp4（每集專屬過場，QR 指向該集）
          │  make_concat_list.py
          ▼
     concat.txt
@@ -35,14 +37,14 @@
 
     git clone <repo> && cd <repo>
     ./install.sh --dry-run     # 先看它會做什麼
-    ./install.sh               # 裝到 ~/ytpl，並註冊 launchd 服務（需要 sudo）
+    ./install.sh               # 裝到 ~/loopcastr，並註冊 launchd 服務（需要 sudo）
 
 服務**不會**在還沒有播出內容時啟動，避免 launchd 一直重啟一個註定失敗的行程。建內容的順序：
 
-    cd ~/ytpl
+    cd ~/loopcastr
     python3 build_playlist.py --url '<播放清單或頻道網址>' -o playlist.json
     python3 build_local_content.py --playlist playlist.json --target 720
-    python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/ytpl
+    python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
     printf %s '<YouTube 串流金鑰>' > stream.key && chmod 600 stream.key
 
 `install.sh --agents` 可裝成 LaunchAgent（不需要 root，但要有圖形登入才會跑）；`--help` 看全部選項。
@@ -51,17 +53,20 @@
 
 裝好之後，日常操作不必再背指令：
 
-    python3 ~/ytpl/webui.py     # http://127.0.0.1:8787
+    python3 ~/loopcastr/webui.py     # http://127.0.0.1:8787
 
 | 區塊 | 內容 |
 |---|---|
 | 狀態 | 服務行程、MediaMTX ready／讀者數／流量、單輪長度與下次循環時間、concat 缺檔、health 與 alerts |
 | 設定 | 直接編輯 `settings.json` 與 `modes.json`（存檔前驗 JSON，舊版留 `.bak`） |
 | 動作 | 建置／只掃描／建置並切換、重建 concat、檢查缺檔（背景執行並回報進度）、**停止建置**（連子行程一起收，並清掉被中斷的輸出檔） |
-| 服務 | 每個 launchd 服務是「執行中／已載入但沒在跑／沒有載入」；沒載入的可以直接按「啟動」（推上 YouTube 的 `com.ytpl.publish` 就是這一格） |
+| 服務 | 每個 launchd 服務是「執行中／已載入但沒在跑／沒有載入」；沒載入的可以直接按「啟動」（推上 YouTube 的 `com.loopcastr.publish` 就是這一格） |
 
 只用標準庫，不必額外安裝。預設只綁 `127.0.0.1`，要對外開放**必須**帶 token 否則拒絕啟動；
 不以 root 執行、不保管密碼，**stream key 只進不出**。細節見 [操作手冊](docs/manual.md)。
+
+品牌資產（Logo／Icon／配色／標語）在 [`assets/`](assets/)：`icon.svg`、`icon-dark.svg`、
+`logo-dark.svg`、`logo-light.svg`。控制台用 `icon-dark` 當 favicon。
 
 頁面標題的專案名連到 GitHub（另開分頁）；標題下方有一顆「▶ 看直播畫面」，直接開
 MediaMTX 的 HLS 頁（就是播出端真正送出去的那一路）。`mediamtx.yml` 的 `hls` 是 `no`
@@ -99,7 +104,7 @@ MediaMTX 的 HLS 頁（就是播出端真正送出去的那一路）。`mediamtx
 | 項目 | 值 |
 |---|---|
 | 執行環境 | 一台 Apple silicon Mac（測試機為 M1 / 8 GB / macOS 27），用系統內建 Python 即可 |
-| 服務 | com.ytpl.mediamtx / .playout / .publish / .health / .refresh（LaunchDaemon，開機自啟、不需登入） |
+| 服務 | com.loopcastr.mediamtx / .playout / .publish / .health / .refresh（LaunchDaemon，開機自啟、不需登入） |
 | 播出方式 | 單一行程 concat ＋ `-c copy`，換片縫 0 秒 |
 | 開機自啟 | 已實測：重開機後全程無人登入仍自動恢復，中斷約 25 秒 |
 
@@ -149,7 +154,7 @@ and can also relay an external YouTube live stream into your own channel.
     playlist.json (YouTube URLs)
          |  build_local_content.py   download, normalize, verify duration, detect black tails
          v
-    media/<id>.mp4 + media/_tr_<id>.mp4   (per-episode transition; its QR points at that episode)
+    media/<mode>/<id>.mp4 + media/<mode>/_tr_<id>.mp4   (per-episode transition; its QR points at that episode)
          |  make_concat_list.py
          v
     concat.txt
@@ -174,15 +179,15 @@ Design points, each measured on the target machine:
 
     git clone <repo> && cd <repo>
     ./install.sh --dry-run     # see what it would do
-    ./install.sh               # install to ~/ytpl and register launchd services (needs sudo)
+    ./install.sh               # install to ~/loopcastr and register launchd services (needs sudo)
 
 The services deliberately do **not** start until there is content to play, so launchd does not
 restart a process that cannot succeed. To build content:
 
-    cd ~/ytpl
+    cd ~/loopcastr
     python3 build_playlist.py --url '<playlist or channel URL>' -o playlist.json
     python3 build_local_content.py --playlist playlist.json --target 720
-    python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/ytpl
+    python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
     printf %s '<YouTube stream key>' > stream.key && chmod 600 stream.key
 
 `install.sh --agents` installs LaunchAgents instead (no root, but requires a GUI login). See `--help`.
@@ -191,18 +196,22 @@ restart a process that cannot succeed. To build content:
 
 Once installed, day-to-day operation needs no shell commands:
 
-    python3 ~/ytpl/webui.py     # http://127.0.0.1:8787
+    python3 ~/loopcastr/webui.py     # http://127.0.0.1:8787
 
 | Tab | Contents |
 |---|---|
 | Status | processes, MediaMTX ready/readers/traffic, round length and next loop time, missing concat entries, health and alerts |
 | Settings | edit `settings.json` and `modes.json` (JSON is validated; the previous version is kept as `.bak`) |
 | Actions | build / scan only / build and switch, rebuild concat, check for missing files, **stop build** (kills the whole process tree and deletes the interrupted output files); runs in the background with progress |
-| Services | each launchd service as running / loaded but idle / not loaded; a not-loaded one can be started from here (`com.ytpl.publish`, the service that pushes to YouTube, is exactly this case) |
+| Services | each launchd service as running / loaded but idle / not loaded; a not-loaded one can be started from here (`com.loopcastr.publish`, the service that pushes to YouTube, is exactly this case) |
 
 Standard library only, so there is nothing to install. It binds to `127.0.0.1` by default; exposing it
 requires a token or it refuses to start. It never runs as root and never stores passwords, and the
 **stream key is write-only** (the page can set it but will never display it).
+
+Brand assets (logo / icon / colours / tagline) live in [`assets/`](assets/):
+`icon.svg`, `icon-dark.svg`, `logo-dark.svg`, `logo-light.svg`. The console uses
+`icon-dark` as its favicon.
 
 The project name in the page title links to GitHub (opens in a new tab), and the "▶ 看直播畫面"
 button below it opens MediaMTX's HLS page — the stream that is actually being sent out. When
@@ -237,7 +246,7 @@ Change what plays in `modes.json`, not in `settings.json` - two sources of truth
 | Item | Value |
 |---|---|
 | Host | one Apple silicon Mac (test machine: M1 / 8 GB / macOS 27); the system Python is enough |
-| Services | com.ytpl.mediamtx / .playout / .publish / .health / .refresh (LaunchDaemons: start at boot, no login needed) |
+| Services | com.loopcastr.mediamtx / .playout / .publish / .health / .refresh (LaunchDaemons: start at boot, no login needed) |
 | Playout | single-process concat with `-c copy`; 0 second seam at every cut |
 | Boot recovery | measured: after a reboot with nobody logged in, the chain recovered automatically; 25 second interruption |
 

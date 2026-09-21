@@ -1,5 +1,5 @@
 
-# ytpl 操作手冊（manual）
+# loopcastr 操作手冊（manual）
 
 > 本文件為繁體中文。英文說明見 repo 根目錄 [README.md](../README.md) 的 English 一節。
 > This document is in Traditional Chinese; see the English section of [README.md](../README.md).
@@ -55,8 +55,8 @@
 | 路徑 | 角色 |
 |---|---|
 | `src/make_concat_list.py` | 把 `playlist-local.json` 轉成 ffmpeg concat 清單 `concat.txt` |
-| `src/playout.sh` | **播出端**：單一行程 concat 循環播出，推 MediaMTX。由 `com.ytpl.playout` 看管 |
-| `src/yt_publish.sh` | **推流端**：單一長命 ffmpeg 從 MediaMTX 推到 YouTube ingest。由 `com.ytpl.publish` 看管 |
+| `src/playout.sh` | **播出端**：單一行程 concat 循環播出，推 MediaMTX。由 `com.loopcastr.playout` 看管 |
+| `src/yt_publish.sh` | **推流端**：單一長命 ffmpeg 從 MediaMTX 推到 YouTube ingest。由 `com.loopcastr.publish` 看管 |
 | `src/switch_edition.sh` | 切換播出哪一版清單（正式／各模式／測試），並重建清單、改 plist、重啟服務 |
 | `src/relay.py` | 聯播／多來源接力引擎（takeover 零斷點換手、看門狗、來源 URL 生命週期） |
 
@@ -75,11 +75,11 @@
 
 | 路徑 | 角色 |
 |---|---|
-| `launchd/com.ytpl.mediamtx.plist` | 媒體樞紐（含 8192 fd 的 ResourceLimits） |
-| `launchd/com.ytpl.playout.plist` | 播出端 |
-| `launchd/com.ytpl.publish.plist` | 推流端 |
-| `launchd/com.ytpl.health.plist` | 健康監控（以 root 執行，才能 kickstart system domain） |
-| `launchd/com.ytpl.refresh.plist` | 自動重新掃描 |
+| `launchd/com.loopcastr.mediamtx.plist` | 媒體樞紐（含 8192 fd 的 ResourceLimits） |
+| `launchd/com.loopcastr.playout.plist` | 播出端 |
+| `launchd/com.loopcastr.publish.plist` | 推流端 |
+| `launchd/com.loopcastr.health.plist` | 健康監控（以 root 執行，才能 kickstart system domain） |
+| `launchd/com.loopcastr.refresh.plist` | 自動重新掃描 |
 
 ## 為什麼播出端用 concat 而不是接力
 
@@ -112,7 +112,7 @@
 產生 `mediamtx.yml`，並註冊 launchd 服務：
 
     ./install.sh --dry-run     # 先看它會做什麼（不會動任何東西）
-    ./install.sh               # 預設裝到 ~/ytpl，用 LaunchDaemon（需要 sudo）
+    ./install.sh               # 預設裝到 ~/loopcastr，用 LaunchDaemon（需要 sudo）
     ./install.sh --agents      # 裝成 LaunchAgent：不需 root，但要有圖形登入
 
 可以重複執行；已存在的 `mediamtx.yml` 與 `stream.key` 不會被覆蓋。
@@ -121,7 +121,7 @@
 
 驗收（播出中，另開一個終端）：
 
-    python3 ~/ytpl/gapwatch.py http://127.0.0.1:9997 live/main 120
+    python3 ~/loopcastr/gapwatch.py http://127.0.0.1:9997 live/main 120
 
 ## 上線前務必確認
 
@@ -134,9 +134,9 @@
 ### 日常看一眼
 
     ssh <USER>@<TARGET_HOST>
-    launchctl list | grep ytpl          # 該有的服務都在嗎（沒有的話看控制台的「服務」區塊）
-    tail -3 ~/ytpl/logs/health.log      # 全鏈路正常嗎
-    tail -3 ~/ytpl/logs/alerts.jsonl    # 有沒有告警過
+    launchctl list | grep loopcastr          # 該有的服務都在嗎（沒有的話看控制台的「服務」區塊）
+    tail -3 ~/loopcastr/logs/health.log      # 全鏈路正常嗎
+    tail -3 ~/loopcastr/logs/alerts.jsonl    # 有沒有告警過
 
 `health.log` 每 60 秒一行。看到 `OK 全鏈路正常（流量 +N bytes / 6s）` 就是正常，N 大約 2,000,000。
 
@@ -144,8 +144,8 @@
 
 `yt_publish.sh` 只在**啟動時**讀一次金鑰，改了檔案一定要重啟：
 
-    printf %s 新金鑰 > ~/ytpl/stream.key && chmod 600 ~/ytpl/stream.key
-    launchctl kickstart -k gui/$(id -u)/com.ytpl.publish
+    printf %s 新金鑰 > ~/loopcastr/stream.key && chmod 600 ~/loopcastr/stream.key
+    launchctl kickstart -k gui/$(id -u)/com.loopcastr.publish
 
 ### 加新集數
 
@@ -154,7 +154,7 @@
 
 要在命令列做同一件事：
 
-    cd ~/ytpl
+    cd ~/loopcastr
     python3 mode_build.py --mode news --switch     # 掃描＋落地＋過場＋切換
     python3 mode_build.py --mode news --scan-only  # 只重新掃描母清單
 
@@ -163,7 +163,7 @@
 
     python3 build_local_content.py --playlist playlist-news.json --target 720 --keep-raw \
       --media-dir media/news --out-playlist playlist-news-local.json
-    python3 make_concat_list.py playlist-news-local.json -o concat-news.txt --base-dir ~/ytpl
+    python3 make_concat_list.py playlist-news-local.json -o concat-news.txt --base-dir ~/loopcastr
     ./switch_edition.sh news
 
 `build_local_content.py --status` 隨時可以看還缺哪幾支。
@@ -176,6 +176,11 @@
 
 先確認是哪一種安裝，指令的 domain 與路徑都不一樣：
 
+> **改名前安裝的舊機器**：這套系統 2026-09-21 由 `ytpl2ytstream` 改名為 `loopcastr`。
+> 在那之前裝的機器目錄是 `~/ytpl`、服務是 `com.ytpl.*`（指令裡的路徑與 label 都要照舊）。
+> 程式本身兩邊都認（label 前綴是掃目錄裡實際的 plist 決定的），所以更新程式不會壞；
+> 要換成新名字得重新安裝一次（或手動搬目錄與改 label）。
+
 | 安裝方式 | domain | plist 位置 | 要不要 sudo |
 |---|---|---|---|
 | `install.sh --agents` | `gui/$(id -u)` | `~/Library/LaunchAgents/` | 不用 |
@@ -184,13 +189,13 @@
 以 LaunchAgent（gui）為例：
 
     # 停
-    launchctl bootout gui/$(id -u)/com.ytpl.publish
-    launchctl bootout gui/$(id -u)/com.ytpl.playout
+    launchctl bootout gui/$(id -u)/com.loopcastr.publish
+    launchctl bootout gui/$(id -u)/com.loopcastr.playout
     # 起
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ytpl.publish.plist
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ytpl.playout.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.loopcastr.publish.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.loopcastr.playout.plist
     # 重啟（不卸載）
-    launchctl kickstart -k gui/$(id -u)/com.ytpl.playout
+    launchctl kickstart -k gui/$(id -u)/com.loopcastr.playout
 
 LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Library/LaunchDaemons/`，前面加 `sudo`。
 控制台的服務區塊只處理 gui domain（它不以 root 執行），system domain 要自己來。
@@ -201,12 +206,12 @@ LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Lib
 
 不用 ssh、不用背指令的介面。只用標準庫，不必額外安裝任何東西。
 
-    cd ~/ytpl
+    cd ~/loopcastr
     python3 webui.py                 # http://127.0.0.1:8787
     python3 webui.py --port 9000
 
     # 要讓它常駐
-    nohup python3 ~/ytpl/webui.py > ~/ytpl/logs/webui.log 2>&1 &
+    nohup python3 ~/loopcastr/webui.py > ~/loopcastr/logs/webui.log 2>&1 &
 
 區塊（由上而下就是操作順序）：
 
@@ -233,7 +238,7 @@ LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Lib
 
 #### 標題與「看直播畫面」
 
-頁面標題的專案名（`ytpl2ytstream`）連到 GitHub 專案頁，另開分頁。
+頁面標題的專案名（`loopcastr`）連到 GitHub 專案頁，另開分頁。
 標題下面那顆「▶ 看直播畫面」開的是 MediaMTX 的 HLS 頁：
 
     http://<主機>:<hlsAddress 的埠>/<路徑>/      # 本機預設 http://127.0.0.1:8888/live/main/
@@ -246,15 +251,15 @@ LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Lib
 
 - **預設只綁 `127.0.0.1`。** 要對外開放必須提供 token，否則拒絕啟動：
 
-      openssl rand -hex 16 > ~/ytpl/webui-token && chmod 600 ~/ytpl/webui-token
+      openssl rand -hex 16 > ~/loopcastr/webui-token && chmod 600 ~/loopcastr/webui-token
       python3 webui.py --host 0.0.0.0
 
   之後用 `?token=<值>` 或 `X-Ytpl-Token` 標頭存取。
 - **所有寫入都要求自訂標頭 `X-Ytpl: 1`**：跨站表單帶不了這個標頭，等於擋掉 CSRF。
 - **不以 root 執行，也不保管密碼。** 需要重啟 system domain 服務時只試 `sudo -n`（非互動），失敗就顯示要加的 sudoers 白名單，不會把密碼餵進程式：
 
-      # /etc/sudoers.d/ytpl-webui
-      <你的帳號> ALL=(root) NOPASSWD: /bin/launchctl kickstart -k system/com.ytpl.playout
+      # /etc/sudoers.d/loopcastr-webui
+      <你的帳號> ALL=(root) NOPASSWD: /bin/launchctl kickstart -k system/com.loopcastr.playout
 - **stream key 只進不出**：可以寫入，但頁面永遠不會把它顯示出來。
 - 動作只呼叫既有 script（argv 清單、不經 shell）；模式名稱必須存在於 `modes.json`，不接受任意路徑。
 
@@ -276,11 +281,11 @@ LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Lib
 
 | 症狀 | 先看 | 常見原因 |
 |---|---|---|
-| YouTube 沒畫面，但控制台的「看直播畫面」有內容 | `launchctl list` 裡有沒有 `com.ytpl.publish` | **推流服務沒被載入**（金鑰貼好了也沒用，因為沒人去用它）。控制台服務區塊按「啟動」 |
+| YouTube 沒畫面，但控制台的「看直播畫面」有內容 | `launchctl list` 裡有沒有 `com.loopcastr.publish` | **推流服務沒被載入**（金鑰貼好了也沒用，因為沒人去用它）。控制台服務區塊按「啟動」 |
 | 觀眾端黑畫面 | `python3 build_local_content.py --rescan` | 某支影片本身有長黑尾 |
 | 黑畫面但 health 正常 | 對本地 HLS 跑 blackdetect | 內容層問題，傳輸與時間軸都看不出來 |
-| YouTube 沒畫面但本地正常，且 publish 有在跑 | `tail ~/ytpl/logs/publish.log` | 金鑰失效、直播活動結束、或 ingest 被拒 |
-| health 一直 FAIL | `cat ~/ytpl/logs/health-state.json` | 看 `problems` 欄位；連續 3 次會自動重啟對應服務 |
+| YouTube 沒畫面但本地正常，且 publish 有在跑 | `tail ~/loopcastr/logs/publish.log` | 金鑰失效、直播活動結束、或 ingest 被拒 |
+| health 一直 FAIL | `cat ~/loopcastr/logs/health-state.json` | 看 `problems` 欄位；連續 3 次會自動重啟對應服務 |
 
 ### 已知限制
 
@@ -292,14 +297,14 @@ LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Lib
 
 這種安裝的服務在 /Library/LaunchDaemons/，操作要加 sudo，domain 是 system 不是 gui：
 
-    sudo launchctl list | grep ytpl
-    sudo launchctl kickstart -k system/com.ytpl.playout
-    sudo launchctl bootout system/com.ytpl.playout
-    sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.playout.plist
+    sudo launchctl list | grep loopcastr
+    sudo launchctl kickstart -k system/com.loopcastr.playout
+    sudo launchctl bootout system/com.loopcastr.playout
+    sudo launchctl bootstrap system /Library/LaunchDaemons/com.loopcastr.playout.plist
 
 playout、publish、mediamtx 以 <USER> 身分執行；health 以 root 執行，因為只有 root 能對 system domain 做 kickstart（那是自動修復的必要條件）。
 
-改成 LaunchDaemon 安裝時，舊的 LaunchAgent 版本建議先移走（例如 `~/ytpl/launchagents-backup/`），否則兩邊會同時被載入、搶同一條串流。
+改成 LaunchDaemon 安裝時，舊的 LaunchAgent 版本建議先移走（例如 `~/loopcastr/launchagents-backup/`），否則兩邊會同時被載入、搶同一條串流。
 
 ### 循環邊界觀測（loopwatch.py）
 
@@ -450,9 +455,9 @@ QR 內容用短網址 `https://youtu.be/<id>`（比 watch?v= 短，模組少、�
 
 改了過場之後要重建清單並重啟播出端（用控制台的「重建 concat 清單」＋「重啟 playout」也一樣）：
 
-    cd ~/ytpl
-    python3 make_concat_list.py playlist-<模式>-local.json -o concat-<模式>.txt --base-dir ~/ytpl
-    launchctl kickstart -k gui/$(id -u)/com.ytpl.playout     # LaunchDaemon 安裝改成 system/，前面加 sudo
+    cd ~/loopcastr
+    python3 make_concat_list.py playlist-<模式>-local.json -o concat-<模式>.txt --base-dir ~/loopcastr
+    launchctl kickstart -k gui/$(id -u)/com.loopcastr.playout     # LaunchDaemon 安裝改成 system/，前面加 sudo
 
 播出端重啟會**從第一段重新開始**，觀眾端會看到內容跳回開頭。
 
@@ -486,7 +491,7 @@ QR 內容用短網址 `https://youtu.be/<id>`（比 watch?v= 短，模組少、�
 
 ⚠️ **暫存目錄請放 `/tmp`，不要放在 `media/` 底下。** 2026-09-19 實測：寫到 `media/.stage*/` 時，ffmpeg 連續三次在收尾階段停滯（檔案大小不再變動、CPU 0%、moov 沒寫出來、主執行緒停在 `sch_wait`），改寫到 `/tmp` 之後同樣的工作 13 秒就完成。同一時間看到 `mediaanalysisd` 吃到 **111% CPU**，正在重複分析我們一直被重寫的 mp4；`/tmp` 不在 Spotlight 索引範圍內。
 
-對策：把 `~/ytpl` 加進 Spotlight 的隱私清單。這會順便省掉那顆一直在跑的 `mediaanalysisd`（實測累積 346 分鐘 CPU 時間）——多線播出時那些都是白佔的 CPU。
+對策：把 `~/loopcastr` 加進 Spotlight 的隱私清單。這會順便省掉那顆一直在跑的 `mediaanalysisd`（實測累積 346 分鐘 CPU 時間）——多線播出時那些都是白佔的 CPU。
 
 另外，若單次建置中途卡住，**不加 `--force` 重跑就有續傳效果**：要不要處理是以「輸出目錄裡有沒有這個檔案」判斷的，已完成的那幾支會自動跳過，只補沒完成的那一支。
 
@@ -508,8 +513,8 @@ QR 內容用短網址 `https://youtu.be/<id>`（比 watch?v= 短，模組少、�
 sudo launchctl limit maxfiles 8192 unlimited
 # mediamtx plist 加上：
 #   SoftResourceLimits / HardResourceLimits → NumberOfFiles = 8192
-sudo launchctl bootout system/com.ytpl.mediamtx
-sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.mediamtx.plist
+sudo launchctl bootout system/com.loopcastr.mediamtx
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.loopcastr.mediamtx.plist
 ```
 
 實測驗證（2026-09-19 06:47–06:50）：
@@ -558,7 +563,7 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.mediamtx.plist
 
 重建完成後**等到下一個換片點**才重啟播出端。播出端是單一行程 concat，重啟就是從第一段重來；若在影片播到一半時重啟，觀眾會看到中途被切掉，等到換片點才切，體感就是規格說的「再下一支影片就從頭開始輸播」。換片點是用「開播時間 ＋ 各段累加長度」推算的（跟 `loopwatch.py` 同一套）。
 
-重啟 system domain 的服務需要 root，所以這支要用 root 跑（跟 `com.ytpl.health` 同一個理由）；非 root 時會退回用 `SUDO_PASS`。
+重啟 system domain 的服務需要 root，所以這支要用 root 跑（跟 `com.loopcastr.health` 同一個理由）；非 root 時會退回用 `SUDO_PASS`。
 
 #### 已知取捨
 
@@ -573,7 +578,7 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.mediamtx.plist
 
 ### 服務：先確認「有沒有被載入」
 
-要推上 YouTube 一定要有 `com.ytpl.publish`。沒有它，畫面只到 MediaMTX ——
+要推上 YouTube 一定要有 `com.loopcastr.publish`。沒有它，畫面只到 MediaMTX ——
 控制台的「看直播畫面」看得到內容、但 YouTube 端是黑的，因為根本沒有東西連上 YouTube ingest。
 
 控制台最下面的「服務」區塊分三種狀態：
@@ -582,20 +587,20 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.mediamtx.plist
 |---|---|---|
 | 執行中 pid N | launchd 有這個 job，行程也在 | 重啟 |
 | 已載入（沒在跑） | job 在，行程被 KeepAlive 拉起來中 | 重啟 |
-| 沒有載入 | launchd 根本沒有這個 job | **啟動**：把 `~/ytpl/<label>.plist` 複製到 `~/Library/LaunchAgents` 再 `launchctl bootstrap` |
+| 沒有載入 | launchd 根本沒有這個 job | **啟動**：把 `~/loopcastr/<label>.plist` 複製到 `~/Library/LaunchAgents` 再 `launchctl bootstrap` |
 
 「沒有載入」是資料目錄裡有 plist、但沒有裝進 launchd 的狀態（例如只裝了三個服務的精簡安裝）。
 要自己確認：
 
-    launchctl list | grep ytpl
+    launchctl list | grep loopcastr
 
-`com.ytpl.health` 與 `com.ytpl.refresh` 原本是設計成系統 domain 的服務
+`com.loopcastr.health` 與 `com.loopcastr.refresh` 原本是設計成系統 domain 的服務
 （要 root 才能重啟播出端），控制台不以 root 執行，這兩個要自己來：
 
-    sudo cp ~/ytpl/com.ytpl.health.plist /Library/LaunchDaemons/
-    sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.health.plist
+    sudo cp ~/loopcastr/com.loopcastr.health.plist /Library/LaunchDaemons/
+    sudo launchctl bootstrap system /Library/LaunchDaemons/com.loopcastr.health.plist
 
 換過 stream key 之後要重啟 publish 才會生效（`yt_publish.sh` 啟動時讀一次金鑰檔）：
 按服務區塊的「重啟 publish」，或
 
-    launchctl kickstart -k gui/$(id -u)/com.ytpl.publish
+    launchctl kickstart -k gui/$(id -u)/com.loopcastr.publish

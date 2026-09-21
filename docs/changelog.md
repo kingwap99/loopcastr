@@ -18,11 +18,11 @@
 | `ffmpeg 9.0.1` | OK，**且有 libx264／libx265／h264_videotoolbox**（先前「沒有 libx264」的說法是錯的） |
 | `yt-dlp 2026.08.19` | OK |
 | `node v26.8.2`／`python3 3.14.7` | OK |
-| `mediamtx` | OK，已由 `launchd com.ytpl.mediamtx`（PID 常駐）管理 |
+| `mediamtx` | OK，已由 `launchd com.loopcastr.mediamtx`（PID 常駐）管理 |
 | `streamlink` | 未安裝，**不需要**（`relay.py` 完全沒用到） |
 | `ffmpeg` 的 `drawtext` | 0 筆（無 freetype）→ 字卡走路徑 A（HTML→PNG→overlay） |
 | 磁碟可用 | 37 GiB（26% 使用） |
-| `~/ytpl/stream.key` | 已就位，24 字元 |
+| `~/loopcastr/stream.key` | 已就位，24 字元 |
 | 播出／推流程式 | **本輪已部署**（`relay.py`、`playout.sh`、`yt_publish.sh`、`make_concat_list.py`、`build_local_content.py`、`gapwatch.py`） |
 | `playlist-local.json` | 尚未產生（**缺內容，見下**） |
 
@@ -38,16 +38,16 @@
 
 取得方式（任一）：
 
-1. 瀏覽器登入 YouTube 後用擴充套件匯出 Netscape 格式 `cookies.txt`，放到 `~/ytpl/cookies.txt`（`chmod 600`）。
+1. 瀏覽器登入 YouTube 後用擴充套件匯出 Netscape 格式 `cookies.txt`，放到 `~/loopcastr/cookies.txt`（`chmod 600`）。
 2. 或 `yt-dlp --cookies-from-browser chrome` —— **本機測過不行**：macOS TCC 擋住 Chrome profile（`Operation not permitted`），除非把 Terminal／Codex 加入「完全取用磁碟」。
 
 拿到 `cookies.txt` 之後：
 
-    cd ~/ytpl
+    cd ~/loopcastr
     python3 build_local_content.py --status            # 先看缺幾支
     python3 build_local_content.py --cookies cookies.txt --limit 3   # 試抓 3 支
     python3 build_local_content.py --cookies cookies.txt             # 抓滿 53 支
-    python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/ytpl
+    python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
 
 另一條完全繞開 YouTube 的路：向創作者直接索取原始檔（授權內容），放進 `media/<id>.mp4`，一樣能跑。
 
@@ -94,16 +94,16 @@
 
 抓到會寫入 `outpoint`，由 `make_concat_list.py` 轉成 concat demuxer 指令，**不需要重新編碼**：
 
-    file '/Users/<USER>/ytpl/media/8jtdcMDuV_A.mp4'
+    file '/Users/<USER>/loopcastr/media/8jtdcMDuV_A.mp4'
     outpoint 551.567
 
 ### 新增：健康監控服務
 
-    launchd/com.ytpl.health.plist   # 每 60 秒一次
+    launchd/com.loopcastr.health.plist   # 每 60 秒一次
 
 檢查「真的有在動」而不是只看程序存不存在：路徑 `ready`、有讀者（推流端連著）、`bytesReceived` 在 6 秒內有成長。狀態變化才告警，持續異常每 30 分鐘重提醒。告警寫進 `logs/alerts.jsonl`。
 
-要外送到 Line／Telegram 等服務，把 webhook URL 放進 `~/ytpl/alert_webhook`（單行純文字）即可：
+要外送到 Line／Telegram 等服務，把 webhook URL 放進 `~/loopcastr/alert_webhook`（單行純文字）即可：
 
     python3 healthcheck.py --check-youtube   # 連 YouTube 端 is_live 一起查（預設 15 分鐘一次）
 
@@ -111,15 +111,15 @@
 
 把清單接成兩份實測繞回點：**869,166 個封包、時間軸重置 0、forward gap 0**。時間戳是連續累加的。
 
-附帶得到一個長期風險：FLV 時間戳是 32 位元毫秒，連續播出約 **49.7 天**會回繞，建議每月重啟一次 `com.ytpl.playout`。
+附帶得到一個長期風險：FLV 時間戳是 32 位元毫秒，連續播出約 **49.7 天**會回繞，建議每月重啟一次 `com.loopcastr.playout`。
 
 ### 目標機現在的服務
 
-    launchctl list | grep ytpl
-    # com.ytpl.mediamtx   媒體樞紐
-    # com.ytpl.playout    播出端（concat 循環）
-    # com.ytpl.publish    推流端（→ YouTube）
-    # com.ytpl.health     健康監控
+    launchctl list | grep loopcastr
+    # com.loopcastr.mediamtx   媒體樞紐
+    # com.loopcastr.playout    播出端（concat 循環）
+    # com.loopcastr.publish    推流端（→ YouTube）
+    # com.loopcastr.health     健康監控
 
 ### 目標機 system層設定（2026-09-17 變更，重要）
 
@@ -193,10 +193,10 @@
 
 #### 3. 自動重新掃描做成 launchd 服務
 
-    launchd/com.ytpl.refresh.plist   # com.ytpl.refresh，以 root 執行（才能 kickstart 播出端）
+    launchd/com.loopcastr.refresh.plist   # com.loopcastr.refresh，以 root 執行（才能 kickstart 播出端）
 
-    sudo launchctl print system/com.ytpl.refresh
-    tail -f ~/ytpl/logs/refreshwatch.out.log
+    sudo launchctl print system/com.loopcastr.refresh
+    tail -f ~/loopcastr/logs/refreshwatch.out.log
 
 服務帶 `--mode auto`，會**讀播出端 plist 的 PLAYLIST 自己判斷現在是哪個模式**：`switch_edition.sh` 換模式之後監看會自動跟著換，不用改服務設定；重開機也會自動恢復。
 
@@ -264,7 +264,7 @@
 
 ### 順帶挖出「跑到一半突然中斷」的根因：launchd 是殺一整個 process group
 
-【實測】重啟控制台（`launchctl kickstart -k gui/501/com.ytpl.webui`）時，**先前由控制台拉起的建置會一起死**。
+【實測】重啟控制台（`launchctl kickstart -k gui/501/com.loopcastr.webui`）時，**先前由控制台拉起的建置會一起死**。
 因為 `Popen` 預設繼承父行程的 process group，建置跟 webui 同組（實測 news 建置的 pgid ＝ webui 的 pid），
 launchd 收掉那個 job 就整組一起收。這正是先前「跑到一半，突然中斷重來」的原因。
 
@@ -283,7 +283,7 @@ launchd 收掉那個 job 就整組一起收。這正是先前「跑到一半，�
 
 ## 控制台標題與「看直播畫面」按鈕（2026-09-21）
 
-- 標題改成 `ytpl2ytstream 控制台`，專案名連到 GitHub 專案頁，**另開分頁**
+- 標題改成 `loopcastr 控制台`，專案名連到 GitHub 專案頁，**另開分頁**
   （`target="_blank" rel="noopener"`）。瀏覽器分頁標題與啟動時印的橫幅也一起改。
 - 標題下面新增「▶ 看直播畫面」，開 MediaMTX 的 HLS 頁。
 
@@ -305,24 +305,24 @@ HLS 的位址不寫死，讀 `mediamtx.yml` 的 `hls` 與 `hlsAddress`：
 【實測】症狀：控制台的「看直播畫面」有內容（＝MediaMTX 有收到播出端的流），
 stream.key 也存好了，但 YouTube 的直播是黑的。原因不是設定，是**推流服務根本沒被載入**：
 
-    $ launchctl list | grep ytpl
-    58562	0	com.ytpl.playout
-    79055	-15	com.ytpl.webui
-    53634	-15	com.ytpl.mediamtx        # 沒有 com.ytpl.publish
+    $ launchctl list | grep loopcastr
+    58562	0	com.loopcastr.playout
+    79055	-15	com.loopcastr.webui
+    53634	-15	com.loopcastr.mediamtx        # 沒有 com.loopcastr.publish
 
-`~/ytpl/com.ytpl.publish.plist` 一直在，只是沒有複製到 `~/Library/LaunchAgents`，
+`~/loopcastr/com.loopcastr.publish.plist` 一直在，只是沒有複製到 `~/Library/LaunchAgents`，
 所以 launchd 沒有這個 job，YouTube 端當然不會有人連上去（`lsof` 也看不到往 1935 的連線）。
 
 修法（一行）：
 
-    cp ~/ytpl/com.ytpl.publish.plist ~/Library/LaunchAgents/
-    launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.ytpl.publish.plist
+    cp ~/loopcastr/com.loopcastr.publish.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.loopcastr.publish.plist
 
 【實測】載入後：
 
 | 檢查點 | 結果 |
 |---|---|
-| `launchctl list` | `70064  0  com.ytpl.publish` |
+| `launchctl list` | `70064  0  com.loopcastr.publish` |
 | `lsof` 對外連線 | `192.168.31.39:55762 -> 108.177.125.134:1935 (ESTABLISHED)`（YouTube ingest） |
 | MediaMTX `live/main` | readers 從 0 變 1，型別 `rtmpConn`（就是推流端自己） |
 | `publish.log` | 只有 1 次「第 1 次連線」，4 分鐘沒有重連 |
@@ -338,10 +338,10 @@ stream.key 也存好了，但 YouTube 的直播是黑的。原因不是設定，
 | 已載入（沒在跑） | 有載入但行程不在（會被 KeepAlive 拉起來） | 重啟 |
 | 沒有載入 | launchd 沒這個 job | **啟動**（從資料目錄複製 plist 到 `~/Library/LaunchAgents` 再 bootstrap） |
 
-【實測】用一個拋棄式服務 `com.ytpl.svctest`（`/bin/sleep 600`）驗證「啟動」：
+【實測】用一個拋棄式服務 `com.loopcastr.svctest`（`/bin/sleep 600`）驗證「啟動」：
 
-    {"ok": true, "how": "launchctl bootstrap gui/501 /Users/yangqingyuan/Library/LaunchAgents/com.ytpl.svctest.plist"}
-    launchctl list  → 71398  0  com.ytpl.svctest
+    {"ok": true, "how": "launchctl bootstrap gui/501 /Users/yangqingyuan/Library/LaunchAgents/com.loopcastr.svctest.plist"}
+    launchctl list  → 71398  0  com.loopcastr.svctest
 
 再按一次會走 kickstart（bootstrap 對已載入的 job 會失敗，不是錯誤）、
 資料目錄沒有 plist 時回「無法安裝」、名稱帶 `../` 會被擋（400）。測完已 bootout 並刪除。
@@ -451,7 +451,7 @@ API 回的 JSON 都一樣）。這樣不必在頁面裡散佈一百多個佔位�
 切換鈕的「中文」（刻意保留）。順帶抓到一個漏翻：`▶ 看直播畫面` 這顆按鈕 ——
 第一次的檢查只掃雙引號字面值，而它是單引號，所以漏掉了。
 
-【實測】`POST /api/lang {"lang":"en"}` → `<title>` 變 `ytpl2ytstream console`、
+【實測】`POST /api/lang {"lang":"en"}` → `<title>` 變 `loopcastr console`、
 `settings.json` 的 `ui.lang` 變 `en`、舊檔留成 `.bak`；送 `both` 會被擋（`語系只能是 zh 或 en`）。
 
 ### 6. 其餘腳本的訊息也英文化
@@ -461,3 +461,53 @@ API 回的 JSON 都一樣）。這樣不必在頁面裡散佈一百多個佔位�
 
 **還沒做的是「註解與 docstring」**：全 repo 還有約兩千行中文註解。那些不是程式執行時會
 吐出來的訊息，所以先留著；要給外國人看原始碼的話這是下一個該做的工。
+
+## 改名 loopcastr（2026-09-21）
+
+專案名稱由 `ytpl2ytstream` 改成 **`loopcastr`**（GitHub repo 也改了：
+`kingwap99/ytpl2ytstream` → [`kingwap99/loopcastr`](https://github.com/kingwap99/loopcastr)）。
+
+### 換掉的東西
+
+| 舊 | 新 | 影響 |
+|---|---|---|
+| repo 名 `ytpl2ytstream` | `loopcastr` | GitHub 會自動轉址舊網址 |
+| 安裝目錄 `~/ytpl` | `~/loopcastr` | `install.sh` 的預設前綴 |
+| launchd label `com.ytpl.*` | `com.loopcastr.*` | 5 個 plist 檔名與內容 |
+| `/etc/sudoers.d/ytpl-webui` | `loopcastr-webui` | 對外開放時的 sudoers 檔名 |
+| 控制台標題 `ytpl2ytstream 控制台` | `loopcastr 控制台` | `webui.py` 的 `PROJECT`／`REPO_URL` |
+
+一共 19 個檔案、5 個 plist 改名，repo 裡已經沒有 `ytpl` 這個字串。
+
+### 但**舊安裝要能用**：label 前綴改成「看現場」
+
+這是最容易踩的地方：如果把 label 寫死成 `com.loopcastr.*`，那台還在跑舊 label 的機器
+（`com.ytpl.*`）一更新程式，控制台就會把三個在跑的服務全顯示成「沒有載入」，
+按「重啟」也找不到東西。
+
+所以 `webui.py`／`healthcheck.py`／`refreshwatch.py` 都改成**掃這個目錄裡實際的 plist**
+來決定前綴（`service_prefix()`），找不到才退回 `com.loopcastr.`；
+`refreshwatch.py` 連 plist 的位置也兩種安裝都找（LaunchDaemon／LaunchAgent）。
+
+【實測】部署端（`~/ytpl`，服務還是 `com.ytpl.*`）更新程式後：
+
+    services: [('com.ytpl.mediamtx','跑'), ('com.ytpl.playout','跑'),
+               ('com.ytpl.publish','跑'), ('com.ytpl.health','停'), ('com.ytpl.refresh','停')]
+
+控制台顯示 `mediamtx 執行中 pid 53634／重啟`、`publish 執行中 pid 70064／重啟` ——
+改名後程式照樣認得舊安裝。前端原本用 `label.replace("com.ytpl.", "")` 去掉前綴，
+也改成認任何前綴（`/^com\.[a-z0-9]+\./`），否則服務名稱會變成整串 label。
+
+### 品牌資產
+
+Logo／Icon 是從品牌提案裡還原出來的向量圖（`assets/`）：
+
+| 檔案 | 用途 |
+|---|---|
+| `assets/icon.svg` | 透明底 icon（淺色背景用） |
+| `assets/icon-dark.svg` | 深海軍藍圓角底（GitHub／App 圖示） |
+| `assets/logo-dark.svg` | 主視覺（深色底） |
+| `assets/logo-light.svg` | 主視覺（淺色底） |
+
+配色：Loop Teal `#40E0D0`、Cast Violet `#7567FF`、Midnight Navy `#0B1020`（卡片 `#151D35`）；
+標語 `ALWAYS ON. ALWAYS PLAYING.`。控制台把 icon 內嵌成 favicon 與標題前的小圖。

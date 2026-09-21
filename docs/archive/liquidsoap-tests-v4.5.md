@@ -162,7 +162,7 @@ v4.4 擔心「沒有 `output.ffmpeg`，得包 ffmpeg」。把 2.4.5 的 17 個 o
 - **工作機**：測試全程隔離在 `/tmp/lsverify/`（bottle 解壓，未經 `brew install`）。過程中為了繞過 stdlib 寫死路徑，曾在 `/opt/homebrew/Cellar/liquidsoap/2.4.5_1` 放過一個 symlink，**已刪除並確認乾淨**（`brew list` 查不到 liquidsoap、Cellar 內已無指向 `/tmp` 的連結）。
 - **未動**：工作機 ffmpeg 仍是 `8.1.2_1`（brew 現行版）、x265 仍是 `4.2`；使用者自己的服務（`web-iptv-wall-player` :8080、`opencodex` :10100）持續在跑。
 - **無殘留**：liquidsoap 與 MediaMTX 程序、1935／1936／8888／8889／9997／9998 埠都已清空。
-- **目標機**【實測】：macOS 27.0 / arm64 / 8 GB / 可用 43 GiB；`brew`、`ffmpeg`、`yt-dlp`、`streamlink`、`mediamtx` 全部 MISSING；Python 3.9.6；`~/ytpl/relay.py`（34,828 bytes）已在。
+- **目標機**【實測】：macOS 27.0 / arm64 / 8 GB / 可用 43 GiB；`brew`、`ffmpeg`、`yt-dlp`、`streamlink`、`mediamtx` 全部 MISSING；Python 3.9.6；`~/loopcastr/relay.py`（34,828 bytes）已在。
 
 ---
 

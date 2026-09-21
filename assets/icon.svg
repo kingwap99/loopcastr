@@ -1,0 +1,8 @@
+<!-- loopcastr icon：透明底，給淺色背景或內嵌用（深色版見 icon-dark.svg） -->
+<svg viewBox="0 0 100 100" width="100%" xmlns="http://www.w3.org/2000/svg">
+  <path d="M74 34 A29 29 0 0 0 25 36" fill="none" stroke="#40DCCD" stroke-width="8" stroke-linecap="round" />
+  <path d="M25 36 L24 19 L41 26Z" fill="#40DCCD" />
+  <path d="M26 66 A29 29 0 0 0 75 64" fill="none" stroke="#7567FF" stroke-width="8" stroke-linecap="round" />
+  <path d="M75 64 L76 81 L59 74Z" fill="#7567FF" />
+  <path d="M42 34 L42 66 L68 50Z" fill="#0B1020" />
+</svg>

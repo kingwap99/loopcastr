@@ -32,15 +32,15 @@ sudo_do() {
 }
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-PLIST="$HERE/com.ytpl.playout.plist"
+PLIST="$HERE/com.loopcastr.playout.plist"
 PB=/usr/libexec/PlistBuddy
 
 # 服務可能裝在兩個地方：system domain 的 LaunchDaemon（開機就起，需要 root），
 # 或使用者自己的 gui domain LaunchAgent（install.sh --agents，不需要 root）。
 # 切換要改的是「實際被載入的那一份」—— 改錯地方會變成「回報切換成功但根本沒換」
 # （實測踩過：plist 改了、載入的那份沒改，播出端照樣播舊的）。
-INSTALLED="/Library/LaunchDaemons/com.ytpl.playout.plist"
-LABEL=com.ytpl.playout
+INSTALLED="/Library/LaunchDaemons/com.loopcastr.playout.plist"
+LABEL=com.loopcastr.playout
 if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
   SCOPE=gui
   INSTALLED="$HOME/Library/LaunchAgents/$LABEL.plist"

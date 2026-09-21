@@ -5,7 +5,7 @@
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
-	<string>com.ytpl.refresh</string>
+	<string>com.loopcastr.refresh</string>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>
@@ -14,17 +14,17 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/opt/homebrew/bin/python3</string>
-		<string>__HOME__/ytpl/refreshwatch.py</string>
+		<string>__HOME__/loopcastr/refreshwatch.py</string>
 		<string>--mode</string>
 		<string>auto</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>__HOME__/ytpl/logs/refreshwatch.err.log</string>
+	<string>__HOME__/loopcastr/logs/refreshwatch.err.log</string>
 	<key>StandardOutPath</key>
-	<string>__HOME__/ytpl/logs/refreshwatch.out.log</string>
+	<string>__HOME__/loopcastr/logs/refreshwatch.out.log</string>
 	<key>WorkingDirectory</key>
-	<string>__HOME__/ytpl</string>
+	<string>__HOME__/loopcastr</string>
 </dict>
 </plist>

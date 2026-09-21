@@ -1,5 +1,5 @@
 #############################################################
-# ytpl — 本機媒體樞紐（MediaMTX）設定範例
+# loopcastr — 本機媒體樞紐（MediaMTX）設定範例
 #
 # install.sh 會在 mediamtx.yml 不存在時複製這份過去；
 # 實際調整請改 mediamtx.yml，不要把站台資訊寫回範例檔。
@@ -58,5 +58,5 @@ paths:
 # 換了路徑名稱時，這三個地方要一起改：
 #   playout.sh     的 DEST / PATH_NAME
 #   yt_publish.sh  的 SRC
-#   launchd/com.ytpl.publish.plist 的 SRC
+#   launchd/com.loopcastr.publish.plist 的 SRC
 

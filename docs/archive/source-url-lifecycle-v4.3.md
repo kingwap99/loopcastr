@@ -270,7 +270,7 @@ MediaMTX `/v3/paths/list` 的 `bytesReceived` 在兩輪 300 秒實測中：
 | 內建 Python | **3.9.6**（`/usr/bin/python3`；工作機是 3.14.6） |
 | homebrew | **未安裝** |
 | yt-dlp／ffmpeg／streamlink／MediaMTX | **全部未安裝** |
-| `relay.py` 可攜性 | 已複製到 `~/ytpl/relay.py`，md5 `5219b4b8166798bd962984c180d55295` 兩邊一致；在 **Python 3.9.6 下 `py_compile` 通過** |
+| `relay.py` 可攜性 | 已複製到 `~/loopcastr/relay.py`，md5 `5219b4b8166798bd962984c180d55295` 兩邊一致；在 **Python 3.9.6 下 `py_compile` 通過** |
 
 **Python 版本不構成阻礙**：`relay.py` 目前語法與 3.9 相容，不需要為了目標機升級 Python。
 

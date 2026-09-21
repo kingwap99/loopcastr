@@ -84,7 +84,7 @@ v1.2 相對 v1.1 的四個實質更正：
 | 本地媒體樞紐 | `MediaMTX` | 接收 RTMP、提供 takeover 讓換手零斷點、提供 HLS 驗收、提供 HTTP API 觀測 |
 | 編碼／封裝 | `ffmpeg` | remux（`-c copy`）為主，必要時轉碼 |
 | 驗收觀測 | `gapwatch.py` | 獨立輪詢 API，回報「接收端離線」與 `bytesReceived` 零成長區間 |
-| 行程看管 | `launchd` | `com.ytpl.mediamtx` / `com.ytpl.playout` / `com.ytpl.publish` / `com.ytpl.health` |
+| 行程看管 | `launchd` | `com.loopcastr.mediamtx` / `com.loopcastr.playout` / `com.loopcastr.publish` / `com.loopcastr.health` |
 | 健康監控 | `healthcheck.py` | 每 60 秒檢查「真的有在動」：路徑 ready、有讀者、`bytesReceived` 有成長。狀態變化即告警，持續異常每 30 分鐘重提醒；YouTube 端最多每 15 分鐘查一次（公開查詢太密集會再被 bot 盯上） |
 | 字卡／轉場（選配） | Liquidsoap 或 HTML→PNG→overlay | 見 v1.0 的 FR-11 |
 
@@ -236,7 +236,7 @@ concat demuxer 搭配 `-c copy` 要求所有片段參數完全相同，混用會
 | FR-09 | 事件記錄 JSONL ＋ API 流量觀測 | P1 | **通過** | `relay-events.jsonl`／`gapwatch.py` |
 | FR-10 | 推送最終訊號至 YouTube ingest | P0 | **通過** | 見 T-14 |
 | FR-11 | 字卡／台標／字幕 | P2 | **可做，但會推翻「純 copy」** | 兩台都沒有 freetype，只能走路徑 A（HTML→PNG→overlay）；而 overlay 必須**解碼再編碼**，8 GB 的目標機會全天候滿載。要做就必須先決定這個取捨 |
-| FR-12 | 連續失敗告警 | P2 | **程式就緒** | `healthcheck.py` 已寫入 `alerts.jsonl`，外送管道的掛勾也在了（`~/ytpl/alert_webhook`），等 D8 給 URL |
+| FR-12 | 連續失敗告警 | P2 | **程式就緒** | `healthcheck.py` 已寫入 `alerts.jsonl`，外送管道的掛勾也在了（`~/loopcastr/alert_webhook`），等 D8 給 URL |
 | **FR-13** | **把來源落地成本機檔案、正規化、並驗證長度** | **P0** | **完成** | 53 支全部落地（4.7 GB），參數一致、長度驗證、黑尾偵測都通過（T-16／T-17／T-18） |
 | **FR-14** | **YouTube 端只有單一長命 publisher** | **P0** | **通過** | 實測 45 秒以上無中斷 |
 | **FR-15** | **播出端與推流端由 launchd 各自看管、開機自啟** | **P0** | **通過** | 已改為 LaunchDaemon；重開機後全程無人登入仍自動恢復（T-11） |
@@ -360,7 +360,7 @@ cookies 優先序：命令列 > playlist 的 `cookies` 欄位 > `<專案>/cookie
 | 頻道名稱 | 使用者指定一個中文名稱；【實測】該頻道在 YouTube 上的**實際顯示名稱與指定名稱不一致**（`<CHANNEL_ID>`），且對應的 `@handle` 與 `/c/` 路徑皆回 404 → 見 D15 |
 | 直播控制室 | `https://studio.youtube.com/video/<LIVE_VIDEO_ID>/livestreaming` |
 | RTMP 端點 | `rtmp://a.rtmp.youtube.com/live2` |
-| stream key | 存於 `目標機:~/ytpl/stream.key`（`chmod 600`）。**不寫入本文件、不進版控**；本文件也刻意不記錄任何指紋或長度特徵。注意 `yt_publish.sh` **只在啟動時讀一次**，換金鑰必須 `launchctl kickstart -k` |
+| stream key | 存於 `目標機:~/loopcastr/stream.key`（`chmod 600`）。**不寫入本文件、不進版控**；本文件也刻意不記錄任何指紋或長度特徵。注意 `yt_publish.sh` **只在啟動時讀一次**，換金鑰必須 `launchctl kickstart -k` |
 | 公開播出 | 【實測 2026-09-16 21:02】**已成立**：`<LIVE_VIDEO_ID>` 回 `live_status=is_live`、`is_live=True`；YouTube 端已長出 144p–720p 完整轉檔階梯（720p @ 2448 kbps），證明收到的是真實畫面 |
 | 換金鑰流程 | 【實測】21:01:39 覆寫金鑰後 `kickstart`，**20 秒內**重新連上 ingest；之後 120 秒量測離線 0 段 |
 
@@ -406,10 +406,10 @@ cookies 優先序：命令列 > playlist 的 `cookies` 欄位 > `<專案>/cookie
 | `yt-dlp` | `2026.08.19` |
 | `python3` | `3.14.7`（Homebrew） |
 | `node` | `v26.8.2` |
-| `mediamtx` | 已安裝，`launchd com.ytpl.mediamtx` 常駐（v1.21.0） |
+| `mediamtx` | 已安裝，`launchd com.loopcastr.mediamtx` 常駐（v1.21.0） |
 | `streamlink` | **未安裝，且不需要** |
 | ffmpeg freetype | 無（`drawtext` 0 筆）→ 字卡走路徑 A |
-| 已部署到 `~/ytpl` | `relay.py`、`playout.sh`、`yt_publish.sh`、`make_concat_list.py`、`build_local_content.py`、`gapwatch.py`、`mediamtx.yml`、`stream.key`、`playlist.json` |
+| 已部署到 `~/loopcastr` | `relay.py`、`playout.sh`、`yt_publish.sh`、`make_concat_list.py`、`build_local_content.py`、`gapwatch.py`、`mediamtx.yml`、`stream.key`、`playlist.json` |
 | 服務管理 | 【實測 2026-09-17】四個服務已從 LaunchAgent 改為 **LaunchDaemon**（`/Library/LaunchDaemons/`）。`mediamtx`／`playout`／`publish` 設 `UserName=<USER>`；`health` **以 root 執行**，因為只有 root 能對 system domain 做 `kickstart`。開機即啟動，不需要圖形登入 |
 | FileVault | 【實測】**已關閉**（2026-09-17 00:07），開機不再需要人工解鎖 |
 | 睡眠 | 【實測】`pmset -a sleep 0 disksleep 0 disablesleep 1`，`SleepDisabled 1`。原本是 `sleep 1`，只是被一個 `caffeinate` 擋著 |
@@ -436,7 +436,7 @@ cookies 優先序：命令列 > playlist 的 `cookies` 欄位 > `<專案>/cookie
 1. **授權**：使用者聲明所有使用的 YouTube 影片皆為合法授權。落地成本機檔案是**為播出穩定性**，不是要規避授權。
 2. **stream key 管理**：
    - 不寫入 `playlist.json` 或任何進版控的檔案。
-   - 以 `chmod 600` 的獨立檔案提供（`目標機:~/ytpl/stream.key`）。
+   - 以 `chmod 600` 的獨立檔案提供（`目標機:~/loopcastr/stream.key`）。
    - 日誌遮罩，禁止印出完整 RTMP URL。`yt_publish.sh` 只把「連線目標名稱」寫進日誌，不含金鑰。
 3. **cookies.txt 管理**：同等敏感（等同帳號登入態）。`chmod 600`、不進版控、用完可輪替。
 4. **帳號**：頻道帳號 `<GOOGLE_ACCOUNT>`。本文件不儲存任何密碼、金鑰或 cookie。
@@ -453,7 +453,7 @@ cookies 優先序：命令列 > playlist 的 `cookies` 欄位 > `<專案>/cookie
 | 播放清單 | `https://www.youtube.com/playlist?list=<PLAYLIST_ID>`（`範例清單`，頻道 <CHANNEL_NAME> `<CHANNEL_HANDLE>`） |
 | 段數／總長 | 53 段／14,582 秒（4 小時 3 分 2 秒） |
 | 段長分布 | 最短 91 秒／最長 619 秒／平均 275 秒 |
-| 測試素材 | `目標機:~/ytpl/media/t1.mp4`（12 秒）、`t2.mp4`（9 秒）、`t3.mp4`（15 秒），`testsrc2` 1280×720@30 + 正弦音，參數一致可 `-c copy` |
+| 測試素材 | `目標機:~/loopcastr/media/t1.mp4`（12 秒）、`t2.mp4`（9 秒）、`t3.mp4`（15 秒），`testsrc2` 1280×720@30 + 正弦音，參數一致可 `-c copy` |
 
 ### 10.2 測試項目與結果
 
@@ -517,7 +517,7 @@ T-01 → T-13 → T-14 → **T-11** → T-16～T-18 → T-20 → T-22 → **T-07
 | **R-09** | **YouTube 的匿名解析會「間歇性」回 `LOGIN_REQUIRED`** | 進行中的落地或聯播中斷 | 【更正 v1.1】這**不是**永久封鎖：同一批影片 05:11 全滅、20:02 全部成功，是 IP 層級的暫時標記。**不需要 cookie**。封鎖期間的備援是 `player_client=android`（上限 360p），已寫進 `build_local_content.py` 自動重試。根本對策仍是內容落地（FR-13）——落地後主線完全不碰來源 URL |
 | **R-12** | **下載靜默截斷** | 半支影片混進 concat，播出中段突然跳掉 | 已修掉兩個根因（3.7）：ffmpeg 未加 `-nostdin`、HLS(m3u8) 路徑不完整。並加下載後長度比對，容差 5%／10 秒，不符即自動重抓 |
 | **R-13** | **來源影片本身含長黑尾**（實測 66–67 秒） | 觀眾端長時間黑畫面，但**所有傳輸與時間軸監控都顯示正常** | 落地時就偵測並以 `outpoint` 截掉（3.8）。注意：這類問題前兩層監控看不到，必須靠像素層的 `blackdetect` |
-| **R-14** | **FLV 時間戳 32 位元回繞** | 連續播出約 **49.7 天**後時間戳回繞，YouTube 端可能中斷 | 【實測】`-stream_loop -1` 的時間戳是**連續累加**、不會每輪歸零，所以時間軸會一路長上去。對策：每月重啟一次 `com.ytpl.playout`，時間軸即歸零 |
+| **R-14** | **FLV 時間戳 32 位元回繞** | 連續播出約 **49.7 天**後時間戳回繞，YouTube 端可能中斷 | 【實測】`-stream_loop -1` 的時間戳是**連續累加**、不會每輪歸零，所以時間軸會一路長上去。對策：每月重啟一次 `com.loopcastr.playout`，時間軸即歸零 |
 | **R-15** | **無法無人值守重開機**（FileVault 開啟 ＋ 無自動登入） | 停電、當機、或任何重開機都需要**人到機器前解鎖**；遠端完全無法恢復 | 已做：`pmset -a sleep 0 disksleep 0 disablesleep 1`（避免睡眠造成的假性停播）。待決：關閉 FileVault（安全取捨，見 D16），並把服務從 LaunchAgent 改成 **LaunchDaemon** —— LaunchAgent 只在圖形介面登入後才會啟動，對無人值守的機器不適合 |
 | **R-10** | **落地內容需要磁碟（一輪 4.5–5.5 GB）** | 磁碟不足 | 目標機可用 37 GiB，足夠；若要多輪備份需先清磁碟 |
 | **R-11** | **concat 接縫的 DTS 重疊（約 11 ms）** | 時間軸不完美 | ffmpeg 自動夾正；必要時改離線預接單一大檔 |
@@ -528,14 +528,14 @@ T-01 → T-13 → T-14 → **T-11** → T-16～T-18 → T-20 → T-22 → **T-07
 
 | 編號 | 待決事項 | 需要誰 | 阻塞 |
 |---|---|---|---|
-| **D1** | ~~YouTube stream key~~ | — | **已解決**：已取得並置於 `目標機:~/ytpl/stream.key` |
+| **D1** | ~~YouTube stream key~~ | — | **已解決**：已取得並置於 `目標機:~/loopcastr/stream.key` |
 | D2 | ~~輸出解析度與位元率~~ | — | **實務上已定案**：落地統一 1280×720，播出 2500 kbps，YouTube 端實際長出 720p @ 2448 kbps。要改再議 |
 | D3 | ~~是否導入 Liquidsoap~~ | — | **已無必要**：當初是為了字卡，而字卡走路徑 A（ffmpeg overlay）就夠，不需要多一層 DSL。若日後需要進階排程再議 |
 | D4 | ~~播放順序政策~~ **固定序循環**（使用者 2026-09-17 定案） | — | **已解決** |
 | D5 | 墊片素材 | 使用者 | FR-05 |
 | D6 | 聯播來源清單 | 使用者 | M6 |
 | D7 | ~~目標機是否安裝 Homebrew／MediaMTX~~ | — | **已解決** |
-| D8 | ~~告警管道~~ | — | **已解決（2026-09-17 03:14）**：改用 Telegram Bot `<BOT_NAME>`。token 存 `~/ytpl/telegram.json`（`chmod 600`，不進版控），chat_id 由 `getUpdates` 自動取得並回寫。實測 `--test-alert` 與模擬故障演練都送出成功 |
+| D8 | ~~告警管道~~ | — | **已解決（2026-09-17 03:14）**：改用 Telegram Bot `<BOT_NAME>`。token 存 `~/loopcastr/telegram.json`（`chmod 600`，不進版控），chat_id 由 `getUpdates` 自動取得並回寫。實測 `--test-alert` 與模擬故障演練都送出成功 |
 | D9 | 頻道名稱與說明需在 Studio 手動設定（API 不支援） | 使用者 | 上線前 |
 | **D14** | ~~YouTube Studio 端的直播活動狀態~~ | — | **已解決**：改用 `<LIVE_VIDEO_ID>` 與新金鑰後，2026-09-16 21:02 已成功公開播出 |
 | **D15** | 直播標題需在 Studio 設定或用 YouTube Data API（RTMP 帶不進標題） | 使用者 | 對外觀感 |
@@ -567,20 +567,20 @@ T-01 → T-13 → T-14 → **T-11** → T-16～T-18 → T-20 → T-22 → **T-07
 ## 附錄 B：驗證指令
 
     # 播出中，量接收端縫隙（另開終端）
-    python3 ~/ytpl/gapwatch.py http://127.0.0.1:9997 live/main 120
+    python3 ~/loopcastr/gapwatch.py http://127.0.0.1:9997 live/main 120
 
     # 本地樞紐狀態
     curl -s http://127.0.0.1:9997/v3/paths/get/live/main
 
     # 匿名解析是否仍被擋（回 2 表示全滅）
-    python3 ~/ytpl/relay.py --playlist ~/ytpl/playlist.json --check
+    python3 ~/loopcastr/relay.py --playlist ~/loopcastr/playlist.json --check
 
     # 落地進度
-    python3 ~/ytpl/build_local_content.py --status
+    python3 ~/loopcastr/build_local_content.py --status
 
     # 服務狀態
-    launchctl list | grep ytpl
-    tail -f ~/ytpl/logs/playout.log ~/ytpl/logs/publish.log
+    launchctl list | grep loopcastr
+    tail -f ~/loopcastr/logs/playout.log ~/loopcastr/logs/publish.log
 
     # ffmpeg 有沒有 freetype（回 0 表示沒有 drawtext）
     ffmpeg -hide_banner -filters | grep -c drawtext
