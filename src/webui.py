@@ -20,6 +20,7 @@ import json
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -289,6 +290,51 @@ def mtx(api, path_name):
         return {"ok": False, "error": str(exc)}
 
 
+# 服務（launchd job）清單。前端不再自己列一份，一律用 /api/status 回傳的。
+SERVICE_LABELS = ["com.ytpl.mediamtx", "com.ytpl.playout", "com.ytpl.publish",
+                  "com.ytpl.health", "com.ytpl.refresh"]
+LAUNCH_AGENTS = os.path.expanduser("~/Library/LaunchAgents")
+
+
+def launchctl_jobs():
+    """`launchctl list` 一次拿到這個使用者 domain 的所有 job：label -> pid（None＝沒跑）。"""
+    rc, out = sh(["launchctl", "list"], timeout=10)
+    jobs = {}
+    if rc != 0:
+        return jobs
+    for line in (out or "").splitlines()[1:]:
+        f = line.split("\t") if "\t" in line else line.split(None, 2)
+        if len(f) < 3:
+            continue
+        pid, label = f[0].strip(), f[2].strip()
+        jobs[label] = int(pid) if pid.isdigit() else None
+    return jobs
+
+
+def service_state(label, jobs):
+    """一個服務的狀態。重點是分清楚「沒載入」和「載入了但沒在跑」——
+    先前控制台只會顯示「沒有在跑」，看不出 publish 根本沒被載入過。"""
+    installed = os.path.join(LAUNCH_AGENTS, label + ".plist")
+    src = os.path.join(PREFIX, label + ".plist")
+    st = {"label": label, "loaded": False, "pid": None,
+          "installed": os.path.exists(installed),
+          "plist": src if os.path.exists(src) else ""}
+    if label in jobs:
+        st["loaded"] = True
+        st["pid"] = jobs[label]
+    else:
+        # 系統 domain 的 job 不會出現在 `launchctl list`。
+        rc, _out = sh(["launchctl", "print", "system/" + label], timeout=6)
+        if rc == 0:
+            st["loaded"] = True
+    return st
+
+
+def services():
+    jobs = launchctl_jobs()
+    return [service_state(l, jobs) for l in SERVICE_LABELS]
+
+
 def hls_preview(path_name):
     """HLS 預覽頁的位址。
 
@@ -365,6 +411,7 @@ def status(api, path_name):
         "proc": procs(),
         "mtx": mtx(api, path_name),
         "preview": hls_preview(path_name),
+        "services": services(),
         "round": round_info(),
         "content": content_info(),
         "ready": ready_map(api, path_name),
@@ -837,6 +884,36 @@ def task_state():
 
 
 # ── 需要特權的動作 ──────────────────────────────────────────────────
+def start_service(label):
+    """把「還沒載入」的服務裝起來：plist 從資料目錄複製到 ~/Library/LaunchAgents
+    再 bootstrap。只搬既有檔案，不自己生設定。"""
+    src = os.path.join(PREFIX, label + ".plist")
+    if not os.path.exists(src):
+        return {"ok": False, "error": "資料目錄裡沒有 %s.plist，無法安裝" % label}
+    dst = os.path.join(LAUNCH_AGENTS, label + ".plist")
+    try:
+        os.makedirs(LAUNCH_AGENTS, exist_ok=True)
+        same = False
+        if os.path.exists(dst):
+            with open(dst, "rb") as a, open(src, "rb") as b:
+                same = a.read() == b.read()
+        if not same:
+            shutil.copyfile(src, dst)
+    except OSError as exc:
+        return {"ok": False, "error": "複製 plist 失敗：%s" % exc}
+    rc, out = sh(["launchctl", "bootstrap", "gui/%d" % os.getuid(), dst], timeout=20)
+    if rc == 0:
+        return {"ok": True, "how": "launchctl bootstrap gui/%d %s" % (os.getuid(), dst)}
+    # 已經載入過的 job 再 bootstrap 會失敗，那就用 kickstart 讓它跑起來。
+    rc2, _o2 = sh(["launchctl", "kickstart", "gui/%d/%s" % (os.getuid(), label)],
+                  timeout=15)
+    if rc2 == 0:
+        return {"ok": True, "how": "launchctl kickstart gui/%d/%s" % (os.getuid(), label)}
+    return {"ok": False, "error": (out or "").strip()[-200:],
+            "hint": "系統 domain 的服務要自己來：sudo launchctl bootstrap system "
+                    "/Library/LaunchDaemons/%s.plist" % label}
+
+
 def restart_service(label):
     """先試 system domain（非互動 sudo），不行再試目前使用者的 gui domain。"""
     if not re.match(r"^[A-Za-z0-9_.-]+$", label or ""):
@@ -963,7 +1040,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/action":
             return self._send(200, start_task(body.get("action") or "", body))
         if path == "/api/service":
-            return self._send(200, restart_service(body.get("label") or ""))
+            label = body.get("label") or ""
+            if not re.match(r"^[A-Za-z0-9_.-]+$", label):
+                return self._send(400, {"error": "不合法的服務名稱"})
+            if (body.get("action") or "restart") == "start":
+                return self._send(200, start_service(label))
+            return self._send(200, restart_service(label))
         if path == "/api/probe":
             return self._send(200, probe_sources(body.get("video_source") or "",
                                                  body.get("shorts_url") or ""))
@@ -1123,10 +1205,10 @@ button.primary{font-weight:700;border-color:#0a0}
 <button onclick="writeKey()">寫入</button></div>
 
 <h2>服務</h2><div class="row" id="svc"></div>
-<p class="dim">system domain 需要非互動 sudo；失敗時會顯示要加哪一條 sudoers。</p>
+<p class="dim">「沒有載入」＝launchd 根本沒這個 job（例如金鑰貼好了卻沒有畫面，就是推流服務沒被載入）。
+按「啟動」會把資料目錄裡的 plist 複製到 ~/Library/LaunchAgents 再 bootstrap。
+系統 domain 的服務需要非互動 sudo；失敗時會顯示要加哪一條 sudoers。</p>
 <script>
-var LABELS = ["com.ytpl.mediamtx","com.ytpl.playout","com.ytpl.publish","com.ytpl.health","com.ytpl.refresh"];
-
 function esc(s){
   return String(s === null || s === undefined ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1157,6 +1239,44 @@ function renderQuick(s){
     : ('<span class="dim">沒有直播畫面預覽：' + esc(p.why || "") + "</span>"));
 }
 
+// 服務狀態：分清楚「沒載入」「載入了沒在跑」「在跑」。沒載入的可以按「啟動」。
+function renderServices(s){
+  var d = document.getElementById("svc");
+  d.innerHTML = "";
+  (s.services || []).forEach(function(x){
+    var name = x.label.replace("com.ytpl.", "");
+    var wrap = document.createElement("span");
+    wrap.style.cssText = "display:inline-block;margin:0 16px 6px 0";
+    var b = document.createElement("b");
+    b.textContent = name;
+    var st = document.createElement("span");
+    st.className = (x.loaded && x.pid) ? "" : "dim";
+    st.textContent = x.loaded ? (x.pid ? ("　執行中 pid " + x.pid) : "　已載入（沒在跑）")
+                              : "　沒有載入";
+    var btn = document.createElement("button");
+    if (x.loaded) {
+      btn.textContent = "重啟";
+      btn.onclick = function(){ svcCall(x.label, "restart"); };
+    } else {
+      btn.textContent = "啟動";
+      btn.disabled = !x.plist;
+      btn.title = x.plist ? ("從 " + x.plist + " 安裝並啟動") : "資料目錄裡沒有這個 plist";
+      btn.onclick = function(){ svcCall(x.label, "start"); };
+    }
+    wrap.appendChild(b); wrap.appendChild(st); wrap.appendChild(btn);
+    d.appendChild(wrap);
+  });
+}
+
+function svcCall(label, action){
+  var name = label.replace("com.ytpl.", "");
+  post("/api/service", { label: label, action: action }).then(function(r){
+    msg(r.ok ? (name + " 已" + (action === "start" ? "啟動" : "重啟") + "（" + r.how + "）")
+             : (name + "：" + (r.error || "") + " " + (r.hint || "")));
+    refresh();
+  });
+}
+
 function refresh(){
   if (REFRESHING) { return; }
   REFRESHING = true;
@@ -1164,6 +1284,7 @@ function refresh(){
     STAT_FAIL = 0;
     text("head", s.now + "　目錄 " + s.prefix);
     renderQuick(s);
+    renderServices(s);
     var selEl = document.getElementById("mode");
     var selMode = (selEl && selEl.value) || "";
     if (!selMode && s.playing_mode && (s.ready || {})[s.playing_mode]) { selMode = s.playing_mode; }
@@ -1504,26 +1625,9 @@ function writeKey(){
   });
 }
 
-function mkSvc(){
-  var d = document.getElementById("svc");
-  d.innerHTML = "";
-  LABELS.forEach(function(l){
-    var b = document.createElement("button");
-    b.textContent = "重啟 " + l.replace("com.ytpl.", "");
-    b.onclick = function(){
-      post("/api/service", { label: l }).then(function(r){
-        msg(r.ok ? ("已重啟（" + r.how + "）") : ((r.error || "") + " " + (r.hint || "")));
-        refresh();
-      });
-    };
-    d.appendChild(b);
-  });
-}
-
 refresh();
 loadCfg();
 pollTask();
-mkSvc();
 setInterval(refresh, 5000);
 </script></body></html>"""
 

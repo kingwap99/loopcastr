@@ -299,3 +299,49 @@ HLS 的位址不寫死，讀 `mediamtx.yml` 的 `hls` 與 `hlsAddress`：
 頁面渲染出 `<a class="btn live" href="http://127.0.0.1:8888/live/main/" target="_blank" rel="noopener">`；
 `/live/main/` 回 HTTP 200、`/live/main/index.m3u8` 回 302（MediaMTX 的轉址，正常）。
 只回傳埠號與路徑、主機名稱由瀏覽器填，所以從別台機器開控制台也連得到。
+
+## 「金鑰貼好了、HLS 也看得到，YouTube 卻沒畫面」＝推流服務沒被載入（2026-09-21）
+
+【實測】症狀：控制台的「看直播畫面」有內容（＝MediaMTX 有收到播出端的流），
+stream.key 也存好了，但 YouTube 的直播是黑的。原因不是設定，是**推流服務根本沒被載入**：
+
+    $ launchctl list | grep ytpl
+    58562	0	com.ytpl.playout
+    79055	-15	com.ytpl.webui
+    53634	-15	com.ytpl.mediamtx        # 沒有 com.ytpl.publish
+
+`~/ytpl/com.ytpl.publish.plist` 一直在，只是沒有複製到 `~/Library/LaunchAgents`，
+所以 launchd 沒有這個 job，YouTube 端當然不會有人連上去（`lsof` 也看不到往 1935 的連線）。
+
+修法（一行）：
+
+    cp ~/ytpl/com.ytpl.publish.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/501 ~/Library/LaunchAgents/com.ytpl.publish.plist
+
+【實測】載入後：
+
+| 檢查點 | 結果 |
+|---|---|
+| `launchctl list` | `70064  0  com.ytpl.publish` |
+| `lsof` 對外連線 | `192.168.31.39:55762 -> 108.177.125.134:1935 (ESTABLISHED)`（YouTube ingest） |
+| MediaMTX `live/main` | readers 從 0 變 1，型別 `rtmpConn`（就是推流端自己） |
+| `publish.log` | 只有 1 次「第 1 次連線」，4 分鐘沒有重連 |
+
+### 控制台補上「服務有沒有被載入」
+
+先前控制台的「服務行程」只會說 publish「沒有在跑」，看不出它**從來沒被載入過** ——
+這兩件事的處理方式完全不同，所以服務區塊改成三態：
+
+| 顯示 | 意思 | 按鈕 |
+|---|---|---|
+| 執行中 pid N | 有載入、有行程 | 重啟 |
+| 已載入（沒在跑） | 有載入但行程不在（會被 KeepAlive 拉起來） | 重啟 |
+| 沒有載入 | launchd 沒這個 job | **啟動**（從資料目錄複製 plist 到 `~/Library/LaunchAgents` 再 bootstrap） |
+
+【實測】用一個拋棄式服務 `com.ytpl.svctest`（`/bin/sleep 600`）驗證「啟動」：
+
+    {"ok": true, "how": "launchctl bootstrap gui/501 /Users/yangqingyuan/Library/LaunchAgents/com.ytpl.svctest.plist"}
+    launchctl list  → 71398  0  com.ytpl.svctest
+
+再按一次會走 kickstart（bootstrap 對已載入的 job 會失敗，不是錯誤）、
+資料目錄沒有 plist 時回「無法安裝」、名稱帶 `../` 會被擋（400）。測完已 bootout 並刪除。

@@ -517,3 +517,32 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.mediamtx.plist
 
 1. **過場與影片檔是跨模式共用的。** 過場用影片 ID 命名（`media/_tr_<id>.mp4`），所以切換模式時該模式的過場會覆蓋上一個模式；同一支影片在兩個模式的長度上限若不同（test 180 秒 vs promotion 450 秒），影片檔也會被覆蓋。目前一次只跑一個模式，這樣最簡單；要讓模式並存，得把內容改放 `media/<模式>/`。
 2. **shorts 池是「第 i 支影片配第 i 支 short」。** 30 支影片只會用到池子裡的前 30 支，50 支裡有 20 支這一輪輪不到。要讓 50 支都出現，得在每次重建時把起點偏移（`refreshwatch.py` 已經會定期重建，加上偏移即可）。
+
+### 服務：先確認「有沒有被載入」
+
+要推上 YouTube 一定要有 `com.ytpl.publish`。沒有它，畫面只到 MediaMTX ——
+控制台的「看直播畫面」看得到內容、但 YouTube 端是黑的，因為根本沒有東西連上 YouTube ingest。
+
+控制台最下面的「服務」區塊分三種狀態：
+
+| 顯示 | 意思 | 可以做什麼 |
+|---|---|---|
+| 執行中 pid N | launchd 有這個 job，行程也在 | 重啟 |
+| 已載入（沒在跑） | job 在，行程被 KeepAlive 拉起來中 | 重啟 |
+| 沒有載入 | launchd 根本沒有這個 job | **啟動**：把 `~/ytpl/<label>.plist` 複製到 `~/Library/LaunchAgents` 再 `launchctl bootstrap` |
+
+「沒有載入」是資料目錄裡有 plist、但沒有裝進 launchd 的狀態（例如只裝了三個服務的精簡安裝）。
+要自己確認：
+
+    launchctl list | grep ytpl
+
+`com.ytpl.health` 與 `com.ytpl.refresh` 原本是設計成系統 domain 的服務
+（要 root 才能重啟播出端），控制台不以 root 執行，這兩個要自己來：
+
+    sudo cp ~/ytpl/com.ytpl.health.plist /Library/LaunchDaemons/
+    sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.health.plist
+
+換過 stream key 之後要重啟 publish 才會生效（`yt_publish.sh` 啟動時讀一次金鑰檔）：
+按服務區塊的「重啟 publish」，或
+
+    launchctl kickstart -k gui/$(id -u)/com.ytpl.publish
