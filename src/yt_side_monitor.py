@@ -36,11 +36,11 @@ def resolve(vid, quality):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--id", required=True, help="YouTube 直播的 video id")
+    ap.add_argument("--id", required=True, help="video id of the YouTube live stream")
     ap.add_argument("--hours", type=float, default=0)
     ap.add_argument("--minutes", type=float, default=60)
-    ap.add_argument("--quality", default="232", help="格式 ID，預設 232（720p）")
-    ap.add_argument("--out", default="", help="輸出檔，預設 logs/yt-side-monitor.log")
+    ap.add_argument("--quality", default="232", help="format id, default 232 (720p)")
+    ap.add_argument("--out", default="", help="output file, default logs/yt-side-monitor.log")
     a = ap.parse_args()
 
     total = a.hours * 3600 if a.hours else a.minutes * 60
@@ -55,17 +55,17 @@ def main():
             fh.write("[%s] %s\n" % (ts(), line))
             fh.flush()
 
-        log("=== YouTube 端監控開始：id=%s 品質=%s 時間=%.0f 分鐘 ==="
+        log("=== YouTube-side monitoring started: id=%s quality=%s for %.0f minutes ==="
             % (a.id, a.quality, total / 60.0))
         while time.time() < end:
             remain = int(end - time.time())
             url = resolve(a.id, a.quality)
             if not url:
-                log("解析失敗（直播可能已結束），60 秒後重試")
+                log("resolve failed (the stream may have ended), retrying in 60 s")
                 time.sleep(60)
                 continue
             rounds += 1
-            log("第 %d 段：解析成功，開始讀取（剩 %.0f 分鐘）"
+            log("segment %d: resolved, reading (%.0f minutes left)"
                 % (rounds, remain / 60.0))
             cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "info",
                    "-i", url, "-t", str(remain),
@@ -85,11 +85,11 @@ def main():
                     log("err " + line)
                 elif "frame=" in line and time.time() - last_beat > 300:
                     last_beat = time.time()
-                    log("心跳：讀取中（已抓 %d 筆異常）" % hits)
+                    log("heartbeat: reading (%d anomalies so far)" % hits)
             p.wait()
-            log("第 %d 段結束 rc=%s" % (rounds, p.returncode))
+            log("segment %d finished rc=%s" % (rounds, p.returncode))
             time.sleep(5)
-        log("=== 監控結束：共 %d 段、%d 筆黑畫面／凍結事件 ===" % (rounds, hits))
+        log("=== monitoring finished: %d segments, %d black/freeze events ===" % (rounds, hits))
     return 0
 
 

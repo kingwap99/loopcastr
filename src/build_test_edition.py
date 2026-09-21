@@ -157,13 +157,13 @@ def main():
     os.makedirs(OUTDIR, exist_ok=True)
     os.makedirs(WMDIR, exist_ok=True)
 
-    print("產生 %d 個浮水印 PNG…" % len(eps), flush=True)
+    print("rendering %d watermark PNGs..." % len(eps), flush=True)
     jobs = []
     for i in range(1, len(eps) + 1):
         p = os.path.join(WMDIR, "%02d.png" % i)
         render_number(i, p)
         jobs.append(p)
-    print("浮水印完成", flush=True)
+    print("watermarks done", flush=True)
 
     todo = []
     for i, seg in enumerate(eps, 1):
@@ -184,7 +184,7 @@ def main():
             else:
                 done += 1
                 print("OK   %02d %-14s %s" % (i, sid, out), flush=True)
-    print("編碼完成 OK=%d FAIL=%d，耗時 %.0f 秒" % (done, fail, time.time() - t0))
+    print("encoding done OK=%d FAIL=%d in %.0f s" % (done, fail, time.time() - t0))
 
     # 組測試清單：集數與過場交錯
     segs = []
@@ -206,7 +206,7 @@ def main():
               encoding="utf-8") as fh:
         json.dump(local, fh, ensure_ascii=False, indent=2)
     total = sum(s["seconds"] for s in segs)
-    print("playlist-test.json：%d 段、總長 %.0fs（%.2f 小時）"
+    print("playlist-test.json: %d segments, %.0fs total (%.2f h)"
           % (len(segs), total, total / 3600.0))
     return 0 if fail == 0 else 1
 

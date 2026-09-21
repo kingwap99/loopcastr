@@ -48,12 +48,12 @@ def main():
     with open(a.out, "w") as f:
         f.write("\n".join(lines) + "\n")
 
-    print("寫出 %s：%d 段（%d 行），總長 %.0fs"
+    print("wrote %s: %d segments (%d lines), %.0fs total"
           % (a.out, len(lines) - trims, len(lines), total))
     if skipped:
-        print("略過非本機片段：%s" % ", ".join(skipped))
+        print("skipping non-local segments: %s" % ", ".join(skipped))
     if missing:
-        print("缺少檔案：%s" % ", ".join(missing))
+        print("missing files: %s" % ", ".join(missing))
     return 0 if lines and not missing else 1
 
 

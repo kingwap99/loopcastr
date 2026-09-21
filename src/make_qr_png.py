@@ -34,15 +34,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("data")
     ap.add_argument("out")
-    ap.add_argument("--scale", type=int, default=10, help="每個模組幾像素")
-    ap.add_argument("--border", type=int, default=3, help="靜區寬度（模組數）")
-    ap.add_argument("--invert", action="store_true", help="黑底白碼")
+    ap.add_argument("--scale", type=int, default=10, help="pixels per QR module")
+    ap.add_argument("--border", type=int, default=3, help="quiet zone width (in modules)")
+    ap.add_argument("--invert", action="store_true", help="white code on black")
     a = ap.parse_args()
 
     try:
         import qrcode
     except ImportError:
-        print("缺少 qrcode 套件：python3 -m pip install --break-system-packages qrcode",
+        print("the qrcode package is missing: python3 -m pip install --break-system-packages qrcode",
               file=sys.stderr)
         return 2
 
@@ -68,7 +68,7 @@ def main():
             rows.append(bytearray(px))
 
     write_png(a.out, n * s, n * s, rows)
-    print("%s -> %s（%dx%d，模組 %d，scale %d）"
+    print("%s -> %s (%dx%d, %d modules, scale %d)"
           % (a.data, a.out, n * s, n * s, n, s))
     return 0
 

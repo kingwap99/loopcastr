@@ -457,3 +457,11 @@ API 回的 JSON 都一樣）。這樣不必在頁面裡散佈一百多個佔位�
 【實測】修掉前端 `fmt()` 的兩個 bug：參數沒給時會印出 `undefined`（`[a,b,c]` 的長度固定是 3），
 以及上面第 2 點。部署後 DOM 檢查：`執行中 pid 53634／running pid 53634`、`重啟／Restart`、
 `沒有載入／not loaded`、`啟動／Start`。
+
+### 6. 其餘腳本的訊息也英文化
+
+`make_concat_list.py`、`make_qr_png.py`、`yt_side_monitor.py`、`build_test_edition.py`、
+`relay.py`（聯播接力引擎，38 處訊息）都改完了。
+
+**還沒做的是「註解與 docstring」**：全 repo 還有約兩千行中文註解。那些不是程式執行時會
+吐出來的訊息，所以先留著；要給外國人看原始碼的話這是下一個該做的工。

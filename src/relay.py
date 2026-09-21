@@ -17,7 +17,7 @@ v3（本輪新增）— 來源 URL 生命週期
    - --url-max-age：沿用上限（預設 1800s），超過就重解析
    - --url-expiry-margin：距到期不足此秒數就重解析（預設 300s）
   - live 段在 url-max-age 到點時主動 takeover 換手，換手 0.34s 而不是等它斷
-  - 排定換手與故障重試分開計數（refreshes / restarts），不吃彼此的額度
+  - 排定換手與故障retry分開計數（refreshes / restarts），不吃彼此的額度
 
 v4（本輪新增）— 自有內容落地 + 反 bot 封鎖
   YouTube 對「同一個對外 IP 的匿名 player 請求」會回 LOGIN_REQUIRED
@@ -200,9 +200,9 @@ def url_freshness(url, resolved_at, max_age, margin):
     """
     exp = url_expiry(url)
     if exp is not None and exp - now() <= margin:
-        return False, "expire 只剩 %.0fs" % (exp - now())
+        return False, "expires in %.0fs" % (exp - now())
     if max_age > 0 and (now() - resolved_at) > max_age:
-        return False, "已解析 %.0fs 前" % (now() - resolved_at)
+        return False, "resolved %.0fs ago" % (now() - resolved_at)
     return True, ""
 
 
@@ -404,7 +404,7 @@ class SegmentRunner(threading.Thread):
                 continue
             why = self._refresh_due()
             if why:
-                log("%-6s 主動換手更新來源 URL（%s）" % (self.sid, why))
+                log("%-6s proactive handover with a fresh source URL (%s)" % (self.sid, why))
                 emit({"event": "url_refresh", "seg": self.sid, "reason": why})
                 self.refresh_try = now()
                 self._restart(planned=True)
@@ -441,9 +441,9 @@ class SegmentRunner(threading.Thread):
                                     self.args.url_expiry_margin)
             if ok:
                 return urls
-            log("%-6s 來源 URL 失效（%s），重解析" % (self.sid, why), "WARN")
+            log("%-6s source URL expired (%s), re-resolving" % (self.sid, why), "WARN")
             emit({"event": "url_stale", "seg": self.sid, "reason": why})
-        return resolve_set(self.i, self.spec, self.clients, label="URL 更新")
+        return resolve_set(self.i, self.spec, self.clients, label="URL updated")
 
     def _refresh_due(self):
         """回傳該主動換手的理由，不需要就回 None。
@@ -464,7 +464,7 @@ class SegmentRunner(threading.Thread):
         hard = min([at + self.args.url_max_age]
                    + ([exp - self.args.url_expiry_margin] if exp else []))
         if now() >= hard:
-            return ("已解析 %.0fs / 到期剩 %.0fs"
+            return ("resolved %.0fs ago / expires in %.0fs"
                     % (now() - at, (exp - now()) if exp else -1))
         return None
 
@@ -473,7 +473,7 @@ class SegmentRunner(threading.Thread):
         if self.spec["type"] in ("vod", "live"):
             urls = self._fresh_urls()
             if not urls:
-                log("skip %s: 無可用來源" % self.sid, "ERROR")
+                log("skip %s: no usable source" % self.sid, "ERROR")
                 emit({"event": "skip", "seg": self.sid})
                 return False
         else:
@@ -482,7 +482,7 @@ class SegmentRunner(threading.Thread):
             exp = url_expiry(urls[0])
             if exp and exp - now() < self.spec["seconds"] + \
                     self.args.url_expiry_margin:
-                log("%-6s 警告：URL 剩 %.0fs 短於本段 %ss + 餘裕"
+                log("%-6s warning: URL lives %.0fs, shorter than this segment %ss plus slack"
                     % (self.sid, exp - now(), self.spec["seconds"]), "WARN")
         cmd = build_cmd(self.spec, self.target, urls)
         self.logfh = open(self.log_path, "ab")
@@ -529,7 +529,7 @@ class SegmentRunner(threading.Thread):
         except Exception as exc:
             # 讀不到 progress 等於看門狗瞎了，不能靜默吞掉。
             if proc.poll() is None and not STOP.is_set():
-                log("%-6s progress 讀取中斷: %r" % (self.sid, exc), "WARN")
+                log("%-6s progress read interrupted: %r" % (self.sid, exc), "WARN")
 
     # -------------------------------------------------------------- watchdog
     def _health(self):
@@ -541,7 +541,7 @@ class SegmentRunner(threading.Thread):
                 return
             if self.restarts < self.args.max_restarts:
                 emit({"event": "early_exit", "seg": self.sid, "rc": p.returncode})
-                log("%-6s 行程提前結束 rc=%s" % (self.sid, p.returncode), "WARN")
+                log("%-6s process exited early rc=%s" % (self.sid, p.returncode), "WARN")
                 self._recover()
             return
         st = self._prog
@@ -552,16 +552,16 @@ class SegmentRunner(threading.Thread):
                 return
             emit({"event": "watchdog", "seg": self.sid,
                   "stalled_s": round(stalled, 2), "mode": self.restart_mode})
-            log("%-6s 輸出停滯 %.1fs（門檻 %.1fs）" % (self.sid, stalled, limit),
+            log("%-6s output stalled %.1fs (threshold %.1fs)" % (self.sid, stalled, limit),
                 "WARN")
             self._recover(stalled)
             self._prog["last"] = now()
 
     def _restart(self, planned=False):
-        """planned=True 是排定的換手（URL 更新），不算失敗重試。
+        """planned=True 是排定的換手（URL updated），不算失敗retry。
 
         兩者必須分開計數：--url-max-age 30 分鐘的 24/7 聯播一天會換手 48 次，
-        若共用 max_restarts 額度，真正的故障就沒有重試機會了。
+        若共用 max_restarts 額度，真正的故障就沒有retry機會了。
         """
         old = self.proc
         if planned:
@@ -570,7 +570,7 @@ class SegmentRunner(threading.Thread):
             self.restarts += 1
         if self.spec["type"] in ("vod", "live") and not self.spec.get("direct"):
             resolve_set(self.i, self.spec, self.clients,
-                        label="預先更新" if planned else "重試")
+                        label="pre-emptive refresh" if planned else "retry")
         if self.restart_mode == "takeover":
             # 先讓新 publisher 接手同一條路徑，再收掉舊的 -> 接收端零斷點。
             if not self._launch():
@@ -582,7 +582,7 @@ class SegmentRunner(threading.Thread):
             self._launch()
 
     def _recover(self, stalled=None):
-        """來源失效時：先用墊片接管同一條路徑，再在背景重試來源。
+        """來源失效時：先用墊片接管同一條路徑，再在背景retry來源。
 
         直接重開同一條來源沒有意義——來源還在斷，重開只是再斷一次。
         所以先切墊片（接收端 0.34s 換手，見 relay-gaps 實測），等來源真的活了再切回來。
@@ -609,7 +609,7 @@ class SegmentRunner(threading.Thread):
         spec = {"id": self.sid + "-slate", "type": "filler",
                 "path": self.args.filler_on_stall}
         cmd = build_cmd(spec, self.target, None)
-        log("%-6s 切墊片 %s（%s）" % (self.sid, self.args.filler_on_stall,
+        log("%-6s switching to the filler %s (%s)" % (self.sid, self.args.filler_on_stall,
                                      self.restart_mode))
         self.slate_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                            stderr=self.logfh,
@@ -665,7 +665,7 @@ class SegmentRunner(threading.Thread):
                 with urllib.request.urlopen(url, timeout=6) as r:
                     txt = r.read().decode("utf-8", "replace")
             except Exception as exc:
-                log("%-6s 探測讀取失敗 %s" % (self.sid, exc), "WARN")
+                log("%-6s probe read failed %s" % (self.sid, exc), "WARN")
                 return False
             seq, last = None, None
             for ln in txt.splitlines():
@@ -702,7 +702,7 @@ class SegmentRunner(threading.Thread):
             self._terminate(self.slate_proc)
             self.slate_proc = None
             self.degraded = False
-            log("%-6s 來源恢復，切回直播" % self.sid)
+            log("%-6s source recovered, back to live" % self.sid)
             break
         self.retrying = False
 
@@ -735,7 +735,7 @@ def prepare_job(i, seg, at):
     sleep_until(at)
     if STOP.is_set():
         return
-    resolve_set(i, seg, RUNTIME["clients"], label="排程前置")
+    resolve_set(i, seg, RUNTIME["clients"], label="schedule prefix")
 
 
 def main():
@@ -745,40 +745,40 @@ def main():
     ap.add_argument("--overlap", type=float, default=0.0)
     ap.add_argument("--resolve-lead", type=float, default=4.0)
     ap.add_argument("--clients", default=None)
-    ap.add_argument("--only", default=None, help="逗號分隔的 segment id")
-    ap.add_argument("--observe", action="store_true", help="用 MediaMTX API 量測縫隙")
+    ap.add_argument("--only", default=None, help="comma-separated segment ids")
+    ap.add_argument("--observe", action="store_true", help="measure gaps through the MediaMTX API")
     ap.add_argument("--cookies", default=None,
-                    help="YouTube cookies.txt 路徑（來源被 bot 檢查擋住時用）。"
-                         "留空則自動找 <專案>/cookies.txt")
+                    help="path to a YouTube cookies.txt (for when bot checks block the source)."
+                         "when empty, look for <project>/cookies.txt")
     ap.add_argument("--check", action="store_true",
-                    help="只解析所有來源並回報可用性，不播出")
+                    help="only resolve every source and report availability; do not play")
     ap.add_argument("--loop", type=int, default=1, metavar="N",
-                    help="整份清單重複幾輪（0 = 無限，24/7 用）。"
-                         "輪與輪之間走同一套 takeover 交班，不必重啟行程")
+                    help="how many rounds of the whole list (0 = endless, for 24/7)."
+                         "rounds hand over with the same takeover, no process restart needed")
     ap.add_argument("--flow-threshold", type=float, default=5.0,
-                    help="bytesReceived 零成長幾秒算異常（預設 5，須大於來源片段長度）")
+                    help="seconds of flat bytesReceived before it counts as an anomaly (default 5, must exceed the source segment length)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--watchdog", type=float, default=3.0,
-                    help="輸出停滯幾秒就重開該段（0 = 關閉）")
+                    help="restart the segment after this many seconds of stalled output (0 = off)")
     ap.add_argument("--startup-grace", type=float, default=12.0,
-                    help="首個 progress 出現前的容忍秒數")
+                    help="seconds tolerated before the first progress appears")
     ap.add_argument("--max-restarts", type=int, default=6)
     ap.add_argument("--filler-on-stall", default="assets/transition.mp4",
-                    help="來源停滯時先接管成這個墊片（空字串 = 停用）")
+                    help="take over with this filler when the source stalls (empty = off)")
     ap.add_argument("--url-max-age", type=float, default=1800.0,
-                    help="來源 URL 最長沿用秒數，超過就重新解析；live 段還會在"
-                         "同一時間點主動換手（0 = 不限，預設 30 分鐘）")
+                    help="max seconds to reuse a source URL before re-resolving; live segments also"
+                         "hand over proactively at that point (0 = no limit, default 30 minutes)")
     ap.add_argument("--url-expiry-margin", type=float, default=300.0,
-                    help="manifest URL 到期前幾秒就先換掉（預設 300）")
+                    help="refresh the manifest URL this many seconds before it expires (default 300)")
     ap.add_argument("--retry-interval", type=float, default=8.0,
-                    help="來源失效後每隔幾秒重試一次")
+                    help="seconds between retries after the source goes bad")
     ap.add_argument("--probe-seconds", type=float, default=3.0,
-                    help="探測來源時先抓幾秒")
+                    help="seconds to pull when probing a source")
     ap.add_argument("--probe-wait", type=float, default=4.0,
-                    help="HLS 探測時，兩次讀取播放清單之間等幾秒")
+                    help="seconds between playlist reads during an HLS probe")
     ap.add_argument("--restart-mode", choices=["auto", "takeover", "cut"],
                     default="auto",
-                    help="auto：本機 MediaMTX 走 takeover（零斷點），其餘 cut")
+                    help="auto: local MediaMTX uses takeover (no gap), everything else cuts")
     args = ap.parse_args()
 
     with open(args.playlist, encoding="utf-8") as fh:
@@ -788,7 +788,7 @@ def main():
         keep = set(args.only.split(","))
         segs = [s for s in segs if s["id"] in keep]
     if not segs:
-        raise SystemExit("沒有可播的 segment")
+        raise SystemExit("no playable segment")
     target = args.target or pl["target"]
     clients = (args.clients.split(",") if args.clients
                else pl.get("clients") or DEFAULT_CLIENTS)
@@ -804,7 +804,7 @@ def main():
     RUNTIME["cookies"] = cookies or None
 
     log("target=%s" % target)
-    log("cookies=%s" % (cookies or "(無)"))
+    log("cookies=%s" % (cookies or "(none)"))
     log("segments=%d overlap=%.1fs watchdog=%.1fs clients=%s"
         % (len(segs), args.overlap, args.watchdog, ",".join(clients)))
 
@@ -823,20 +823,20 @@ def main():
         for i, seg in enumerate(segs):
             if seg["type"] not in URL_TYPES:
                 skip += 1
-                log("check %-10s %-6s 略過（本機檔案/墊片）"
+                log("check %-10s %-6s skipped (local file / filler)"
                     % (seg.get("id", i), seg["type"]))
                 continue
             urls = resolve_set(i, seg, clients, label="check")
             if urls:
                 ok += 1
                 exp = url_expiry(urls[0])
-                log("check %-10s OK   %d 條 URL%s"
+                log("check %-10s OK   %d URL(s)%s"
                     % (seg.get("id", i), len(urls),
-                       ("，expire 剩 %.0fs" % (exp - now())) if exp else ""))
+                       (", expires in %.0fs" % (exp - now())) if exp else ""))
             else:
                 bad += 1
-                log("check %-10s FAIL（來源不可用）" % (seg.get("id", i)), "ERROR")
-        log("check 完成：OK=%d FAIL=%d SKIP=%d" % (ok, bad, skip))
+                log("check %-10s FAIL (source unavailable)" % (seg.get("id", i)), "ERROR")
+        log("check done: OK=%d FAIL=%d SKIP=%d" % (ok, bad, skip))
         return 0 if bad == 0 else 2
 
     emit({"event": "run_start", "target": target, "overlap": args.overlap,
@@ -850,7 +850,7 @@ def main():
             obs.start()
             log("observer started on MediaMTX path '%s'" % p)
         else:
-            log("--observe 需要本機 MediaMTX target，已停用", "WARN")
+            log("--observe needs a local MediaMTX target, disabled", "WARN")
 
     for i, seg in enumerate(segs):
         # "direct": true 代表 url 已經是可直接餵給 ffmpeg 的位址，跳過 yt-dlp 解析。
@@ -892,7 +892,7 @@ def main():
         for r in list(RUNNERS):
             r.join(timeout=max(1.0, r.stop_at - now()) + 30.0)
     except KeyboardInterrupt:
-        log("KeyboardInterrupt，收工", "WARN")
+        log("KeyboardInterrupt, stopping", "WARN")
     finally:
         STOP.set()
         for r in list(RUNNERS):
@@ -919,23 +919,23 @@ def main():
         fwins = obs.flow_windows(0.0)
         longest = max((w[2] for w in fwins), default=0.0)
         bad = [w for w in fwins if w[2] >= args.flow_threshold]
-        log("觀測取樣 %d 筆 / 涵蓋 %.2fs (api_fail=%d)"
+        log("observation samples %d / span %.2fs (api_fail=%d)"
             % (len(obs.samples), elapsed, obs.api_fail))
         if not wins:
-            log("接收端離線時段：0 段（整場連續）", "OK")
+            log("receiver offline windows: 0 (continuous)", "OK")
         else:
             for (a, b, d) in wins:
-                log("接收端離線 %s -> %s = %.3fs" % (stamp(a), stamp(b), d), "WARN")
-            log("接收端離線總計 %.3fs（%d 段）" % (total_off, len(wins)), "WARN")
-        log("資料零成長間隔 %d 段，最長 %.3fs（HLS 是整段拉整段送，"
-            "來源正常時每隔一個片段長度本來就會空一段）"
+                log("receiver offline %s -> %s = %.3fs" % (stamp(a), stamp(b), d), "WARN")
+            log("receiver offline total %.3fs (%d windows)" % (total_off, len(wins)), "WARN")
+        log("flat-data windows: %d, longest %.3fs (HLS pulls and delivers in chunks,"
+            "so a gap of one segment length is normal with a healthy source)"
             % (len(fwins), longest), "INFO")
         if bad:
             for (a, b, d) in bad:
-                log("零成長 >= %.1fs：%s -> %s = %.3fs"
+                log("flat >= %.1fs: %s -> %s = %.3fs"
                     % (args.flow_threshold, stamp(a), stamp(b), d), "WARN")
         else:
-            log("沒有 >= %.1fs 的零成長區間" % args.flow_threshold, "OK")
+            log("no flat window >= %.1fs" % args.flow_threshold, "OK")
         with open(GAPS_PATH, "w", encoding="utf-8") as fh:
             json.dump({"overlap": args.overlap, "elapsed": round(elapsed, 3),
                        "samples": len(obs.samples),
@@ -951,7 +951,7 @@ def main():
                            {"from": stamp(a), "to": stamp(b), "seconds": round(d, 3)}
                            for (a, b, d) in bad]},
                       fh, ensure_ascii=False, indent=2)
-        log("gap 報告寫入 %s" % GAPS_PATH)
+        log("gap report written to %s" % GAPS_PATH)
     return 0
 
 
