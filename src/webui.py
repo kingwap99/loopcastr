@@ -1193,6 +1193,7 @@ UI_TEXT = {
     "一輪播幾趟（0＝用預設）": "passes per round (0 = auto)",
     "只收首播時間在 N 小時內的影片（0＝不限；先用上面的支數取前 N 支再過濾）":
         "keep only videos first aired within N hours (0 = no limit; applied after the video limit)",
+    "只播幾小時內首播的（0＝不限）": "only videos first aired within N hours (0 = no limit)",
     "新聞模式": "News mode",
     "（modes.json 裡沒有可編輯的模式）": "(no editable modes in modes.json)",
     # ── 狀態與訊息
@@ -1780,6 +1781,7 @@ var FIELDS = [
   ["shorts_url", "② 過場 shorts 網址（轉場輪播）", "text", 56,
    "https://www.youtube.com/@YourChannel/shorts"],
   ["video_limit", "影片數上限", "number", 6, ""],
+  ["max_age_hours", "只播幾小時內首播的（0＝不限）", "number", 6, ""],
   ["max_seconds", "每支長度上限（秒，0＝全長）", "number", 6, ""],
   ["shorts_count", "shorts 支數", "number", 6, ""],
   ["shorts_seconds", "每支 short 長度上限（秒）", "number", 6, ""],
