@@ -684,3 +684,30 @@ link 之前原本的檔案都還在，install 失敗也不會斷。
 為了能在控制台按「看直播畫面」直接看測試結果，`.22` 的 `mediamtx.yml` 改成
 `hls: yes` ＋ `hlsAddress: :8888`（綁所有介面，區網可看）。這是**每台部署的選擇**，
 repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU）。
+
+### 迴歸：控制台的設定表單整片不見（2026-09-22，使用者發現）
+
+【實測】症狀：控制台只剩狀態列與服務區塊，**「① 來源設定」的三張模式卡片、
+模式下拉、畫質表單全部空白** —— 也就是使用者唯一能自己改設定的入口整個消失。
+
+根因是上一輪「遠端模式修 token」那批改動：把 GET 換成 `getJSON()` 時，
+`loadCfg()` 的鏈變成
+
+    getJSON("/api/schema").then(... return getJSON("/api/config"); )
+      .then(function(r){ return r.json(); })   // ← getJSON 已經 parse 過了
+
+`r` 是物件、`r.json` 不存在 → TypeError → 後面整串（`renderSettings`、
+`renderModes`、下拉選項、`refresh()`）全部沒跑。修法是拿掉那個多餘的 `.then`。
+
+**教訓**：那批改動我只驗了「狀態列與服務區塊有沒有出來」（因為修的是 token），
+沒有驗**設定表單**——而表單正是使用者唯一能改來源與畫質的地方。
+驗證要涵蓋「使用者真的會走的那條路」，不是只驗自己剛改的那一段。
+
+【實測】修好後：
+
+    模式卡片 3 張、每張 10 個輸入欄位（含新增的 max_age_hours）
+    模式下拉 3 個選項（news／promotion／test）
+    畫質表單（語言 ui 區塊）有內容、原始 JSON textarea 有內容
+    JS 錯誤 0
+    儲存路徑：POST /api/config 改 test.shorts_seconds 90 → 91 → 還原 90，
+              每次都回 ok、wrote modes.json、舊版留 .bak

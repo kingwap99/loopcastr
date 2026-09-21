@@ -1801,7 +1801,7 @@ function loadCfg(){
   getJSON("/api/schema").then(function(sc){
     SETTINGS_SCHEMA = sc.settings || [];
     return getJSON("/api/config");
-  }).then(function(r){ return r.json(); }).then(function(c){
+  }).then(function(c){
     SETTINGS_CACHE = c.settings || {};
     document.getElementById("ta-settings").value = JSON.stringify(c.settings, null, 2);
     document.getElementById("ta-modes").value = JSON.stringify(c.modes, null, 2);
