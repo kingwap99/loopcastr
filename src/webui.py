@@ -1624,10 +1624,27 @@ function text(id, s){ document.getElementById(id).textContent = s; }
 function html(id, s){ document.getElementById(id).innerHTML = s; }
 function msg(s){ text("msg", s || ""); }
 
+// 對外開放時（--host 0.0.0.0）要帶 token。?token= 只擋得住第一次載入，
+// 之後每個 /api/* 都要自己帶，否則整頁都會 401（這個 bug 在遠端模式下必現）。
+var TOKEN = (function(){
+  var m = location.search.match(/[?&]token=([^&]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+})();
+
+function authHeaders(extra){
+  var h = extra || {};
+  if (TOKEN) { h["X-Ytpl-Token"] = TOKEN; }
+  return h;
+}
+
+function getJSON(url){
+  return fetch(url, { headers: authHeaders() }).then(function(r){ return r.json(); });
+}
+
 function post(url, body){
   return fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Ytpl": "1" },
+    headers: authHeaders({ "Content-Type": "application/json", "X-Ytpl": "1" }),
     body: JSON.stringify(body)
   }).then(function(r){ return r.json(); });
 }
@@ -1709,7 +1726,7 @@ function svcCall(label, action){
 function refresh(){
   if (REFRESHING) { return; }
   REFRESHING = true;
-  fetch("/api/status").then(function(r){ return r.json(); }).then(function(s){
+  getJSON("/api/status").then(function(s){
     STAT_FAIL = 0;
     text("head", s.now + "　目錄 " + s.prefix);
     renderQuick(s);
@@ -1778,9 +1795,9 @@ function refresh(){
 }
 
 function loadCfg(){
-  fetch("/api/schema").then(function(r){ return r.json(); }).then(function(sc){
+  getJSON("/api/schema").then(function(sc){
     SETTINGS_SCHEMA = sc.settings || [];
-    return fetch("/api/config");
+    return getJSON("/api/config");
   }).then(function(r){ return r.json(); }).then(function(c){
     SETTINGS_CACHE = c.settings || {};
     document.getElementById("ta-settings").value = JSON.stringify(c.settings, null, 2);
@@ -2034,7 +2051,7 @@ function lockButtons(t){
 }
 
 function pollTask(){
-  fetch("/api/task").then(function(r){ return r.json(); }).then(function(t){
+  getJSON("/api/task").then(function(t){
     lockButtons(t);
     var head = (t.running ? (t.stopping ? "正在停止…　" : "執行中　") : "已完成／待機　") +
                (t.action || "") + (t.adopted ? "（webui 重啟前啟動的）" : "") +

@@ -20,11 +20,13 @@ Output is compatible with the existing playlist JSON, plus:
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
 
-YTDLP = "/opt/homebrew/bin/yt-dlp"
+# yt-dlp 的位置：優先用 PATH 上的（不是每個人都用 brew 裝），找不到才退回 brew 的預設路徑。
+YTDLP = shutil.which("yt-dlp") or "/opt/homebrew/bin/yt-dlp"
 FMT = "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/b"
 
 

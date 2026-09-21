@@ -6,6 +6,8 @@
 # 可以重複執行；已存在的 mediamtx.yml 與 stream.key 不會被覆蓋。
 
 set -eu
+# 從 ssh／腳本呼叫時 PATH 可能沒有 brew，先補上（下面的依賴檢查用 command -v）。
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
 
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 HOME_DIR="$HOME"
@@ -192,7 +194,8 @@ if [ "$DO_SERVICES" = 1 ]; then
       sudo -v || { say "  取得 sudo 權限失敗；改用 --agents 或 --no-services" >&2; exit 5; }
     fi
   fi
-  for s in mediamtx playout publish health refresh; do
+  # webui（控制台）也要一起裝：它是日常操作的入口，漏掉的話遠端就只能用命令列。
+  for s in mediamtx playout publish health refresh webui; do
     label="com.loopcastr.$s"
     if [ "$SCOPE" = "daemon" ]; then
       run sudo cp -f "$PREFIX/$label.plist" "/Library/LaunchDaemons/$label.plist"

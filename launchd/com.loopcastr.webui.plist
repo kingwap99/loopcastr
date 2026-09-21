@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.loopcastr.webui</string>
+
+	<!-- 本機控制台。預設只綁 127.0.0.1；要從別台機器開就在 ProgramArguments 加上
+	     --host 0.0.0.0 --token-file <prefix>/webui-token（沒有 token 時它會拒絕啟動）。 -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/python3</string>
+		<string>__HOME__/loopcastr/webui.py</string>
+	</array>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/bin:/bin</string>
+	</dict>
+
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+
+	<key>StandardOutPath</key>
+	<string>__HOME__/loopcastr/logs/webui.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME__/loopcastr/logs/webui.err.log</string>
+
+	<key>UserName</key>
+	<string>__USER__</string>
+</dict>
+</plist>

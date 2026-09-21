@@ -529,3 +529,57 @@ Logo／Icon 是從品牌提案裡還原出來的向量圖（`assets/`）：
 
 【實測】部署端（播 news）：單輪 **220 段、94768 秒（26.3 小時）**，
 下次循環 2026-09-22 19:52:14；修改前顯示的是 3 段／540 秒。
+
+## 測試機搬到 .22，.39 退場（2026-09-22）
+
+以後測試都在 `192.168.31.22`（MacBook-Air-FS.local，macOS 26.6.2）；
+`.39`（原本的開發機）整套停掉不用。
+
+### .22 的環境與安裝
+
+| 項目 | 狀態 |
+|---|---|
+| brew／ffmpeg／ffprobe／python3 3.14.3／node | 本來就有 |
+| yt-dlp | **用 pip 裝**（`pip install --break-system-packages yt-dlp`） |
+| mediamtx v1.21.1 | 官方 darwin_arm64 單檔，放 `/opt/homebrew/bin/` |
+| Pillow 12.3.0／qrcode | `pip install --user --break-system-packages` |
+| 安裝方式 | `./install.sh --prefix ~/loopcastr --agents --no-services` |
+
+【實測】**brew 完全不能用**：`brew install` 直接回「You have not agreed to the Xcode
+license」。接受授權是系統層變更，所以改走「不碰授權」的路 —— yt-dlp 走 pip、
+mediamtx 抓官方單檔。要改用 brew 管理就得先 `sudo xcodebuild -license accept`。
+
+【實測】GitHub release 對那台很慢（約 100 KB/s，25.6 MB 抓了 4 分鐘），而且第一次
+抓 yt-dlp 時卡在 11.9 MB 不動 —— 所以 mediamtx 的下載改成「`-C -` 續傳 ＋ 重試 6 次」。
+
+### 控制台遠端模式的 bug（修掉才能用）
+
+`?token=` 只擋得住第一次載入：頁面載進來之後，**每個 `/api/*` 都沒有帶 token**，
+所以遠端開控制台會整頁 401。修法：頁面記住 `location.search` 的 token
+（`var TOKEN`），所有 GET 走新的 `getJSON()`、POST 走 `post()`，兩者都掛
+`X-Ytpl-Token`。
+
+【實測】`--host 0.0.0.0 --token-file webui-token`：curl 不帶 token 回 401、
+帶 `X-Ytpl-Token` 回 200、瀏覽器開 `?token=…` 時狀態列與服務區塊都正常（API 有帶到 token）。
+
+### install.sh 補兩個洞
+
+1. **服務清單漏了 `webui`**：`for s in mediamtx playout publish health refresh`
+   是寫死的，所以控制台從來沒被 install.sh 裝過（.39 那顆是手動加的）。
+   現在多了 `launchd/com.loopcastr.webui.plist` 模板，清單也補上 webui。
+2. **PATH**：從 ssh／腳本呼叫時 PATH 沒有 brew，依賴檢查會誤報「缺少 ffmpeg／yt-dlp／mediamtx」。
+   改成腳本開頭自己補 `/opt/homebrew/bin`。
+
+### .22 的現況與 .39 的退場
+
+【實測】.22 控制台：`services: mediamtx(跑) playout(停) publish(停) health(停) refresh(停)`、
+`開播檢查: news 還沒建置內容／promotion 來源還是範例值／test 還沒建置內容`。
+
+mediamtx 與 webui 已用 LaunchAgent 起著；**playout／publish／health／refresh 先不啟動** ——
+install.sh 的「還沒有播出內容就先不裝」保護本來就會擋，而且那四個要等內容建好才有意義。
+它們的 plist 已經在 `~/loopcastr/`，所以控制台服務區塊會顯示「沒有載入 ＋ 啟動」，
+第一次建置完成後直接在那裡按「啟動」即可（gui domain，不需要 sudo）。
+
+.39 的處理：`launchctl bootout` 四個服務（先停 publish，YouTube 端才是有序結束），
+再把 plist 移到 `~/ytpl/launchagents-disabled/`，這樣重開機登入也不會自己回來。
+**資料 28 GB 原封不動留在 `~/ytpl`**，要恢復就是把 plist 搬回去再 bootstrap。
