@@ -583,3 +583,11 @@ install.sh 的「還沒有播出內容就先不裝」保護本來就會擋，而
 .39 的處理：`launchctl bootout` 四個服務（先停 publish，YouTube 端才是有序結束），
 再把 plist 移到 `~/ytpl/launchagents-disabled/`，這樣重開機登入也不會自己回來。
 **資料 28 GB 原封不動留在 `~/ytpl`**，要恢復就是把 plist 搬回去再 bootstrap。
+
+### 順手修掉第一次建置的死路
+
+全新安裝時播出端還沒被載入，`switch_edition.sh` 原本遇到「兩個 domain 都找不到服務」
+只會印一行警告就結束（exit 6）—— 也就是說第一次按「建置並切換（開始直播）」
+**建好內容卻永遠不會開播**，得自己先去 `./install.sh` 或手動 bootstrap。
+現在那個分支會直接把剛寫好的 plist 載起來（gui 或 system 都支援），
+所以「建置並切換」在全新機器上可以一次到位。

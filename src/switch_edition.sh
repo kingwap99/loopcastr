@@ -104,9 +104,26 @@ case "$SCOPE" in
     sudo_do launchctl bootstrap system "$INSTALLED" || exit 5
     ;;
   none)
-    echo "WARNING: ${LABEL} is not loaded in either the gui or the system domain." >&2
-    echo "  $PLIST and the concat list were updated, but there is no service to restart; run ./install.sh first" >&2
-    exit 6
+    # 服務還沒被載入（例如全新安裝、內容才剛建好）：直接把剛寫好的這份 plist 載起來。
+    # 沒有這一段的話，第一次「建置並切換」只會印警告、播出端永遠不會動。
+    echo "service ${LABEL} is not loaded yet; loading it now"
+    if [ -f "$HOME/Library/LaunchAgents/${LABEL}.plist" ]; then
+      cp "$PLIST" "$HOME/Library/LaunchAgents/${LABEL}.plist"
+      launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/${LABEL}.plist" || exit 5
+      SCOPE=gui
+      INSTALLED="$HOME/Library/LaunchAgents/${LABEL}.plist"
+    elif [ -f "/Library/LaunchDaemons/${LABEL}.plist" ]; then
+      sudo_do cp "$PLIST" "/Library/LaunchDaemons/${LABEL}.plist"
+      sudo_do chown root:wheel "/Library/LaunchDaemons/${LABEL}.plist"
+      sudo_do chmod 644 "/Library/LaunchDaemons/${LABEL}.plist"
+      sudo_do launchctl bootstrap system "/Library/LaunchDaemons/${LABEL}.plist" || exit 5
+      SCOPE=system
+      INSTALLED="/Library/LaunchDaemons/${LABEL}.plist"
+    else
+      echo "WARNING: ${LABEL} is not loaded and no plist is installed;" >&2
+      echo "  run ./install.sh --agents (or ./install.sh) first" >&2
+      exit 6
+    fi
     ;;
 esac
 sleep 6
