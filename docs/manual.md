@@ -570,6 +570,10 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.loopcastr.mediamtx.pl
 注意：**concat 清單是播出端啟動時讀一次**（實測：播放中 append 進清單的片段完全不會被播到），
 所以每次擴充都必須重啟播出端 —— 換片點重啟是為了不讓觀眾看到中斷，不是為了省掉重啟。
 
+代價：每次擴充都會重啟播出端一次，**推流端（YouTube）也會跟著重連一次**（幾秒）。
+批次開大一點（`batch_size`，預設 10）可以少幾次；實測 `.22` 的 publish log 會看到
+`connect #N` 一直往上加，那是正常的。
+
 #### 重新建置時不會重編已經做好的
 
 每支影片與過場都記了「編碼參數指紋 ＋ 檔案大小」，重新建置時如果 media 裡那一份還在、
