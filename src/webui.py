@@ -868,11 +868,27 @@ def build_cmd(action, body):
             cmd.append("--switch")
         return cmd, ""
     if action == "concat":
+        # 要用「目前選的那個模式」的清單，不能寫死正式版：
+        # 只建過 test 的機器上，playlist-local.json 根本不存在。
+        mode = str(body.get("mode") or "").strip() or "live"
+        pl_name, list_name = EDITION.get(mode, EDITION["live"])
+        src = os.path.join(PREFIX, pl_name)
+        if not os.path.exists(src):
+            return None, "%s 不存在；這個模式要先建置過" % pl_name
         return [sys.executable, os.path.join(HERE, "make_concat_list.py"),
-                PLAYLIST_LOCAL, "-o", CONCAT, "--base-dir", HERE], ""
+                src, "-o", os.path.join(PREFIX, list_name), "--base-dir", HERE], ""
     if action == "status":
-        return [sys.executable, os.path.join(HERE, "build_local_content.py"),
-                "--playlist", PLAYLIST, "--status"], ""
+        mode = str(body.get("mode") or "").strip() or "live"
+        name = "playlist.json" if mode == "live" else "playlist-%s.json" % mode
+        src = os.path.join(PREFIX, name)
+        if not os.path.exists(src):
+            return None, "%s 不存在；這個模式要先掃描過" % name
+        cmd = [sys.executable, os.path.join(HERE, "build_local_content.py"),
+               "--playlist", src, "--status"]
+        media = MEDIA if mode == "live" else os.path.join(MEDIA, mode)
+        if os.path.isdir(media):
+            cmd += ["--media-dir", media]
+        return cmd, ""
     if action == "loopwatch":
         return [sys.executable, os.path.join(HERE, "loopwatch.py"),
                 "--playlist", PLAYLIST_LOCAL, "--lead", "45", "--tail", "90"], ""
@@ -1232,6 +1248,8 @@ UI_TEXT = {
         "keep only videos first aired within N hours (0 = no limit; applied after the video limit)",
     "只播幾小時內首播的（0＝不限）": "only videos first aired within N hours (0 = no limit)",
     "語系只能是 zh 或 en": "the language must be zh or en",
+    "%s 不存在；這個模式要先建置過": "%s does not exist; build this mode first",
+    "%s 不存在；這個模式要先掃描過": "%s does not exist; scan this mode first",
     "新聞模式": "News mode",
     "（modes.json 裡沒有可編輯的模式）": "(no editable modes in modes.json)",
     # ── 狀態與訊息
