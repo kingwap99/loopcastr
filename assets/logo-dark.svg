@@ -1,5 +1,6 @@
 <!-- loopcastr 主視覺（深色底）：Infinite Broadcast -->
-<svg viewBox="0 0 340 160" width="100%" xmlns="http://www.w3.org/2000/svg">
+<!-- viewBox 比提案的 340 寬一點：標語 "ALWAYS ON. ALWAYS PLAYING." 在 340 會被切掉 -->
+<svg viewBox="0 0 400 160" width="100%" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="lcgrad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#40E0D0" />
@@ -14,5 +15,5 @@
   <path d="M69 58 Q69 54 74 57 L101 77 Q106 80 101 83 L74 103 Q69 106 69 100 Z" fill="#FFFFFF" />
   <text x="170" y="87" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.4" fill="#F8FAFC">loop</text>
   <text x="238" y="87" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.4" fill="#40E0D0">castr</text>
-  <text x="172" y="111" font-family="Inter,Arial,sans-serif" font-size="9" font-weight="600" letter-spacing="3" fill="#8D9AB8">ALWAYS ON. ALWAYS PLAYING.</text>
+  <text x="172" y="111" font-family="Inter,Arial,sans-serif" font-size="9" font-weight="600" letter-spacing="2.2" fill="#8D9AB8">ALWAYS ON. ALWAYS PLAYING.</text>
 </svg>
