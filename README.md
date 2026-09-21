@@ -65,6 +65,16 @@
 只用標準庫，不必額外安裝。預設只綁 `127.0.0.1`，要對外開放**必須**帶 token 否則拒絕啟動；
 不以 root 執行、不保管密碼，**stream key 只進不出**。細節見 [操作手冊](docs/manual.md)。
 
+### 不用等整批轉完才開播
+
+每個模式可以設 `first_batch`（控制台是「先做幾支就開播」）：先做前 N 支就上線，
+之後每批擴充一次，每次都在**下一個換片點**重啟播出端，所以觀眾不會看到內容跳回開頭。
+`news`（55 支全長）原本要等好幾小時，設 `first_batch=2` 之後第一批做完就能播。
+
+重新建置時也只補缺的：每支影片與過場都記了「編碼參數指紋 ＋ 檔案大小」，
+沒變就跳過（`--force` 才全部重做）。實測 `.22` 上重跑一次 `test` 模式：
+`3 skipped by fingerprint`、`0 transitions, 6 skipped`，整輪 15 秒、0 支重編。
+
 品牌資產（Logo／Icon／配色／標語）在 [`assets/`](assets/)：`icon.svg`、`icon-dark.svg`、
 `logo-dark.svg`、`logo-light.svg`。控制台用 `icon-dark` 當 favicon。
 
@@ -208,6 +218,17 @@ Once installed, day-to-day operation needs no shell commands:
 Standard library only, so there is nothing to install. It binds to `127.0.0.1` by default; exposing it
 requires a token or it refuses to start. It never runs as root and never stores passwords, and the
 **stream key is write-only** (the page can set it but will never display it).
+
+### Go live without waiting for the whole build
+
+Each mode can set `first_batch` (the console calls it "go live after building this many videos"):
+the first N videos are built, deployed and put on air, then each further batch extends the list —
+restarting the playout **at the next segment boundary**, so viewers never see it jump back to the
+start. A 55-video `news` build that used to take hours is live after the first couple of videos.
+
+Rebuilds only fill in what is missing: every video and transition records an
+"encode-parameter fingerprint plus file size", and unchanged files are skipped
+(`--force` redoes everything).
 
 Brand assets (logo / icon / colours / tagline) live in [`assets/`](assets/):
 `icon.svg`, `icon-dark.svg`, `logo-dark.svg`, `logo-light.svg`. The console uses

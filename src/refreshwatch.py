@@ -29,6 +29,7 @@ import time
 import urllib.request
 
 import mode_build as MB
+import playout_ctl as pctl
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 YTDLP = "/opt/homebrew/bin/yt-dlp"
@@ -104,17 +105,9 @@ def notify(text):
         log("Telegram notification failed: %r" % exc)
 
 
-def last_start():
-    last = None
-    p = os.path.join(HERE, "logs", "playout.log")
-    if not os.path.exists(p):
-        return None
-    with open(p, encoding="utf-8", errors="ignore") as fh:
-        for line in fh:
-            m = START_RE.search(line)
-            if m:
-                last = datetime.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-    return last
+def next_boundary(local_json):
+    """下一個換片點（推算邏輯在 playout_ctl，跟分批建置共用）。"""
+    return pctl.next_boundary(local_json)
 
 
 def active_mode():
@@ -138,36 +131,12 @@ def active_mode():
     return ""
 
 
-def next_boundary(local_json):
-    """播出端時間軸是連續累加的，所以用「開播時間 + 各段累加長度」推算換片點。"""
-    st = last_start()
-    if not st or not os.path.exists(local_json):
-        return None
-    segs = json.load(open(local_json, encoding="utf-8")).get("segments") or []
-    total = sum(s.get("outpoint") or s["seconds"] for s in segs)
-    if total <= 0:
-        return None
-    elapsed = (datetime.datetime.now() - st).total_seconds()
-    done = elapsed % total
-    acc = 0.0
-    for s in segs:
-        acc += s.get("outpoint") or s["seconds"]
-        if acc > done:
-            return st + datetime.timedelta(seconds=elapsed - done + acc)
-    return st + datetime.timedelta(seconds=elapsed - done + total)
-
-
 def restart_playout():
-    cmd = ["launchctl", "kickstart", "-k", "system/" + SVC + "playout"]
-    if os.geteuid() == 0:
-        return subprocess.run(cmd, stdin=subprocess.DEVNULL).returncode == 0
-    pw = os.environ.get("SUDO_PASS")
-    if not pw:
-        log("not root and SUDO_PASS is unset, cannot restart the playout")
-        return False
-    cv = ["sudo", "-S"] + cmd
-    return subprocess.run(cv, input=pw + chr(10), text=True,
-                          capture_output=True).returncode == 0
+    """重啟播出端；回傳用過的指令（空字串＝失敗）。"""
+    how = pctl.restart_playout()
+    if not how:
+        log("could not restart the playout (gui and system domain both failed)")
+    return how
 
 
 def check(mode, cfg, f, args):

@@ -1247,6 +1247,8 @@ UI_TEXT = {
     "只收首播時間在 N 小時內的影片（0＝不限；先用上面的支數取前 N 支再過濾）":
         "keep only videos first aired within N hours (0 = no limit; applied after the video limit)",
     "只播幾小時內首播的（0＝不限）": "only videos first aired within N hours (0 = no limit)",
+    "先做幾支就開播（0＝全部做完才切換）":
+        "go live after building this many videos (0 = wait for everything)",
     "語系只能是 zh 或 en": "the language must be zh or en",
     "%s 不存在；這個模式要先建置過": "%s does not exist; build this mode first",
     "%s 不存在；這個模式要先掃描過": "%s does not exist; scan this mode first",
@@ -1865,6 +1867,7 @@ var FIELDS = [
    "https://www.youtube.com/@YourChannel/shorts"],
   ["video_limit", "影片數上限", "number", 6, ""],
   ["max_age_hours", "只播幾小時內首播的（0＝不限）", "number", 6, ""],
+  ["first_batch", "先做幾支就開播（0＝全部做完才切換）", "number", 6, ""],
   ["max_seconds", "每支長度上限（秒，0＝全長）", "number", 6, ""],
   ["shorts_count", "shorts 支數", "number", 6, ""],
   ["shorts_seconds", "每支 short 長度上限（秒）", "number", 6, ""],

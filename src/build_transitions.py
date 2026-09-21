@@ -35,6 +35,45 @@ TMP = "/tmp/wm"
 
 
 
+FP_VERSION = 1          # 改動會影響過場畫面的程式時要 +1，讓舊檔重做
+
+
+def transition_fp(base_id, seconds, caption, title, air, sid, p, stride):
+    """這一支過場的「參數指紋」：底稿、長度、文字、QR、贊助…沒變就不必重做。"""
+    if blc is None:
+        return ""
+    import hashlib
+    blob = json.dumps({
+        "v": FP_VERSION, "base": os.path.basename(base_id or ""),
+        "seconds": seconds, "caption": caption, "title": title, "air": air,
+        "sid": sid, "pass": p, "stride": stride,
+        "qr_size": blc.QR_SIZE, "qr_px": blc.QR_PX,
+        "text_size": blc.TEXT_SIZE, "text_stroke": blc.TEXT_STROKE,
+        "date_label": blc.DATE_LABEL,
+        "sponsor_url": blc.SPONSOR_URL, "sponsor_caption": blc.SPONSOR_CAPTION,
+    }, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+
+def load_manifest(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def deployed_ok(skip_dir, name, fp):
+    """已部署的那一份還在、指紋也一樣 → 可以跳過。"""
+    if not skip_dir or not fp:
+        return False
+    p = os.path.join(skip_dir, name)
+    if not os.path.exists(p):
+        return False
+    rec = load_manifest(os.path.join(skip_dir, "transitions.json")).get(name) or {}
+    return rec.get("fp") == fp and rec.get("bytes") == os.path.getsize(p)
+
+
 def make_qr(url, path, scale=8, border=4):
     p = subprocess.run([sys.executable, os.path.join(HERE, "make_qr_png.py"),
                         url, path, "--scale", str(scale), "--border", str(border)],
@@ -174,6 +213,13 @@ def main():
     # 第二趟從第 31 支 short 接著播。
     ap.add_argument("--passes", type=int, default=1,
                     help="how many passes of videos per round (default 1) so the whole shorts pool gets used")
+    ap.add_argument("--stride", type=int, default=0,
+                    help="shorts 輪動的步幅（預設＝本輪集數）。分批建置時要給固定值，"
+                         "否則集數一變、所有過場的指紋都變、全部重做")
+    ap.add_argument("--skip-dir", default="",
+                    help="已部署的目錄；同一支過場的參數指紋沒變就跳過不做（分批建置用）")
+    ap.add_argument("--force", action="store_true",
+                    help="忽略指紋，全部重做")
     a = ap.parse_args()
 
     out_dir = a.out_dir or MEDIA
@@ -211,6 +257,7 @@ def main():
         bases = [CLEAN]
 
     jobs = []
+    skipped = 0
     for p in range(max(1, a.passes)):
         for i, seg in enumerate(eps, 1):
             sid = seg["id"]
@@ -244,12 +291,25 @@ def main():
                                           show_url=False)
                 ov.append((sb, None, "x=W-w:y=H-h"))
 
-                # shorts 連續輪動：第 p 趟第 i 支用池子裡第 (p*len(eps) + i - 1) 支。
-                idx = p * len(eps) + (i - 1)
-                jobs.append({"i": i, "pass": p, "sid": sid, "url": url, "out": out,
-                             "base": bases[idx % len(bases)], "ov": ov})
+            # shorts 連續輪動：第 p 趟第 i 支用池子裡第 (p*len(eps) + i - 1) 支。
+            # ⚠ 這兩行原本被縮排在「有贊助連結」的 if 裡面 —— 沒設 sponsor_url 就
+            #   一支過場都不會做（實測 .22：concat 六段全是影片、_tr_ 檔 0 個）。
+            # 步幅：預設是「這一輪的集數」，分批建置時由 --stride 給固定值（例如
+            # 模式的 video_limit），這樣中途加入集數不會讓已做好的過場全部重做。
+            stride = a.stride or len(eps)
+            idx = p * stride + (i - 1)
+            base = bases[idx % len(bases)]
+            fp = transition_fp(base, a.seconds, a.button_caption,
+                               seg.get("title") or "", seg.get("air_date") or "",
+                               sid, p, stride)
+            if not a.force and deployed_ok(a.skip_dir, name, fp):
+                skipped += 1
+                continue
+            jobs.append({"i": i, "pass": p, "sid": sid, "url": url, "out": out,
+                         "base": base, "ov": ov, "name": name, "fp": fp})
 
-    print("building %d transitions (title bar + QR)..." % len(jobs), flush=True)
+    print("building %d transitions (title bar + QR), %d skipped by fingerprint..."
+          % (len(jobs), skipped), flush=True)
     done = fail = 0
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=max(1, a.parallel)) as ex:
@@ -263,6 +323,17 @@ def main():
             else:
                 done += 1
     print("encoding done OK=%d FAIL=%d in %.0f s" % (done, fail, time.time() - t0))
+
+    # 記下指紋（含 bytes）：下一輪如果檔案還在、指紋一樣、大小一樣就跳過。
+    if a.skip_dir:
+        mp = os.path.join(a.skip_dir, "transitions.json")
+        rec = load_manifest(mp)
+        for j in jobs:
+            if os.path.exists(j["out"]):
+                rec[j["name"]] = {"fp": j["fp"], "bytes": os.path.getsize(j["out"])}
+        os.makedirs(a.skip_dir, exist_ok=True)
+        with open(mp, "w", encoding="utf-8") as fh:
+            json.dump(rec, fh, ensure_ascii=False, indent=2)
 
     if a.verify and fail == 0:
         print("sample verification (decoded from the encoded files)...", flush=True)

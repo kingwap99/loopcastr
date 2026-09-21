@@ -345,6 +345,41 @@ def make_countdown_frames(total, out_dir, size=28, prefix=""):
     return n
 
 
+FP_VERSION = 1      # 改動會影響畫面的程式（浮水印、濾鏡、參數）時要 +1，讓舊檔重做
+
+
+def encode_fp(seg, args, w, h):
+    """這支影片的「編碼參數指紋」。
+
+    用途：重新建置時，如果 media/<模式>/<id>.mp4 還在、指紋一樣、大小也一樣，
+    就直接跳過不要重編。以前是「暫存目錄沒有就重做」，所以每次建置都把整批
+    重編一次（實測 news 55 支要好幾小時）。
+    """
+    import hashlib
+    raw = os.path.join(RAW_DIR, seg["id"] + ".mp4")
+    try:
+        raw_id = "%d|%d" % (os.path.getsize(raw), int(os.path.getmtime(raw)))
+    except OSError:
+        raw_id = ""
+    blob = json.dumps({
+        "v": FP_VERSION, "raw": raw_id, "id": seg["id"],
+        "wh": [w, h], "fps": args.fps, "venc": args.venc, "abr": args.abr,
+        "no_norm": bool(args.no_normalize), "max": args.max_seconds,
+        "fade": args.audio_fade,
+        "no_date": bool(args.no_date_overlay), "no_link": bool(args.no_link_button),
+        "no_cd": bool(args.no_countdown), "link_caption": args.link_caption,
+        "band_left": args.band_left, "label": DATE_LABEL,
+        "qr": [QR_SIZE, QR_PX], "txt": [TEXT_SIZE, TEXT_STROKE],
+        "marquee": [MARQUEE_SPEED, MARQUEE_GAP], "y": OVERLAY_Y,
+        "margin": OVERLAY_MARGIN, "cd": [CD_PRE, CD_SUF],
+        "sponsor": [SPONSOR_URL, SPONSOR_CAPTION],
+        "black": [args.black_tail_min, BLACK_TAIL_SLACK, bool(args.no_auto_trim)],
+        "title": seg.get("title") or "", "air": seg.get("air_date") or "",
+        "secs": seg.get("seconds"),
+    }, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
+
+
 def black_runs(path, min_len=BLACK_TAIL_MIN):
     """回傳 [(start, end, duration)]。只解關鍵帧，一趟約 1 秒，很便宜。"""
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "info",
@@ -465,14 +500,28 @@ def main():
     segs = [s for s in pl["segments"] if s.get("type") in (None, "vod", "live")]
 
     missing = []
+    skipped = 0
     for seg in segs:
-        path = os.path.join(args.out_dir or MEDIA_DIR, seg["id"] + ".mp4")
-        if args.force or not os.path.exists(path):
+        sid = seg["id"]
+        staged = os.path.join(args.out_dir or MEDIA_DIR, sid + ".mp4")
+        deployed = os.path.join(MEDIA_DIR, sid + ".mp4")
+        rec = manifest.get(sid) or {}
+        fp = encode_fp(seg, args, *(TARGETS.get(args.target) or (0, 0)))
+        if args.force:
+            missing.append(seg)
+        elif args.out_dir and os.path.exists(staged):
+            continue                      # 暫存目錄裡有 → 續傳，不要重做
+        elif (os.path.exists(deployed) and rec.get("fp") == fp
+              and rec.get("bytes") == os.path.getsize(deployed)):
+            skipped += 1                  # 已部署、參數沒變、大小一樣 → 跳過
+            continue
+        else:
             missing.append(seg)
 
     mode = "source parameters (not recommended)" if args.no_normalize else "%dx%d" % TARGETS[args.target]
-    log("list has %d segments, %d present, %d missing; output format %s"
-        % (len(segs), len(segs) - len(missing), len(missing), mode))
+    log("list has %d segments, %d present, %d missing (%d skipped by fingerprint); "
+        "output format %s"
+        % (len(segs), len(segs) - len(missing), len(missing), skipped, mode))
 
     if args.status:
         for seg in missing:
@@ -665,6 +714,8 @@ def main():
             "bytes": os.path.getsize(out),
             "fetched_at": int(time.time()),
             "target": "raw" if args.no_normalize else "%dx%d" % (w, h),
+            # 編碼參數指紋：下一輪比對這個（+ 檔案大小）就知道要不要重編
+            "fp": encode_fp(seg, args, w, h),
         }
         cut = black_tail(out, seconds, args.black_tail_min)
         if cut:

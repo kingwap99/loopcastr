@@ -18,6 +18,7 @@ refreshwatch.py 依 refresh_seconds 定期重新掃描。
 """
 
 import argparse
+import datetime
 import json
 import os
 import shutil
@@ -34,6 +35,8 @@ try:
     import build_local_content as BLC
 except ImportError:
     BLC = None
+
+import playout_ctl as pctl      # 換片點推算與重啟（跟 refreshwatch 共用）
 
 
 def setting(section, key, default):
@@ -105,7 +108,7 @@ def scan(cfg, f):
     return run(cmd)
 
 
-def land(cfg, f):
+def land(cfg, f, force=False, limit=0):
     cmd = [sys.executable, os.path.join(HERE, "build_local_content.py"),
            "--playlist", f["mother"],
            "--target", str(setting("media", "target", "720")), "--keep-raw",
@@ -114,10 +117,14 @@ def land(cfg, f):
            "--out-playlist", "/tmp/stage-%s-playlist.json" % os.path.basename(f["mother"])]
     if cfg.get("max_seconds"):
         cmd += ["--max-seconds", str(cfg["max_seconds"])]
+    if force:
+        cmd.append("--force")
+    if limit:
+        cmd += ["--limit", str(limit)]      # 這一輪只做幾支（分批建置用）
     return run(cmd)
 
 
-def transitions(cfg, f, passes):
+def transitions(cfg, f, passes, force=False, limit=0):
     if not cfg.get("shorts_url"):
         log("no shorts_url for this mode, skipping transitions")
         return 0
@@ -131,6 +138,16 @@ def transitions(cfg, f, passes):
            "--parallel", "2",
            "--passes", str(passes),
            "--out-dir", f["stage_tr"]]
+    if cfg.get("video_limit"):
+        # 固定步幅：分批建置時集數會變，不固定的話已做好的過場會全部重做
+        cmd += ["--stride", str(cfg["video_limit"])]
+    if force:
+        cmd.append("--force")
+    else:
+        # 指紋沒變的過場不重做（分批建置時只做新的）
+        cmd += ["--skip-dir", f["media"]]
+    if limit:
+        cmd += ["--limit", str(limit)]      # 只做前 N 集的過場
     return run(cmd)
 
 
@@ -177,17 +194,95 @@ def fix_manifest(f):
     log("manifest: fixed %d paths" % n)
 
 
-def rebuild_playlist(cfg, f, passes):
+def rebuild_playlist(cfg, f, passes, mother=None):
     """重跑一次（不帶 --out-dir、不帶 --force）：影片都已在 media/，所以只會
     重新產生清單，並把 media/_tr_<id>.mp4 的過場插進去。"""
     cmd = [sys.executable, os.path.join(HERE, "build_local_content.py"),
-           "--playlist", f["mother"],
+           "--playlist", mother or f["mother"],
            "--target", str(setting("media", "target", "720")), "--keep-raw",
            "--media-dir", f["media"], "--passes", str(passes),
            "--out-playlist", f["local"]]
     if cfg.get("max_seconds"):
         cmd += ["--max-seconds", str(cfg["max_seconds"])]
     return run(cmd)
+
+
+def ready_mother(f):
+    """把「media/ 裡已經有檔案」的段落寫成一份暫存母清單。
+
+    分批建置的中間輪要用它重建播出清單：直接拿完整母清單去重建，
+    build_local_content 會把還沒做的段落也一起做掉，分批就白做了。
+    """
+    d = json.load(open(f["mother"], encoding="utf-8"))
+    segs = [s for s in d["segments"]
+            if os.path.exists(os.path.join(f["media"], s["id"] + ".mp4"))]
+    out = "/tmp/ready-%s.json" % os.path.basename(f["mother"])
+    d = dict(d)
+    d["segments"] = segs
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, ensure_ascii=False, indent=2)
+    return out, len(segs)
+
+
+def batched_build(cfg, f, a, batch, bsize):
+    """先做第一批就開播，之後每批擴充一次。
+
+    為什麼要這樣：全部做完才開播的話，news（55 支全長）要等好幾小時。
+    分批之後第一批（例如 2 支）做完就能上線，剩下的在背景補。
+    每次擴充都在**下一個換片點**重啟播出端，所以觀眾不會看到內容跳回開頭。
+    """
+    total = len(json.load(open(f["mother"], encoding="utf-8"))["segments"])
+    passes = passes_for(cfg, f)
+    ends = list(range(batch, total, bsize))
+    if not ends or ends[-1] != total:
+        ends.append(total)
+    live = False
+    prev = 0
+    for end in ends:
+        log("batch: building up to %d of %d" % (end, total))
+        want = end - prev
+        prev = end
+        if land(cfg, f, a.force, want) != 0:
+            log("landing had failures; still deploying whatever completed")
+        if not a.skip_transitions and transitions(cfg, f, passes, a.force, end) != 0:
+            log("some transitions failed")
+        if not deploy(f):
+            log("some files are incomplete; not rebuilding the list")
+            return 3
+        fix_manifest(f)
+        ready, n = ready_mother(f)
+        log("ready so far: %d segments" % n)
+        if rebuild_playlist(cfg, f, passes, mother=ready) != 0:
+            log("rebuilding the playout list failed")
+            return 1
+        if make_concat(f) != 0:
+            log("generating the concat list failed")
+            return 1
+        if not live:
+            live = True
+            rc = switch(a.mode)
+            if rc != 0:
+                log("switching failed rc=%s" % rc)
+                return rc
+            log("on air: first batch is playing")
+            continue
+        tgt = pctl.next_boundary(f["local"])
+        wait = (tgt - datetime.datetime.now()).total_seconds() if tgt else 0
+        if wait > 20:
+            log("waiting %.0f s for the next segment boundary (%s) before restarting"
+                % (wait, tgt.strftime("%F %T")))
+            time.sleep(wait)
+        else:
+            log("no boundary wait (%s)"
+                % ("no boundary could be computed" if not tgt else "%.0f s away" % wait))
+        how = pctl.restart_playout()
+        log("playout restarted (%s)" % how if how else "could not restart the playout")
+
+    segs = json.load(open(f["local"], encoding="utf-8"))["segments"]
+    tot = sum(s.get("outpoint") or s["seconds"] for s in segs)
+    log("%s ready: %d segments, %.0fs total (%.2f h)"
+        % (os.path.basename(f["concat"]), len(segs), tot, tot / 3600.0))
+    return 0
 
 
 def make_concat(f):
@@ -211,6 +306,12 @@ def main():
     ap.add_argument("--deploy-only", action="store_true")
     ap.add_argument("--switch", action="store_true")
     ap.add_argument("--skip-transitions", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="忽略指紋，影片與過場全部重做")
+    ap.add_argument("--first-batch", type=int, default=0,
+                    help="先做 N 支就開播，之後每批擴充一次（0＝全部做完才切換）")
+    ap.add_argument("--batch-size", type=int, default=0,
+                    help="第一批之後每批幾支（0＝用 --first-batch 的值）")
     a = ap.parse_args()
 
     modes = load_modes()
@@ -231,7 +332,12 @@ def main():
         if scan(cfg, f) != 0:
             log("scan failed, stopping")
             return 1
-        if land(cfg, f) != 0:
+        batch = int(a.first_batch or cfg.get("first_batch") or 0)
+        if batch > 0:
+            # 第一批小、之後大一點：每批都要重啟一次播出端，批次太小會一直斷
+            bsize = int(a.batch_size or cfg.get("batch_size") or max(batch, 10))
+            return batched_build(cfg, f, a, batch, max(1, bsize))
+        if land(cfg, f, a.force) != 0:
             log("landing had failures; still deploying whatever completed")
 
     passes = passes_for(cfg, f)
@@ -240,7 +346,7 @@ def main():
             % (passes, cfg.get("shorts_count"),
                len(json.load(open(f["mother"], encoding="utf-8"))["segments"])
                if os.path.exists(f["mother"]) else 0))
-        if transitions(cfg, f, passes) != 0:
+        if transitions(cfg, f, passes, a.force) != 0:
             log("some transitions failed")
 
     if not deploy(f):
