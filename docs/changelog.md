@@ -591,3 +591,26 @@ install.sh 的「還沒有播出內容就先不裝」保護本來就會擋，而
 **建好內容卻永遠不會開播**，得自己先去 `./install.sh` 或手動 bootstrap。
 現在那個分支會直接把剛寫好的 plist 載起來（gui 或 system 都支援），
 所以「建置並切換」在全新機器上可以一次到位。
+
+### 事後補充：.22 的 brew 是別人的（2026-09-22）
+
+接受 Xcode 授權之後 `brew --version`／`brew info` 都通了，但 `brew install` 仍然失敗：
+
+    Error: /opt/homebrew is not writable.
+    sudo chown -R yangqingyuan /opt/homebrew ...
+
+【實測】`ls -ld /opt/homebrew` → **擁有者是 `neoyang`**（那台機器另一個帳號，
+brew 是他裝的）。`/opt/homebrew/bin` 可以寫入，所以手動放執行檔沒問題，
+但 `brew install` 需要整個 prefix 的寫入權。
+
+**沒有動那個 chown**：那會把 brew 從另一個帳號手上拿走（neoyang 那邊跑著 go2rtc wall），
+屬於影響別人的系統變更。目前的做法是：
+
+| 工具 | 來源 | 升級方式 |
+|---|---|---|
+| yt-dlp | pip（`~/Library/Python/3.14/bin/yt-dlp`），`/opt/homebrew/bin/yt-dlp` 是指向它的 symlink | `python3 -m pip install -U --break-system-packages yt-dlp` |
+| mediamtx v1.21.1 | 官方 darwin_arm64 單檔 | 重新下載覆蓋 |
+| Pillow／qrcode | pip --user | `python3 -m pip install -U --user --break-system-packages pillow qrcode` |
+
+用 symlink 而不是複製，是為了讓 pip 升級直接生效（複製的話 `/opt/homebrew/bin` 那份會變舊）。
+要改成 brew 管理，就得跑上面那個 `chown`（等於把 brew 收給 `yangqingyuan`）。
