@@ -1,6 +1,11 @@
 # loopcastr — 把 YouTube 播放清單變成 24/7 不中斷的直播頻道
 
-<p align="center"><img src="assets/logo-dark.svg" alt="loopcastr" width="340"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img src="assets/logo-light.svg" alt="loopcastr" width="340">
+  </picture>
+</p>
 
 [中文](#中文)｜[English](#english)　　雙語文件，**中文為主**
 
