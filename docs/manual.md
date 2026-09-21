@@ -12,7 +12,7 @@
 
 ## 一句話架構
 
-    media/*.mp4 ──concat──> playout.sh（單一 ffmpeg）──> MediaMTX ──yt_publish.sh（單一長命 ffmpeg）──> YouTube ingest
+    media/<模式>/*.mp4 ──concat──> playout.sh（單一 ffmpeg）──> MediaMTX ──yt_publish.sh（單一長命 ffmpeg）──> YouTube ingest
 
 本機檔案走 concat；只有「需要換來源」的 YouTube 直播聯播才回到 `relay.py` 的 takeover 接力。
 
@@ -33,11 +33,21 @@
 | 路徑 | 角色 |
 |---|---|
 | `src/build_playlist.py` | 掃描播放清單或頻道，產生母清單 `playlist.json`（含每支長度） |
-| `src/build_local_content.py` | 把母清單抓成本機 `media/<id>.mp4`：正規化、長度核對、黑尾偵測、浮水印與倒數、淡入淡出 |
-| `src/build_transitions.py` | 產生每集專屬過場（QR 指向該集），可吃 shorts 池輪播 |
+| `src/build_local_content.py` | 把母清單抓成本機 `media/<模式>/<id>.mp4`：正規化、長度核對、黑尾偵測、浮水印與倒數、淡入淡出 |
+| `src/build_transitions.py` | 產生每集專屬過場 `media/<模式>/_tr_<id>.mp4`（QR 指向該集），可吃 shorts 池輪播 |
 | `src/build_test_edition.py` | 產生縮短的測試版：每集剪成固定秒數，右上角燒流水號 |
 | `src/mode_build.py` | 依 `modes.json` 跑完整條鏈：掃描 → 落地 → 過場 → 部署 → 重建清單 |
 | `src/wmtext.py`、`src/make_qr_png.py` | 浮水印文字與 QR Code 的 PNG 產生（機器上沒有 freetype，所以自己畫） |
+
+內容放在哪裡（`media/` 底下）：
+
+| 路徑 | 是什麼 | 共用嗎 |
+|---|---|---|
+| `media/<模式>/<id>.mp4` | 正規化後的影片 | 每個模式一份（同一支影片在不同模式可有不同長度上限） |
+| `media/<模式>/_tr_<id>.mp4` | 第 1 趟的過場；`_tr_<id>_p2.mp4` 是第 2 趟 | 同上 |
+| `media/<模式>/manifest.json` | 該模式的長度／黑尾紀錄 | 同上 |
+| `media/.raw/<id>.mp4` | 原始下載檔（`--keep-raw`） | **共用**：是輸入，跟模式無關 |
+| `media/short-<id>.mp4` | shorts 池 | **共用**：同上 |
 
 播出：
 
@@ -123,7 +133,7 @@
 ### 日常看一眼
 
     ssh <USER>@<TARGET_HOST>
-    launchctl list | grep ytpl          # 四個服務都在嗎
+    launchctl list | grep ytpl          # 該有的服務都在嗎（沒有的話看控制台的「服務」區塊）
     tail -3 ~/ytpl/logs/health.log      # 全鏈路正常嗎
     tail -3 ~/ytpl/logs/alerts.jsonl    # 有沒有告警過
 
@@ -138,15 +148,22 @@
 
 ### 加新集數
 
-1. 把新集數加進 `~/ytpl/playlist.json` 的 `segments`（`type: vod`、`url`、`seconds`）。
-2. 落地（會自動正規化、檢查長度、偵測黑尾）：
+平常走控制台就好：填好該模式的來源網址 → 按「建置並切換（開始直播）」。
+它會依 `modes.json` 跑完整條鏈（掃描 → 落地 → 過場 → 部署 → 重建清單 → 切換）。
 
-       cd ~/ytpl && python3 build_local_content.py --target 720
+要在命令列做同一件事：
 
-3. 重建清單並套用：
+    cd ~/ytpl
+    python3 mode_build.py --mode news --switch     # 掃描＋落地＋過場＋切換
+    python3 mode_build.py --mode news --scan-only  # 只重新掃描母清單
 
-       python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/ytpl
-       launchctl kickstart -k gui/$(id -u)/com.ytpl.playout
+只有「手動塞幾支自己準備的片段」才需要碰母清單 `playlist-<模式>.json` 的 `segments`
+（`type: vod`、`url`、`seconds`），再自己落地與重建清單：
+
+    python3 build_local_content.py --playlist playlist-news.json --target 720 --keep-raw \
+      --media-dir media/news --out-playlist playlist-news-local.json
+    python3 make_concat_list.py playlist-news-local.json -o concat-news.txt --base-dir ~/ytpl
+    ./switch_edition.sh news
 
 `build_local_content.py --status` 隨時可以看還缺哪幾支。
 
@@ -155,6 +172,15 @@
     python3 build_local_content.py --rescan
 
 ### 服務開關
+
+先確認是哪一種安裝，指令的 domain 與路徑都不一樣：
+
+| 安裝方式 | domain | plist 位置 | 要不要 sudo |
+|---|---|---|---|
+| `install.sh --agents` | `gui/$(id -u)` | `~/Library/LaunchAgents/` | 不用 |
+| `install.sh` | `system` | `/Library/LaunchDaemons/` | 要 |
+
+以 LaunchAgent（gui）為例：
 
     # 停
     launchctl bootout gui/$(id -u)/com.ytpl.publish
@@ -165,9 +191,12 @@
     # 重啟（不卸載）
     launchctl kickstart -k gui/$(id -u)/com.ytpl.playout
 
+LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Library/LaunchDaemons/`，前面加 `sudo`。
+控制台的服務區塊只處理 gui domain（它不以 root 執行），system domain 要自己來。
+
 播出端重啟會從第一段重新開始，並有約 2.5 秒的冷啟動縫。
 
-+### 本機控制台（webui.py）
+### 本機控制台（webui.py）
 
 不用 ssh、不用背指令的介面。只用標準庫，不必額外安裝任何東西。
 
@@ -178,13 +207,16 @@
     # 要讓它常駐
     nohup python3 ~/ytpl/webui.py > ~/ytpl/logs/webui.log 2>&1 &
 
-三個區塊：
+區塊（由上而下就是操作順序）：
 
 | 區塊 | 內容 |
 |---|---|
-| 狀態 | 服務行程、MediaMTX ready／讀者數／流量、單輪長度與下次循環時間、concat 缺檔、media 大小、health 與 alerts 尾端 |
-| 設定 | 直接編輯 `settings.json` 與 `modes.json`。存檔前驗 JSON，舊版留成 `.bak`，下次建置生效 |
-| 動作 | 建置／只掃描／建置並切換、重建 concat、檢查缺檔、停止建置。背景執行並回報進度（建置可能數十分鐘） |
+| ① 來源設定 | 每個模式一張卡片：播放清單網址、shorts 網址、影片支數與長度上限、掃描間隔。卡片右上角有該模式的狀態標籤 |
+| ② 開始直播 | 建置／只掃描／建置並切換、重建 concat、檢查缺檔、**停止建置**。背景執行並回報進度（建置可能數十分鐘） |
+| 播出狀態／服務行程／內容／日誌 | 服務行程、MediaMTX ready／讀者數／流量、單輪長度與下次循環時間、concat 缺檔、media 大小、health 與 alerts 尾端 |
+| 畫質與版面 | 由 schema 產生的表單（位元率、preset、文字與 QR 尺寸、淡化秒數、黑尾門檻…），存檔後下次建置生效 |
+| 進階設定 | `settings.json` 與 `modes.json` 原始 JSON。存檔前驗 JSON，舊版留成 `.bak` |
+| 服務 | 每個 launchd 服務是「執行中／已載入沒在跑／沒有載入」，沒載入的可以按「啟動」（見下方「服務」一節） |
 
 #### 停止建置
 
@@ -242,9 +274,10 @@
 
 | 症狀 | 先看 | 常見原因 |
 |---|---|---|
+| YouTube 沒畫面，但控制台的「看直播畫面」有內容 | `launchctl list` 裡有沒有 `com.ytpl.publish` | **推流服務沒被載入**（金鑰貼好了也沒用，因為沒人去用它）。控制台服務區塊按「啟動」 |
 | 觀眾端黑畫面 | `python3 build_local_content.py --rescan` | 某支影片本身有長黑尾 |
 | 黑畫面但 health 正常 | 對本地 HLS 跑 blackdetect | 內容層問題，傳輸與時間軸都看不出來 |
-| YouTube 沒畫面但本地正常 | `tail ~/ytpl/logs/publish.log` | 金鑰失效、直播活動結束、或 ingest 被拒 |
+| YouTube 沒畫面但本地正常，且 publish 有在跑 | `tail ~/ytpl/logs/publish.log` | 金鑰失效、直播活動結束、或 ingest 被拒 |
 | health 一直 FAIL | `cat ~/ytpl/logs/health-state.json` | 看 `problems` 欄位；連續 3 次會自動重啟對應服務 |
 
 ### 已知限制
@@ -253,9 +286,9 @@
 - **連續播出約 49.7 天**會遇到 FLV 32 位元時間戳回繞，建議每月重啟一次播出端。
 - **換片點有約 11 ms 的音訊時間戳重疊**（`Non-monotonic DTS` 警告），ffmpeg 會自動夾正，聽感無影響。要完全消除需先離線預接成單一大檔。
 
-### 服務位置與開關
+### 服務：system domain（`install.sh` 的 LaunchDaemon 安裝）
 
-服務現在在 /Library/LaunchDaemons/，操作要加 sudo，domain 是 system 不是 gui：
+這種安裝的服務在 /Library/LaunchDaemons/，操作要加 sudo，domain 是 system 不是 gui：
 
     sudo launchctl list | grep ytpl
     sudo launchctl kickstart -k system/com.ytpl.playout
@@ -264,7 +297,7 @@
 
 playout、publish、mediamtx 以 <USER> 身分執行；health 以 root 執行，因為只有 root 能對 system domain 做 kickstart（那是自動修復的必要條件）。
 
-舊的 LaunchAgent 版本已移到 ~/ytpl/launchagents-backup/，不會再被載入。
+改成 LaunchDaemon 安裝時，舊的 LaunchAgent 版本建議先移走（例如 `~/ytpl/launchagents-backup/`），否則兩邊會同時被載入、搶同一條串流。
 
 ### 循環邊界觀測（loopwatch.py）
 
@@ -273,25 +306,27 @@ playout、publish、mediamtx 以 <USER> 身分執行；health 以 root 執行，
     python3 loopwatch.py --lead 45 --tail 90
     python3 loopwatch.py --at 04:19:07      # 也可直接指定時刻
 
-輸出會列出跨循環點的接收端離線區段與 bytesReceived 零成長區段。單輪長度取自 playlist-local.json（含 outpoint 修正），約 14,487 秒。
+輸出會列出跨循環點的接收端離線區段與 bytesReceived 零成長區段。單輪長度取自 playlist-local.json（含 outpoint 修正），所以換清單或改長度上限後不用改參數。
 
-### 過場影片
+### 過場影片（每集一份）
 
-每一集之後（含最後一集之後）插入一段過場。過場檔是 `media/_transition.mp4`，**只要檔案存在就會自動插入**，所以設定是持久的。
+每一集之後（含最後一集之後）插入一段過場。**過場是一集一份**：`media/<模式>/_tr_<影片id>.mp4`，
+內容是 short 輪播（或乾淨底）＋ 標題列 ＋ 一顆指向**該集網址**的 QR，讓觀眾掃碼去看剛播完的那一集。
 
-    # 第一次設定（YouTube URL 或 video id 都可以）
-    python3 build_local_content.py --transition lj9nUq97uzQ
+命名用**影片 ID** 而不是序號：序號在換清單時會互相覆蓋，切回舊清單還會拿到錯的 QR。
+一輪跑多趟（`--passes`）時第 2 趟之後加 `_pN`，因為同一支影片在不同趟要配不同的 short。
 
-    # 換一段過場（加 --force 才會重抓）
-    python3 build_local_content.py --transition <新的 id 或本機檔案> --force
+`build_local_content.py` 依序在每一集後面插入對應的 `_tr_<id>.mp4`；萬一某集沒有專屬檔，
+會退回共用的 `media/<模式>/_transition.mp4`（舊機制，仍然可用）。
 
-    # 暫時停用過場（檔案留著，不插入）
-    python3 build_local_content.py --no-transition
+    python3 build_transitions.py --parallel 3 --verify 5     # 全部重做，做完抽驗
 
-    # 想完全移除就刪檔
-    rm ~/ytpl/media/_transition.mp4
+    # 舊機制：一體適用的共用過場（只有在沒有每集 QR 時才需要）
+    python3 build_local_content.py --transition <YouTube URL 或 video id>
+    python3 build_local_content.py --no-transition           # 暫時停用（檔案留著，不插入）
 
-過場會跟其他片段一樣被正規化成 1280x720 / H.264 High L3.1 / 30fps / AAC-LC 48k 立體，所以 concat 一樣是純 `-c copy`、不需要轉碼。實測 106 段（53 集 + 53 段過場）時間軸 forward gap 為 0。
+過場會跟其他片段一樣被正規化成 1280x720 / H.264 High L3.1 / 30fps / AAC-LC 48k 立體，
+所以 concat 一樣是純 `-c copy`、不需要轉碼。
 
 ### 正式版／測試版切換
 
@@ -311,36 +346,26 @@ playout、publish、mediamtx 以 <USER> 身分執行；health 以 root 執行，
 
 它會持續拉 YouTube 的直播串流跑 blackdetect 與 freezedetect，每筆事件都補上實際時間，方便跟本地事件對照。直播位址過期時會自動重新解析續讀。
 
-### 過場影片上的頻道 QR Code
+### 畫面上的 QR Code 有哪幾顆
 
-過場右下角有一個指向頻道的 QR Code（`https://www.youtube.com/channel/<CHANNEL_ID>`），方便觀眾掃碼傳播。
+| 位置 | 內容 | 出現時機 |
+|---|---|---|
+| 右上角 | 該集原片 `https://youtu.be/<id>`，說明文字「▶ 看原片」（集數）／「去追劇」（過場） | 集數與過場都有，位置與格式**完全一致** |
+| 右下角 | 贊助連結（`settings.json` 的 `overlay.sponsor_url`） | 有填才出現；`overlay.sponsor_code` 填指定值可關掉 |
 
-`make_qr_png.py` 負責產生：目標機沒有 qrencode、沒有 PIL，所以只裝純 Python 的 `qrcode` 拿矩陣，PNG 自己用 zlib + struct 寫。
+QR 的 PNG 由 `make_qr_png.py` 產生（機器上沒有 qrencode，所以只裝純 Python 的 `qrcode`
+拿矩陣，PNG 自己用 zlib + struct 寫）：
 
     python3 make_qr_png.py "<網址>" out.png --scale 8 --border 4
 
-**改 QR 內容或換圖**：乾淨版過場留在 `media/_transition-clean.mp4`，重疊時從它出發、不要從已經疊過的版本再疊（會愈疊愈花）：
+過場的 QR 是 `build_transitions.py` 每次重建時重新疊上去的，要改內容就改參數重跑，
+不要去改已經疊過的檔案（會愈疊愈花）：
 
-    python3 make_qr_png.py "<新網址>" /tmp/qr.png --scale 8 --border 4
-    ffmpeg -y -i media/_transition-clean.mp4 -i /tmp/qr.png \
-      -filter_complex "[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p[v];[v][1:v]overlay=W-w-40:H-h-40[out]" \
-      -map "[out]" -map 0:a -t 20 -c:v libx264 -preset veryfast -profile:v high -level 3.1 \
-      -g 60 -b:v 2500k -maxrate 2500k -bufsize 5000k -c:a aac -b:a 128k -ar 48000 -ac 2 \
-      -movflags +faststart media/_transition.mp4
+    python3 build_transitions.py --button-caption "去追劇" --parallel 3
 
 驗證一定要做 —— 從**編碼後的影片**抽格解碼，不是只看畫面有沒有東西：
 
-   python3 -c "import cv2,subprocess;subprocess.run(['ffmpeg','-y','-ss','10','-i','media/_transition.mp4','-frames:v','1','/tmp/f.png']);print(cv2.QRCodeDetector().detectAndDecode(cv2.imread('/tmp/f.png'))[0])"
-
-### 過場 QR 是「一集一份」
-
-過場的用途是讓觀眾掃碼去看**剛播完的那一集**，所以 QR 內容是那一集的網址，不是頻道網址。53 集就是 53 份過場：`media/_transition-01.mp4` … `_transition-53.mp4`。
-
-    python3 build_transitions.py --parallel 3 --verify 5
-
-`build_local_content.py` 會依序在每一集後面插入對應的 `media/_tr_<影片id>.mp4`；萬一某集沒有專屬檔，會退回共用的 `_transition.mp4`。
-
-用**影片 ID** 而不是序號命名，是為了換清單時兩份的過場不會互相覆蓋（序號會撞號，切回舊清單還會拿到錯的 QR）。
+   python3 -c "import cv2,subprocess;subprocess.run(['ffmpeg','-y','-ss','10','-i','media/news/_tr_<id>.mp4','-frames:v','1','/tmp/f.png']);print(cv2.QRCodeDetector().detectAndDecode(cv2.imread('/tmp/f.png'))[0])"
 
 ### 用 shorts 輪播當過場
 
@@ -350,7 +375,9 @@ playout、publish、mediamtx 以 <USER> 身分執行；health 以 root 執行，
       --shorts-url "https://www.youtube.com/<SHORTS_CHANNEL>/shorts" \
       --shorts-count 3 --seconds 90 --parallel 3 --verify 3
 
-它會抓前 N 支 shorts、正規化成與其他片段一致的參數（1280x720 / H.264 High L3.1 / 30fps / AAC-LC），再依序把每集的 QR 疊上去。第 i 集用第 `i % N` 支，所以會輪替。
+它會抓前 N 支 shorts、正規化成與其他片段一致的參數（1280x720 / H.264 High L3.1 / 30fps / AAC-LC），再依序把每集的 QR 疊上去。
+配法是「第 p 趟的第 i 集用池子裡第 `(p × 集數 + i - 1) % N` 支」——
+所以 30 支影片配 50 支 shorts、跑 2 趟時，第 2 趟會接著從第 31 支 short 播下去，而不是重頭輪。
 
 **直式短片會被縮小補黑邊**（pillarbox），不裁切也不變形。實測 1080x1920 的 short 縮成 404x720、左右各留約 438px 黑邊。
 
@@ -358,9 +385,9 @@ playout、publish、mediamtx 以 <USER> 身分執行；health 以 root 執行，
 
 過場上也會有**標題跑馬燈**（與集數相同的樣式），但左界給 0 —— 直式短片兩側本來就是黑邊，不需要像集數那樣讓開 logo 的空間。
 
-過場的 QR 與集數用**同一個元件**（同樣的圓角面板、同樣大小的 QR），差別只在說明文字是「追劇去」且放在 QR **上方**，整個按鈕固定在畫面**右下角**。文字可用 `--button-caption` 改（預設「追劇去」），`--no-button` 可整個關掉。
-過場的 QR 與集數**完全一致**：同一個元件、同樣的位置（右上角）、同樣的說明文字與排版，不做任何區分。`--button-caption` 可覆寫文字，`--no-button` 可整個關掉。
-過場的 QR 與集數用**同一個元件**、**同樣的位置**（右上角）與排版；差別只在說明文字：集數是「看原片」，過場是「**去追劇**」（`--button-caption` 可改，`--no-button` 可整個關掉）。
+過場的 QR 與集數用**同一個元件**、**同樣的位置**（右上角）與排版，不做任何區分；
+差別只在說明文字：集數是「看原片」，過場是「**去追劇**」
+（`--button-caption` 可改，`--no-button` 可整個關掉）。
 
 ### 剩餘播放時間倒數
 
@@ -419,10 +446,13 @@ playout、publish、mediamtx 以 <USER> 身分執行；health 以 root 執行，
 
 QR 內容用短網址 `https://youtu.be/<id>`（比 watch?v= 短，模組少、比較好掃）。
 
-目前設定：`lj9nUq97uzQ`（20 秒，4K 來源降轉）。單輪總長由 14,487 秒變成 **15,549 秒（4 小時 19 分）**。改動過場後記得重建清單並重啟播出端：
+改了過場之後要重建清單並重啟播出端（用控制台的「重建 concat 清單」＋「重啟 playout」也一樣）：
 
-    python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/ytpl
-    sudo launchctl kickstart -k system/com.ytpl.playout
+    cd ~/ytpl
+    python3 make_concat_list.py playlist-<模式>-local.json -o concat-<模式>.txt --base-dir ~/ytpl
+    launchctl kickstart -k gui/$(id -u)/com.ytpl.playout     # LaunchDaemon 安裝改成 system/，前面加 sudo
+
+播出端重啟會**從第一段重新開始**，觀眾端會看到內容跳回開頭。
 
 ### 換片時的聲音淡入淡出
 
@@ -467,6 +497,10 @@ QR 內容用短網址 `https://youtu.be/<id>`（比 watch?v= 短，模組少、�
 | `maxfiles` | 256 | **8192** | MediaMTX 每多一條路徑＋讀者約 +2 個 fd（實測：1 條 61、13 條 85），256 大約 97 線就爆 |
 | MediaMTX `hls` | `yes` ＋ `hlsAlwaysRemux: yes` | **`no`** | 沒有人在用 HLS，但每條路徑都會白做一次 remux（實測每路徑約 +1.1% CPU） |
 
+上表的 `hls: no` 是**多線產能**的取捨（也正好是 repo 的預設值）。單機自用時
+把 `hls: yes` 開回來，控制台標題下面就會多一顆「▶ 看直播畫面」可以直接看播出結果，
+代價就是上面那個每路徑約 +1.1% CPU。
+
 ```bash
 # fd 上限：系統預設 ＋ 服務層（plist 才是重開機後仍然有效的那一層）
 sudo launchctl limit maxfiles 8192 unlimited
@@ -495,13 +529,16 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.mediamtx.plist
 | `promotion` 推廣模式 | 來源頻道最新 30 支 | 最多 450 秒（不必播完） | 最新 50 支 | 每 1800 秒 |
 | `test` 測試模式 | 3 支 | 180 秒 | 6 支 | 不掃描 |
 
+上表是 `src/modes.json` 的**範例值**；實際值就是你在控制台「① 來源設定」填的那些，
+存在部署目錄的 `modes.json`（改完下次建置生效）。
+
     python3 mode_build.py --mode promotion            # 掃描 → 落地 → 過場 → 部署 → 重建清單
     python3 mode_build.py --mode promotion --switch   # 上面全部做完，再切換播出端
     python3 mode_build.py --mode promotion --scan-only
 
     ./switch_edition.sh promotion                     # 清單已建好時，只切換播出端
 
-`mode_build.py` 的流程刻意分成「暫存 → 驗證 → mv」：影片先寫到 `/tmp/stage-ep-<模式>/`、過場寫到 `/tmp/stage-tr-<模式>/`，逐檔驗過長度才 mv 進 `media/`。中途卡住或中斷時，**不加 `--force` 重跑會自動續傳**（要不要做是以暫存目錄裡有沒有這個檔案判斷）。
+`mode_build.py` 的流程刻意分成「暫存 → 驗證 → mv」：影片先寫到 `/tmp/stage-ep-<模式>/`、過場寫到 `/tmp/stage-tr-<模式>/`，逐檔驗過長度才 mv 進 `media/<模式>/`（為什麼不直接寫 `media/`：播出端是單一行程 concat，直接覆寫正在播的檔案會讓它讀到沒有 moov 的半成品）。中途卡住或中斷時，**不加 `--force` 重跑會自動續傳**（要不要做是以暫存目錄裡有沒有這個檔案判斷）。
 
 #### 重新掃描與「下一支就從頭開始」
 
@@ -513,10 +550,16 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/com.ytpl.mediamtx.plist
 
 重啟 system domain 的服務需要 root，所以這支要用 root 跑（跟 `com.ytpl.health` 同一個理由）；非 root 時會退回用 `SUDO_PASS`。
 
-#### 兩個已知取捨
+#### 已知取捨
 
-1. **過場與影片檔是跨模式共用的。** 過場用影片 ID 命名（`media/_tr_<id>.mp4`），所以切換模式時該模式的過場會覆蓋上一個模式；同一支影片在兩個模式的長度上限若不同（test 180 秒 vs promotion 450 秒），影片檔也會被覆蓋。目前一次只跑一個模式，這樣最簡單；要讓模式並存，得把內容改放 `media/<模式>/`。
-2. **shorts 池是「第 i 支影片配第 i 支 short」。** 30 支影片只會用到池子裡的前 30 支，50 支裡有 20 支這一輪輪不到。要讓 50 支都出現，得在每次重建時把起點偏移（`refreshwatch.py` 已經會定期重建，加上偏移即可）。
+1. **內容已經每個模式一份**（`media/<模式>/`，見上面「內容放在哪裡」）。同一支影片在
+   不同模式可以有不同長度上限而不互相蓋掉。**共用**的只有輸入：`media/.raw/` 與 shorts 池。
+2. **shorts 池的輪替有上限。** 配法是「第 p 趟的第 i 集用池子裡第 `(p × 集數 + i - 1) % N` 支」，
+   `passes` 預設由 `ceil(池子 ÷ 集數)` 自動算、上限 5。所以池子裡前「集數 × passes」支一定輪得到，
+   超出的那幾支這一輪不會出現（例：30 集配 200 支 shorts → 只用到前 150 支）。
+   要全部都輪到就把 `shorts_passes` 調大，或把 `shorts_count` 縮小。
+3. **播放順序是「固定序循環」。** 重建時照來源順序取前 `video_limit` 支（頻道就是最新在前），
+   之後每一輪都是同一個順序；新片上架要重新掃描才會進來，進來之後順序會整批往前挪。
 
 ### 服務：先確認「有沒有被載入」
 
