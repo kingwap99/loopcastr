@@ -195,6 +195,10 @@ SETTINGS_SCHEMA = [
     # 表單由這份 schema 產生：新增旋鈕只要加一行。型別支援 text／int／float／bool／choice。
     # 「預設值」是 settings.json 沒有這個 key 時表單要顯示什麼，也是程式的內建預設
     # （兩邊必須一致，否則表單會顯示一個跟實際行為不同的數字）。
+    ("ui", "語言", [
+        ("lang", "介面與畫面語言", "choice", ["zh", "en", "both"], None,
+         "zh＝全中文、en＝全英文、both＝雙語（畫面字樣用「／」串起來）", "both"),
+    ]),
     ("media", "畫質與流量", [
         ("target", "解析度", "choice", ["1080", "720", "480"], None,
          "所有片段都正規化到這個尺寸。播出端是純複製，所以全部必須一致", "720"),
@@ -220,6 +224,8 @@ SETTINGS_SCHEMA = [
     ("overlay", "畫面元素", [
         ("date_label", "日期前綴", "text", None, None,
          "浮水印上「首播日期：」那段文字，換語系改這裡", "首播日期："),
+        ("date_label_en", "日期前綴（英文）", "text", None, None,
+         "en 模式只用這個；both 模式兩個一起顯示", "First aired: "),
         ("overlay_y", "浮水印距頂端（px）", "int", None, (0, 400), "", 40),
         ("overlay_margin", "左右邊界（px）", "int", None, (0, 400), "", 40),
         ("band_left", "跑馬燈左界（px）", "int", None, (0, 640),
@@ -233,14 +239,21 @@ SETTINGS_SCHEMA = [
         ("qr_px", "QR 邊長（px）", "int", None, (60, 300), "越大越好掃，但佔畫面", 120),
         ("link_button", "顯示 QR 按鈕", "bool", None, None, "關掉就只剩跑馬燈", True),
         ("link_caption", "按鈕文字（集數）", "text", None, None, "集數的按鈕說明", "▶ 看原片"),
+        ("link_caption_en", "按鈕文字（集數，英文）", "text", None, None, "", "▶ Watch original"),
         ("countdown", "顯示剩餘時間倒數", "bool", None, None,
          "QR 下方那一行「01/03　剩餘 02:57」", True),
+        ("countdown_prefix", "倒數前綴（中文）", "text", None, None,
+         "中文放在秒數前面（剩餘 02:57）", "剩餘 "),
+        ("countdown_suffix_en", "倒數後綴（英文）", "text", None, None,
+         "英文放在秒數後面（02:57 left）；both 模式＝中文前綴 ＋ 英文後綴", " left"),
         ("transition_caption", "按鈕文字（過場）", "text", None, None,
          "過場的按鈕說明", "去追劇"),
+        ("transition_caption_en", "按鈕文字（過場，英文）", "text", None, None, "", "Watch more"),
         ("sponsor_url", "贊助連結（QR）", "text", None, None,
          "填了就固定在畫面右下角顯示 QR；留空＝不顯示", ""),
         ("sponsor_caption", "贊助按鈕文字", "text", None, None,
          "QR 下方的說明文字", "贊助"),
+        ("sponsor_caption_en", "贊助按鈕文字（英文）", "text", None, None, "", "Support"),
         ("sponsor_code", "贊助碼", "text", None, None,
          "填入指定值會關閉贊助 QR（留空＝正常顯示）", ""),
     ]),
@@ -640,7 +653,8 @@ def sweep_stage(mode):
     if not mode:
         return gone, kept
     if not have_ffprobe():
-        task_note("停止：找不到 ffprobe，無法判斷哪些是半成品，這次不清暫存目錄")
+        task_note("stop: ffprobe not found, cannot tell partials apart, "
+                  "leaving the staging dir alone")
         return gone, kept
     for d in stage_dirs(mode):
         if not os.path.isdir(d):
@@ -717,7 +731,7 @@ def reap_stopped(targets, mode, inflight):
             except OSError:
                 pass
         if hard:
-            task_note("停止：%d 個行程沒有回應 SIGTERM，已補 SIGKILL" % len(hard))
+            task_note("stop: %d process(es) ignored SIGTERM, sent SIGKILL" % len(hard))
         killed = []
         for p in inflight:
             try:
@@ -726,8 +740,8 @@ def reap_stopped(targets, mode, inflight):
             except OSError:
                 pass
         gone, kept = sweep_stage(mode)
-        task_note("停止完成：刪掉 %d 個被中斷的輸出、%d 個讀不出來的半成品"
-                  "（保留 %d 個完整檔）%s"
+        task_note("stop done: deleted %d interrupted output(s), %d unreadable partial(s) "
+                  "(%d complete files kept)%s"
                   % (len(killed), len(gone), kept,
                      ("：" + "、".join(killed + gone)) if (killed or gone) else ""))
     finally:
@@ -765,7 +779,7 @@ def stop_task():
             pass
     threading.Thread(target=reap_stopped, args=(targets, mode, inflight),
                      daemon=True).start()
-    task_note("停止：對 %s 送出 SIGTERM"
+    task_note("stop: sent SIGTERM to %s"
               % (", ".join("pid %d" % p for p in targets) if targets else "（沒有找到行程）"))
     return {"ok": True, "pids": targets, "mode": mode,
             "detail": "pid %s" % (", ".join(str(p) for p in targets) or "無")
@@ -783,7 +797,8 @@ def watch_adopted(pid):
         if TASK.get("pid") == pid:
             TASK.update({"running": False, "rc": None, "adopted": False,
                          "stopping": False})
-    task_note("webui 重啟前就在跑的建置已經結束（不是這次控制台啟動的，結束碼未知）")
+    task_note("a build that was already running before the console restarted has finished "
+              "(not started by this console; exit code unknown)")
 
 
 def adopt_running_build():
@@ -948,7 +963,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         if isinstance(body, (dict, list)):
-            body = json.dumps(body, ensure_ascii=False).encode("utf-8")
+            body = json.dumps(localize_obj(body), ensure_ascii=False).encode("utf-8")
         elif isinstance(body, str):
             body = body.encode("utf-8")
         self.send_response(code)
@@ -992,14 +1007,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed():
             return self._send(401, {"error": "需要 token"})
         if path == "/":
-            return self._send(200, PAGE, "text/html; charset=utf-8")
+            return self._send(200, localize(PAGE), "text/html; charset=utf-8")
         if path == "/api/status":
             return self._send(200, status(self.api, self.path_name))
         if path == "/api/config":
             return self._send(200, {"settings": read_json(SETTINGS, {}),
                                     "modes": read_json(MODES, {})})
         if path == "/api/schema":
-            return self._send(200, {"settings": SETTINGS_SCHEMA})
+            return self._send(200, {"settings": localize_schema(SETTINGS_SCHEMA)})
         if path == "/api/task":
             return self._send(200, task_state())
         return self._send(404, {"error": "not found"})
@@ -1110,6 +1125,361 @@ def main():
 
 # PAGE 必須在 if __name__ 之前定義：以腳本執行時那一行會直接進入
 # serve_forever()，寫在它後面的定義都來不及跑到（實測踩過：GET / 回空的）。
+# ── 語言（後台介面）─────────────────────────────────────────────────
+# 做法：原始碼一律寫中文，回給瀏覽器之前把整份字串換掉（HTML、JS 字面值、
+# 以及 API 回的 JSON 都是）。這樣不必在頁面裡散佈佔位符，翻譯表也只有一處。
+# 注意：英文翻譯裡不要出現雙引號或反斜線 —— 字串會直接塞進 HTML／JS／JSON。
+UI_TEXT = {
+    # ── 頁面骨架
+    " 控制台": " console",
+    "① 來源設定": "1. Sources",
+    "② 開始直播": "2. Go live",
+    "播出狀態": "Playout status",
+    "服務行程": "Service processes",
+    "內容": "Content",
+    "日誌": "Logs",
+    "畫質與版面": "Quality and layout",
+    "進階設定（原始 JSON）": "Advanced (raw JSON)",
+    "直播金鑰": "Stream key",
+    "服務": "Services",
+    "填這兩個網址 → 按「儲存這個模式」→ 再按下面的「開始直播」。\n「驗證網址」會先實際解析一次，確認網址沒打錯（填錯不用等整場建置跑完才發現）。":
+        "Fill in these two URLs → press Save this mode → then press Go live below.\n"
+        "Check URLs resolves them once for real, so a typo shows up immediately "
+        "instead of after a long build.",
+    "第一次會下載與轉檔（每支影片數十 MB，數分鐘到數十分鐘）；已經下載過的會跳過。\n切換會重啟播出端，中斷數秒。按鈕按下去是在背景跑，下面會即時顯示進度。\n按「停止建置」會把整個建置連子行程（含 ffmpeg）一起停掉，並清掉被中斷的半成品；\n已經轉好的檔案會留著，下次建置從缺的補。":
+        "The first run downloads and transcodes (tens of MB per video, minutes each); "
+        "anything already downloaded is skipped.\nSwitching restarts the playout and "
+        "interrupts the stream for a few seconds. It all runs in the background and the "
+        "box below shows live progress.\nStop build kills the whole process tree "
+        "(including ffmpeg) and deletes the interrupted output files; finished files are "
+        "kept and the next build fills in what is missing.",
+    "存檔後要重新建置才會套用到已下載的內容（改畫質等於重新轉檔）。":
+        "Saving only takes effect after a rebuild: changing quality means re-encoding.",
+    "settings.json（畫質、版面、淡化、黑尾門檻）":
+        "settings.json (quality, layout, fades, black-tail threshold)",
+    "modes.json 原始內容（上面表單沒涵蓋的欄位改這裡；存檔會整份覆蓋）":
+        "raw modes.json (edit fields the form above does not cover; saving replaces the whole file)",
+    "寫入 stream.key（權限 600）。金鑰只進不出，這個頁面不會把它顯示出來。":
+        "Writes stream.key (mode 600). The key is write-only: this page never displays it.",
+    "「沒有載入」＝launchd 根本沒這個 job（例如金鑰貼好了卻沒有畫面，就是推流服務沒被載入）。\n按「啟動」會把資料目錄裡的 plist 複製到 ~/Library/LaunchAgents 再 bootstrap。\n系統 domain 的服務需要非互動 sudo；失敗時會顯示要加哪一條 sudoers。":
+        "Not loaded means launchd does not have this job at all (the classic case: the key "
+        "is saved but YouTube stays black because the publish service was never loaded).\n"
+        "Start copies the plist from the data directory into ~/Library/LaunchAgents and "
+        "bootstraps it.\nSystem-domain services need non-interactive sudo; on failure the "
+        "page tells you which sudoers line to add.",
+    # ── 按鈕與表單
+    "建置並切換（開始直播）": "Build and switch (go live)",
+    "只建置，不切換": "Build only",
+    "只掃描來源": "Scan sources only",
+    "重建 concat 清單": "Rebuild concat list",
+    "檢查缺哪些檔案": "Check missing files",
+    "停止建置": "Stop build",
+    "儲存這個模式": "Save this mode",
+    "儲存這一段": "Save this section",
+    "儲存原始 JSON": "Save raw JSON",
+    "儲存": "Save",
+    "寫入": "Write",
+    "驗證網址": "Check URLs",
+    "重啟": "Restart",
+    "啟動": "Start",
+    "模式名稱（顯示用）": "mode name (display only)",
+    "① 播放清單網址（要播的影片）": "1. playlist URL (the videos to play)",
+    "② 過場 shorts 網址（轉場輪播）": "2. shorts URL (transition carousel)",
+    "影片數上限": "max videos",
+    "每支長度上限（秒，0＝全長）": "max seconds per video (0 = full length)",
+    "每支 short 長度上限（秒）": "max seconds per short",
+    "shorts 支數": "shorts count",
+    "重新掃描間隔（秒，0＝不掃）": "rescan interval in seconds (0 = never)",
+    "一輪播幾趟（0＝用預設）": "passes per round (0 = auto)",
+    "只收首播時間在 N 小時內的影片（0＝不限；先用上面的支數取前 N 支再過濾）":
+        "keep only videos first aired within N hours (0 = no limit; applied after the video limit)",
+    "新聞模式": "News mode",
+    "（modes.json 裡沒有可編輯的模式）": "(no editable modes in modes.json)",
+    # ── 狀態與訊息
+    "可以開始直播": "ready to go live",
+    "已經轉好、也切換完成（%s），串流正常": "built and switched (%s); the stream is healthy",
+    "還沒建置內容": "no content built yet",
+    "還沒填播放清單網址": "no playlist URL yet",
+    "正在建置（下載／轉檔中）": "building (downloading / transcoding)",
+    "正在停止建置…": "stopping the build...",
+    "已轉好，但播出端還在播另一版": "built, but the playout is still on another edition",
+    "內容不完整（有檔案不見了）": "content is incomplete (some files are gone)",
+    "串流沒有起來": "the stream is not up",
+    "不確定的模式": "unknown mode",
+    "來源還是範例值 @YourChannel": "the source is still the @YourChannel example",
+    "來源還是範例值 @YourChannel —— 建置前請先填上真實的頻道網址。":
+        "the source is still the @YourChannel example — set a real channel URL before building.",
+    "請改成你真實的頻道或播放清單網址": "set your real channel or playlist URL",
+    "到上面的「① 來源設定」填播放清單與 shorts 網址，存檔後再建置":
+        "fill in the playlist and shorts URLs under Sources, save, then build",
+    "找不到 %s／%s；按下面的「建置並切換（開始直播）」":
+        "cannot find %s / %s; press Build and switch (go live) below",
+    "沒有 %s 對應的清單檔名": "no list file is mapped to %s",
+    "從 %s 開始，完成前不要開播；下面那個框有即時進度":
+        "started at %s; do not go live before it finishes — the box below shows progress",
+    "已經送出停止訊號，收工後會自動清掉被中斷的半成品":
+        "stop signal sent; interrupted output files are cleaned up when it finishes",
+    "%s 已就緒（%s）。目前播的是 %s；按「建置並切換（開始直播）」就會切過去":
+        "%s is ready (%s). Now playing %s; press Build and switch (go live) to switch over",
+    "（沒有載入播出端）": "(nothing loaded in the playout)",
+    "MediaMTX 沒有 ready；看下面的「服務行程」與日誌":
+        "MediaMTX is not ready; check Service processes and the logs below",
+    "這個模式現在可以正式開播了嗎？": "can this mode go live now?",
+    "少了 %d 個：%s": "%d missing: %s",
+    "%d 段、單輪約 %d 分": "%d segments, about %d min per round",
+    "剛剛": "just now",
+    # ── 動作與錯誤
+    "已開始：": "started: ",
+    "無法開始：": "cannot start: ",
+    "已送出停止：": "stop sent: ",
+    "無法停止：": "cannot stop: ",
+    "已儲存 ": "saved ",
+    "儲存失敗：": "save failed: ",
+    "失敗：": "failed: ",
+    "查不到：": "query failed: ",
+    "驗證中…（會實際解析一次，約數秒）": "checking... (resolves once for real, a few seconds)",
+    "驗證失敗：": "check failed: ",
+    "JSON 有錯：": "JSON error: ",
+    "讀狀態失敗，正在重試…": "status read failed, retrying...",
+    "讀狀態失敗（連續 %s 次）：%s": "status read failed (%s times in a row): %s",
+    "請先輸入金鑰": "enter the key first",
+    "已設定（%s bytes）": "set (%s bytes)",
+    "未設定": "not set",
+    "已寫入 stream.key（%s bytes）。%s": "wrote stream.key (%s bytes). %s",
+    "已經有工作在跑：%s": "a job is already running: %s",
+    "上一個工作還在收尾（正在停止），等下面顯示「已完成／待機」再按":
+        "the previous job is still winding down; wait for the status below to say idle",
+    "現在沒有在跑的工作": "no job is running",
+    "已經在停止中了，等它收尾": "already stopping, waiting for it to finish",
+    "不合法的服務名稱": "invalid service name",
+    "資料目錄裡沒有這個 plist": "no such plist in the data directory",
+    "需要 token": "token required",
+    "缺少 X-Ytpl 標頭": "missing the X-Ytpl header",
+    "內部錯誤：%s": "internal error: %s",
+    "未知動作：%s": "unknown action: %s",
+    "金鑰格式看起來不對（只允許英數與 - _）":
+        "the key format looks wrong (letters, digits, - and _ only)",
+    "要重啟 publish 服務才會生效": "restart the publish service for it to take effect",
+    "下次建置生效；舊版已備份為 .bak":
+        "takes effect on the next build; the previous version is kept as .bak",
+    "沒有輸出": "no output",
+    "（無）": "(none)",
+    "無": "none",
+    "未 ready": "not ready",
+    "沒有在跑": "not running",
+    "執行中 (%s)": "running (%s)",
+    "執行中　": "running　",
+    "已完成／待機　": "idle　",
+    "正在停止…　": "stopping...　",
+    "　執行中 pid %s": "　running pid %s",
+    "　已載入（沒在跑）": "　loaded (not running)",
+    "　沒有載入": "　not loaded",
+    "　結束碼 %s%s": "　exit code %s%s",
+    "　目錄 ": "　dir ",
+    "　讀者 ": "　readers ",
+    " 段　": " segments　",
+    " 秒": " s",
+    " 段": " segments",
+    "下次循環": "next loop",
+    "單輪": "round",
+    "行程": "process",
+    "狀態": "state",
+    "（被中止）": "(interrupted)",
+    "（webui 重啟前啟動的）": " (started before the console restarted)",
+    "缺 ": "missing ",
+    " 安裝並啟動": " install and start",
+    "從 %s 安裝並啟動": "install and start from %s",
+    "已啟動 %s（%s）": "started %s (%s)",
+    "已重啟 %s（%s）": "restarted %s (%s)",
+    "%s：%s %s": "%s: %s %s",
+    "%s（%s 秒後）": "%s (%s s later)",
+    "已儲存 %s：%s": "saved %s: %s",
+    "已寫入 %s（%s）": "wrote %s (%s)",
+    "越快＝同流量下畫質越差；veryfast 是多數情況的平衡點":
+        "faster means worse quality at the same bitrate; veryfast is the usual balance",
+    # ── settings.json 表單
+    "畫質與流量": "Quality and traffic",
+    "畫面元素": "On-screen elements",
+    "內容處理": "Content handling",
+    "解析度": "Resolution",
+    "所有片段都正規化到這個尺寸。播出端是純複製，所以全部必須一致":
+        "every segment is normalized to this size; the playout copies streams, so they must match",
+    "影格率": "Frame rate",
+    "一般用 30": "30 is the usual choice",
+    "編碼器": "Encoder",
+    "libx264 品質穩定但吃 CPU；videotoolbox 走硬體、較省電":
+        "libx264 is stable but CPU-hungry; videotoolbox uses hardware and saves power",
+    "越高越快但越吃 CPU": "higher is faster but uses more CPU",
+    "影片位元率": "Video bitrate",
+    "例如 2500k／4000k。最直接影響畫質與上傳頻寬的旋鈕":
+        "e.g. 2500k / 4000k; the most direct quality-versus-bandwidth knob",
+    "位元率上限": "Max bitrate",
+    "通常與位元率相同": "usually the same as the bitrate",
+    "位元率緩衝": "Bitrate buffer",
+    "通常是位元率的 2 倍": "usually twice the bitrate",
+    "音訊位元率": "Audio bitrate",
+    "128k 對談話內容足夠": "128k is plenty for speech",
+    "音訊取樣率": "Audio sample rate",
+    "48000 是通用值": "48000 is the common value",
+    "換片淡入淡出（秒）": "Fade in/out (seconds)",
+    "每段開頭淡入、結尾淡出。播出端接縫插不了濾鏡，所以要建置時烤進檔案":
+        "fade in at the start and out at the end; the playout seam cannot take a filter, "
+        "so it is baked in at build time",
+    "每支長度上限（秒）": "Max seconds per video",
+    "0＝播完整支。模式層級（modes.json）可以再覆寫":
+        "0 = full length; the per-mode value in modes.json overrides this",
+    "一輪播幾趟": "Passes per round",
+    "大於 1 時一輪會重播影片，shorts 池接著往下輪":
+        "above 1, videos repeat within a round and the shorts pool keeps advancing",
+    "日期前綴": "Date label",
+    "浮水印上「首播日期：」那段文字，換語系改這裡":
+        "the text before the air time on the watermark; per-language text goes here",
+    "浮水印距頂端（px）": "Watermark top offset (px)",
+    "左右邊界（px）": "Side margin (px)",
+    "跑馬燈速度（px/秒）": "Marquee speed (px/s)",
+    "跑馬燈間距（px）": "Marquee gap (px)",
+    "兩輪文字之間的空白": "the gap between two marquee rounds",
+    "跑馬燈左界（px）": "Marquee left bound (px)",
+    "0＝自動用畫面寬度的 1/7，讓開原片左上角的 logo":
+        "0 = use 1/7 of the width, leaving room for the original video's top-left logo",
+    "文字大小（px）": "Text size (px)",
+    "文字描邊（px）": "Text outline (px)",
+    "描邊讓字在任何畫面上都看得清": "the outline keeps the text readable on any background",
+    "QR 按鈕字級": "QR caption size",
+    "QR 邊長（px）": "QR size (px)",
+    "越大越好掃，但佔畫面": "bigger scans better but takes screen space",
+    "顯示 QR 按鈕": "Show QR button",
+    "關掉就只剩跑馬燈": "turning it off leaves only the marquee",
+    "按鈕文字（集數）": "Caption (episodes)",
+    "集數的按鈕說明": "the caption on episode buttons",
+    "顯示剩餘時間倒數": "Show remaining time",
+    "QR 下方那一行「01/03　剩餘 02:57」": "the line under the QR, e.g. 01/03  02:57 left",
+    "按鈕文字（過場）": "Caption (transitions)",
+    "過場的按鈕說明": "the caption on transition buttons",
+    "贊助連結（QR）": "Sponsor link (QR)",
+    "填了就固定在畫面右下角顯示 QR；留空＝不顯示":
+        "when set, a QR is pinned to the bottom-right; empty = hidden",
+    "贊助按鈕文字": "Sponsor caption",
+    "QR 下方的說明文字": "the caption under the QR",
+    "贊助碼": "Sponsor code",
+    "填入指定值會關閉贊助 QR（留空＝正常顯示）":
+        "filling in the magic value hides the sponsor QR (empty = normal)",
+    "黑尾門檻（秒）": "Black tail threshold (s)",
+    "片尾連續黑畫面超過這個秒數就截掉。播出端看不出來，觀眾端是一片黑":
+        "a black stretch this long at the tail gets trimmed; the playout cannot see it, "
+        "viewers just see black",
+    "黑尾容許範圍（秒）": "Black tail slack (s)",
+    "黑尾結束點要落在片尾幾秒內才算數":
+        "how close to the end the black must finish to count",
+    "過場同時編幾個": "Parallel transition encodes",
+    "頻道／清單": "Channel / playlist",
+    "實際解析一次，確認填的網址是對的（不用等整條建置跑完才發現打錯）。":
+        "resolves the URLs once for real, so a typo shows up immediately",
+    "只接受 YouTube 家族的網址 —— 這個 API 拿使用者給的網址去呼叫 yt-dlp。":
+        "only YouTube-family URLs are accepted — this API passes user URLs to yt-dlp.",
+    "%s：OK　第一支 %s（%s）": "%s: OK　first video %s (%s)",
+    "%s：失敗　%s": "%s: failed　%s",
+    "%s：未填": "%s: empty",
+    "%s：只接受 youtube.com／youtu.be 網址": "%s: only youtube.com / youtu.be URLs",
+    # ── 啟動時的訊息
+    "%s 控制台：http://%s:%d/   （API %s，路徑 %s）":
+        "%s console: http://%s:%d/   (API %s, path %s)",
+    "拒絕啟動：--host %s 等於對外開放，必須提供 token。":
+        "refusing to start: --host %s exposes it publicly, a token is required.",
+    "  先產生：": "  create one first:",
+    "已啟用 token 驗證（%s）": "token auth enabled (%s)",
+    "按 Ctrl-C 結束": "press Ctrl-C to quit",
+    "找不到 mediamtx.yml": "mediamtx.yml not found",
+    "mediamtx.yml 的 hls 是 no（預設值，要用請改成 yes）":
+        "hls is no in mediamtx.yml (the default; set it to yes to use this)",
+    "hlsAddress 讀不出埠號：%s": "cannot read a port from hlsAddress: %s",
+    "沒有直播畫面預覽：%s": "no live preview: %s",
+}
+
+
+def ui_lang():
+    cfg = read_json(SETTINGS, {}) or {}
+    return str((cfg.get("ui") or {}).get("lang", "both")).strip().lower()
+
+
+def T(zh, lang=None):
+    """中文原文 -> 依語系挑字串。both 用「／」串起來（冒號只留最後一個）。"""
+    lang = lang or ui_lang()
+    en = UI_TEXT.get(zh)
+    if not en:
+        return zh
+    if lang == "en":
+        return en
+    if lang == "zh":
+        return zh
+    z, e = zh.strip(), en.strip()
+    colon = z.endswith(("：", ":")) or e.endswith(("：", ":"))
+    # 英文那半段的 %s 改成位置參數：雙語模板會有兩組 %s，順序替換會把參數吃掉兩次。
+    k = [0]
+
+    def _num(_m):
+        k[0] += 1
+        return "%%%d$s" % k[0]
+
+    return "%s／%s%s" % (z.rstrip("：: 　"),
+                         re.sub("%s", _num, e).rstrip("：: 　"),
+                         "：" if colon else "")
+
+
+_LOC_RE = None
+
+
+def localize(text, lang=None):
+    """把整份文字裡的中文原文換成該語系的字串。
+
+    用「一次掃描、最長優先」的替換：逐條 replace 的話，雙語模式下換出來的結果
+    裡還留著中文原文，會被後面的短字串再咬一次（實測：「%s（%s 秒後）」會變成
+    「%s（%s秒／s後）／…」）。
+    """
+    global _LOC_RE
+    lang = lang or ui_lang()
+    if lang == "zh":
+        return text
+    if _LOC_RE is None:
+        keys = sorted(UI_TEXT, key=len, reverse=True)
+        _LOC_RE = re.compile("|".join(re.escape(k) for k in keys))
+    return _LOC_RE.sub(lambda m: T(m.group(0), lang), text)
+
+
+# 只翻「我們自己產生的訊息欄位」，不動使用者資料（模式名稱、影片標題、路徑）。
+LOC_KEYS = ("short", "why", "error", "hint", "note", "detail", "how")
+
+
+def localize_obj(obj):
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(v, str) and k in LOC_KEYS:
+                out[k] = localize(v)
+            else:
+                out[k] = localize_obj(v)
+        return out
+    if isinstance(obj, list):
+        return [localize_obj(x) for x in obj]
+    return obj
+
+
+def localize_schema(schema):
+    """只翻欄位標題與說明，**不翻預設值** —— 預設值是要寫進 settings.json 的真字串
+    （例如 date_label 的「首播日期：」），翻掉會讓存檔把中文換成英文。"""
+    out = []
+    for sec in schema:
+        fields = []
+        for f in sec[2]:
+            f = list(f)
+            f[1] = localize(f[1])
+            if len(f) > 5 and isinstance(f[5], str):
+                f[5] = localize(f[5])
+            fields.append(tuple(f))
+        out.append([sec[0], localize(sec[1]), fields])
+    return out
+
+
 PAGE = r"""<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1210,6 +1580,19 @@ button.primary{font-weight:700;border-color:#0a0}
 按「啟動」會把資料目錄裡的 plist 複製到 ~/Library/LaunchAgents 再 bootstrap。
 系統 domain 的服務需要非互動 sudo；失敗時會顯示要加哪一條 sudoers。</p>
 <script>
+// 組合字串用：fmt("已儲存 %s：%s", a, b)。整句才翻得乾淨（雙語時不會出現半中半英）。
+// 雙語模板會混用「順序 %s」與「位置 %1$s」（後者是英文那半段，避免參數被吃掉兩次）。
+function fmt(tpl, a, b, c){
+  var all = [a, b, c];
+  var i = 0;
+  return String(tpl).replace(/%(\d+)\$s|%s/g, function(m, n){
+    var v;
+    if (n) { v = all[parseInt(n, 10) - 1]; }
+    else { v = all[i]; i += 1; }
+    return (v === undefined || v === null) ? "" : String(v);
+  });
+}
+
 function esc(s){
   return String(s === null || s === undefined ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -1252,7 +1635,7 @@ function renderServices(s){
     b.textContent = name;
     var st = document.createElement("span");
     st.className = (x.loaded && x.pid) ? "" : "dim";
-    st.textContent = x.loaded ? (x.pid ? ("　執行中 pid " + x.pid) : "　已載入（沒在跑）")
+    st.textContent = x.loaded ? (x.pid ? fmt("　執行中 pid %s", x.pid) : "　已載入（沒在跑）")
                               : "　沒有載入";
     var btn = document.createElement("button");
     if (x.loaded) {
@@ -1261,7 +1644,7 @@ function renderServices(s){
     } else {
       btn.textContent = "啟動";
       btn.disabled = !x.plist;
-      btn.title = x.plist ? ("從 " + x.plist + " 安裝並啟動") : "資料目錄裡沒有這個 plist";
+      btn.title = x.plist ? fmt("從 %s 安裝並啟動", x.plist) : "資料目錄裡沒有這個 plist";
       btn.onclick = function(){ svcCall(x.label, "start"); };
     }
     wrap.appendChild(b); wrap.appendChild(st); wrap.appendChild(btn);
@@ -1272,8 +1655,8 @@ function renderServices(s){
 function svcCall(label, action){
   var name = label.replace("com.ytpl.", "");
   post("/api/service", { label: label, action: action }).then(function(r){
-    msg(r.ok ? (name + " 已" + (action === "start" ? "啟動" : "重啟") + "（" + r.how + "）")
-             : (name + "：" + (r.error || "") + " " + (r.hint || "")));
+    msg(r.ok ? fmt(action === "start" ? "已啟動 %s（%s）" : "已重啟 %s（%s）", name, r.how)
+             : fmt("%s：%s %s", name, r.error || "", r.hint || ""));
     refresh();
   });
 }
@@ -1306,7 +1689,7 @@ function refresh(){
     var p = "<tr><th>行程</th><th>狀態</th></tr>";
     s.proc.forEach(function(x){
       p += "<tr><td>" + esc(x.name) + "</td><td>" +
-           (x.up ? badge(true, "執行中 (" + x.count + ")") : badge(false, "沒有在跑")) +
+           (x.up ? badge(true, fmt("執行中 (%s)", x.count)) : badge(false, "沒有在跑")) +
            "</td></tr>";
     });
     html("proc", p);
@@ -1320,8 +1703,9 @@ function refresh(){
     r2 += "<tr><th>單輪</th><td>" + esc((s.round.segments || 0) + " 段　" +
           (s.round.round_seconds || 0) + " 秒") + "</td></tr>";
     if (s.round.next_loop){
-      r2 += "<tr><th>下次循環</th><td>" + esc(s.round.next_loop) + "（" +
-            esc(s.round.loop_in_seconds) + " 秒後）</td></tr>";
+      r2 += "<tr><th>下次循環</th><td>" +
+            fmt("%s（%s 秒後）", esc(s.round.next_loop),
+                esc(s.round.loop_in_seconds)) + "</td></tr>";
     }
     html("play", r2);
 
@@ -1333,7 +1717,7 @@ function refresh(){
     c += "<tr><th>media</th><td>" + esc(s.content.media_size) + "</td></tr>";
     c += "<tr><th>stream.key</th><td>" +
          (s.content.stream_key.exists
-           ? badge(true, "已設定（" + s.content.stream_key.bytes + " bytes）")
+           ? badge(true, fmt("已設定（%s bytes）", s.content.stream_key.bytes))
            : badge(false, "未設定")) + "</td></tr>";
     html("content", c);
 
@@ -1343,7 +1727,7 @@ function refresh(){
   }).catch(function(e){
     STAT_FAIL += 1;
     if (STAT_FAIL === 1) { msg("讀狀態失敗，正在重試…"); setTimeout(refresh, 1500); }
-    else { msg("讀狀態失敗（連續 " + STAT_FAIL + " 次）：" + e); }
+    else { msg(fmt("讀狀態失敗（連續 %s 次）：%s", STAT_FAIL, e)); }
   }).then(function(){ REFRESHING = false; });
 }
 
@@ -1364,7 +1748,7 @@ function loadCfg(){
       .forEach(function(k){
         var o = document.createElement("option");
         o.value = k;
-        o.textContent = k + (c.modes[k].label ? "（" + c.modes[k].label + "）" : "");
+        o.textContent = k + (c.modes[k].label ? "　" + c.modes[k].label : "");
         sel.appendChild(o);
       });
     refresh();
@@ -1376,7 +1760,7 @@ function save(kind){
   try { data = JSON.parse(document.getElementById("ta-" + kind).value); }
   catch (e) { return msg("JSON 有錯：" + e.message); }
   post("/api/config", { kind: kind, data: data }).then(function(r){
-    msg(r.ok ? ("已寫入 " + r.wrote + "（" + r.note + "）") : ("失敗：" + (r.error || "")));
+    msg(r.ok ? fmt("已寫入 %s（%s）", r.wrote, r.note) : ("失敗：" + (r.error || "")));
   }).catch(function(e){ msg("失敗：" + e); });
 }
 function saveSettings(){ save("settings"); }
@@ -1415,7 +1799,7 @@ function renderModes(modes){
     var box = document.createElement("div");
     box.className = "modebox";
     var h = document.createElement("h3");
-    h.textContent = mk + (m.label ? "（" + m.label + "）" : "");
+    h.textContent = mk + (m.label ? "　" + m.label : "");
     var chip = document.createElement("span");
     chip.className = "chip";
     h.appendChild(chip);
@@ -1477,7 +1861,7 @@ function saveMode(mk, inputs){
     }
   });
   post("/api/config", { kind: "modes", data: modes }).then(function(r){
-    msg(r.ok ? ("已儲存 " + mk + "：" + r.note) : ("儲存失敗：" + (r.error || "")));
+    msg(r.ok ? fmt("已儲存 %s：%s", mk, r.note) : ("儲存失敗：" + (r.error || "")));
     if (r.ok) { loadCfg(); }
   }).catch(function(e){ msg("儲存失敗：" + e); });
 }
@@ -1499,7 +1883,7 @@ function renderSettings(schema, values){
     var box = document.createElement("div");
     box.className = "modebox";
     var h = document.createElement("h3");
-    h.textContent = sec[1] + "（" + sec[0] + "）";
+    h.textContent = sec[1] + "　" + sec[0];
     box.appendChild(h);
     var inputs = {};
     sec[2].forEach(function(f){
@@ -1567,7 +1951,7 @@ function saveSettingsSection(sec, inputs){
     else { s[name][k] = el.value.trim(); }
   });
   post("/api/config", { kind: "settings", data: s }).then(function(r){
-    msg(r.ok ? ("已儲存 " + name + "：" + r.note) : ("儲存失敗：" + (r.error || "")));
+    msg(r.ok ? fmt("已儲存 %s：%s", name, r.note) : ("儲存失敗：" + (r.error || "")));
     if (r.ok) { loadCfg(); }
   }).catch(function(e){ msg("儲存失敗：" + e); });
 }
@@ -1609,7 +1993,7 @@ function pollTask(){
                (t.action || "") + (t.adopted ? "（webui 重啟前啟動的）" : "") +
                (t.started ? ("　" + t.started) : "") +
                (t.rc === null || t.rc === undefined ? ""
-                 : ("　結束碼 " + t.rc + (t.rc < 0 ? "（被中止）" : "")));
+                 : fmt("　結束碼 %s%s", t.rc, t.rc < 0 ? "（被中止）" : ""));
     text("task", head + "\n\n" + (t.log || []).join("\n"));
     if (t.running) { setTimeout(pollTask, t.stopping ? 1000 : 2000); } else { refresh(); }
   });
@@ -1620,7 +2004,7 @@ function writeKey(){
   if (!k) { return msg("請先輸入金鑰"); }
   post("/api/stream-key", { key: k }).then(function(r){
     document.getElementById("key").value = "";
-    msg(r.ok ? ("已寫入 stream.key（" + r.bytes + " bytes）。" + r.note)
+    msg(r.ok ? fmt("已寫入 stream.key（%s bytes）。%s", r.bytes, r.note)
              : ("失敗：" + (r.error || "")));
     refresh();
   });
