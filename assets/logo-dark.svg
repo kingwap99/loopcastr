@@ -13,7 +13,8 @@
   <path d="M49 105 A43 43 0 0 0 120 107" fill="none" stroke="url(#lcgrad)" stroke-width="11" stroke-linecap="round" />
   <path d="M120 107 L120 130 L98 121 Z" fill="#6C63FF" />
   <path d="M69 58 Q69 54 74 57 L101 77 Q106 80 101 83 L74 103 Q69 106 69 100 Z" fill="#FFFFFF" />
-  <text x="170" y="87" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.4" fill="#F8FAFC">loop</text>
-  <text x="238" y="87" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.4" fill="#40E0D0">castr</text>
+  <!-- 一個 text ＋ tspan："loop" 與 "castr" 交給排版引擎接著排。
+       用兩個獨立 text ＋ 固定 x 對位的話，字型一換（Inter → Arial）中間就會開一個縫。 -->
+  <text x="170" y="87" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.4" fill="#F8FAFC">loop<tspan fill="#40E0D0">castr</tspan></text>
   <text x="172" y="111" font-family="Inter,Arial,sans-serif" font-size="9" font-weight="600" letter-spacing="2.2" fill="#8D9AB8">ALWAYS ON. ALWAYS PLAYING.</text>
 </svg>
