@@ -119,6 +119,15 @@ case "$SCOPE" in
       sudo_do launchctl bootstrap system "/Library/LaunchDaemons/${LABEL}.plist" || exit 5
       SCOPE=system
       INSTALLED="/Library/LaunchDaemons/${LABEL}.plist"
+    elif [ -f "$PLIST" ]; then
+      # plist 還在安裝目錄、還沒裝進 launchd（install.sh 因為「還沒有內容」跳過安裝，
+      # 或是只裝了 mediamtx／webui）。照控制台「啟動」的做法：裝成 LaunchAgent。
+      echo "installing ${LABEL} as a LaunchAgent"
+      mkdir -p "$HOME/Library/LaunchAgents"
+      cp "$PLIST" "$HOME/Library/LaunchAgents/${LABEL}.plist"
+      launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/${LABEL}.plist" || exit 5
+      SCOPE=gui
+      INSTALLED="$HOME/Library/LaunchAgents/${LABEL}.plist"
     else
       echo "WARNING: ${LABEL} is not loaded and no plist is installed;" >&2
       echo "  run ./install.sh --agents (or ./install.sh) first" >&2

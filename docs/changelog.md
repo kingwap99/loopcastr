@@ -636,3 +636,51 @@ brew 是他裝的）。`/opt/homebrew/bin` 可以寫入，所以手動放執行�
 結果 install 失敗 → 那兩個指令一度消失（mediamtx 還靠已刪除的 inode 在跑，重啟就會掛）。
 正確順序是「**先 install（Cellar 裝好就好）、再 `brew link --overwrite`**」——
 link 之前原本的檔案都還在，install 失敗也不會斷。
+
+## .22 端到端實測：臣心報報（2026-09-22）
+
+用 `test` 模式（臣心報報清單 `PL1DCTrWM6hndbHwmlB6FhqzIayctuJNRb`、
+3 支 × 180 秒、shorts 用 `@chiu_chenyuan/shorts` 6 支）在 `.22` 跑完整條鏈。
+
+### 結果：整條通
+
+    02:45:48  mode test: 3 支、limit 180 s、6 shorts
+    02:47:45  deploy: moved 3, skipped 0
+    02:47:45  concat-test.txt ready: 6 segments, 1080s total
+    02:48:14  switched to test（播出端自動載入）
+
+控制台（`/api/status`）：
+
+    MediaMTX: ready=True readers=1 bytes=2641245 tracks=['H264', 'MPEG-4 Audio']
+    playing: test | concat 段數: 6 | media: 423.5 MB
+    開播檢查: news 還沒建置內容／promotion 來源還是範例值／test 可以開始直播
+
+【實測】從**另一台機器**拉 `.22` 的 HLS（`hlsAddress: :8888`）抽一格畫面：
+1280x720、標題列 `…小事　首播日期：2023/07/29 18:00`（到分的新格式）、
+右上 QR `看原片` ＋ `youtu.be/Ig3vtqtXowY`、倒數 `01/03　剩餘 02:54`。
+
+### 這輪測試抓到並修掉的東西
+
+1. **`switch_edition.sh` 的「自動載入」少了一種情況**（第一次建置就卡在這）：
+   我前一輪加的分支只找「已裝進 launchd 的 plist」，但 `.22` 的狀況是
+   **plist 只在安裝目錄裡**（install.sh 因為還沒有內容而跳過安裝）→ 仍然 exit 6，
+   「建好內容卻沒開播」。補上第三種情況：plist 在安裝目錄時就裝成 LaunchAgent 再 bootstrap。
+2. **控制台「服務行程」的 `playout ffmpeg` 永遠顯示 0**：pattern 寫的是 `concat.txt`，
+   只對得上預設清單，播 test／news 時就對不上。改成 `stream_loop`（播出端一定帶這個參數）。
+3. **控制台「內容」的 concat 段數永遠顯示 0**：讀的是預設 `concat.txt`。
+   改成讀「播出端實際載入的那一份」（跟前面單輪長度的修法一致）。
+
+### 環境陷阱：brew 升級 Python 之後要重啟 python 服務
+
+【實測】控制台一度每個 API 都回 `500 內部錯誤：No module named '_strptime'`。
+原因不是程式：`brew` 把 `python@3.14` 從 **3.14.3 升到 3.14.7**，
+而控制台是在升級**之前**啟動的 —— 行程還在跑舊的直譯器，但它的 stdlib 目錄已經被刪掉，
+所以延遲載入的 `_strptime` 找不到。重啟服務即恢復（`ps -o lstart` 可以看到行程時間早於升級）。
+
+教訓：**brew 升級 python 之後，所有用 python 跑的服務都要重啟**（控制台、health、refresh）。
+
+### .22 的 HLS 打開了
+
+為了能在控制台按「看直播畫面」直接看測試結果，`.22` 的 `mediamtx.yml` 改成
+`hls: yes` ＋ `hlsAddress: :8888`（綁所有介面，區網可看）。這是**每台部署的選擇**，
+repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU）。

@@ -274,7 +274,8 @@ SETTINGS_SCHEMA = [
 PROCS = [
     ("mediamtx", "mediamtx"),
     ("playout", "playout.sh"),
-    ("playout ffmpeg", "concat.txt"),
+    # 播出端的 ffmpeg 一定帶 -stream_loop（concat 循環），用它才不會只在播預設清單時才對得上
+    ("playout ffmpeg", "stream_loop"),
     ("publish", "yt_publish.sh"),
     ("publish ffmpeg", "live2/"),
     ("health", "healthcheck.py"),
@@ -422,9 +423,11 @@ def round_info():
 
 
 def content_info():
+    # 讀「播出端實際載入的那份 concat」：寫死 concat.txt 的話，播 test／news 時會顯示 0 段。
+    list_path = loaded_edition().get("list") or CONCAT
     entries = []
-    if os.path.exists(CONCAT):
-        for line in tail(CONCAT, 600):
+    if os.path.exists(list_path):
+        for line in tail(list_path, 600):
             if line.startswith("file "):
                 p = unquote(line[5:])
                 entries.append((os.path.basename(p), os.path.exists(p)))
