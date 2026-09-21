@@ -32,15 +32,25 @@ sudo_do() {
 }
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-PLIST="$HERE/com.loopcastr.playout.plist"
 PB=/usr/libexec/PlistBuddy
+
+# label 前綴不寫死：改名前（loopcastr 之前叫 ytpl）的安裝是 com.ytpl.*，
+# 所以看這個目錄裡實際的 plist 檔名決定。
+SVC_PREFIX=com.loopcastr.
+for f in "$HERE"/com.*.playout.plist; do
+  [ -f "$f" ] || continue
+  SVC_PREFIX="$(basename "$f")"
+  SVC_PREFIX="${SVC_PREFIX%.playout.plist}."
+  break
+done
+PLIST="$HERE/${SVC_PREFIX}playout.plist"
 
 # 服務可能裝在兩個地方：system domain 的 LaunchDaemon（開機就起，需要 root），
 # 或使用者自己的 gui domain LaunchAgent（install.sh --agents，不需要 root）。
 # 切換要改的是「實際被載入的那一份」—— 改錯地方會變成「回報切換成功但根本沒換」
 # （實測踩過：plist 改了、載入的那份沒改，播出端照樣播舊的）。
-INSTALLED="/Library/LaunchDaemons/com.loopcastr.playout.plist"
-LABEL=com.loopcastr.playout
+INSTALLED="/Library/LaunchDaemons/${SVC_PREFIX}playout.plist"
+LABEL="${SVC_PREFIX}playout"
 if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
   SCOPE=gui
   INSTALLED="$HOME/Library/LaunchAgents/$LABEL.plist"

@@ -511,3 +511,21 @@ Logo／Icon 是從品牌提案裡還原出來的向量圖（`assets/`）：
 
 配色：Loop Teal `#40E0D0`、Cast Violet `#7567FF`、Midnight Navy `#0B1020`（卡片 `#151D35`）；
 標語 `ALWAYS ON. ALWAYS PLAYING.`。控制台把 icon 內嵌成 favicon 與標題前的小圖。
+
+### 改名順手抓到的兩個 bug
+
+改名讓「寫死 label」的地方全部現形。除了上面三個程式，還有兩處：
+
+1. **`loaded_edition()`**（控制台判斷「播出端載入的是哪一版」）也是寫死 label 讀 launchctl。
+   部署端更新程式之後，它找不到 `com.loopcastr.playout`，於是**誤報**
+   「news 已轉好，但播出端還在播另一版」—— 但實際上播出端好好地在播 `concat-news.txt`。
+   改成用 `service_prefix()` 之後：`playing: news`、`news: ok 可以開始直播`。
+2. **`switch_edition.sh`** 的 `PLIST`／`INSTALLED`／`LABEL` 也是寫死的，
+   改成掃同目錄的 `com.*.playout.plist` 決定前綴。
+
+另外修掉一個**本來就存在**的顯示錯誤：控制台的「單輪長度」永遠讀 `playlist-local.json`，
+所以播 news 模式時會顯示預設版（測試版 3 段）的長度。
+改成讀「播出端實際載入的那一份」：
+
+【實測】部署端（播 news）：單輪 **220 段、94768 秒（26.3 小時）**，
+下次循環 2026-09-22 19:52:14；修改前顯示的是 3 段／540 秒。

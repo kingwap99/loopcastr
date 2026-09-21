@@ -392,8 +392,12 @@ def hls_preview(path_name):
 
 
 def round_info():
-    """單輪長度（讀 playlist-local.json）與下一次循環的時間點。"""
-    d = read_json(PLAYLIST_LOCAL)
+    """單輪長度與下一次循環的時間點。
+
+    清單要讀「播出端實際載入的那一份」：永遠讀 playlist-local.json 的話，
+    播 news 模式時會顯示預設版（測試版）的長度，看起來就像另一件事。
+    """
+    d = read_json(loaded_edition().get("playlist") or PLAYLIST_LOCAL)
     if not d or not d.get("segments"):
         return {}
     total = 0.0
@@ -469,9 +473,10 @@ EDITION = {
 def loaded_edition():
     """播出端「實際載入」的那一版。讀 launchctl 而不是讀檔案：
     編輯過 plist 但沒重啟時，檔案的內容會騙人。"""
-    rc, txt = sh(["launchctl", "print", "gui/%d/com.loopcastr.playout" % os.getuid()], timeout=5)
+    label = service_prefix() + "playout"
+    rc, txt = sh(["launchctl", "print", "gui/%d/%s" % (os.getuid(), label)], timeout=5)
     if rc != 0:
-        rc, txt = sh(["sudo", "-n", "launchctl", "print", "system/com.loopcastr.playout"], timeout=5)
+        rc, txt = sh(["sudo", "-n", "launchctl", "print", "system/" + label], timeout=5)
     out = {"list": "", "playlist": "", "ok": False}
     for line in (txt or "").splitlines():
         s = line.strip()
