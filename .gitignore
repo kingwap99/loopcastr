@@ -19,6 +19,8 @@ work/playout/auto.crt
 *.mp3
 *.png
 *.jpg
+# ...but the brand assets and the shipped sponsor QR picture belong in the repo
+!assets/*.png
 
 # ── Runtime artifacts ──────────────────────────────────────────────
 logs/
