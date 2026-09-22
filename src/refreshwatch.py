@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """定期重新掃描來源清單；偵測到新影片或新 shorts 就重建，並在「下一個換片點」
-把播出端切回清單開頭。
+以連續位置更新播出端。
 
 對應規格（新聞模式／推廣模式）：
   切換下一支影片時重新掃描播放清單；如果有新的影片，再下一支影片就從頭開始輸播。
   shorts 也以較高頻率同步更新清單。
 
-為什麼要等換片點：播出端是單一行程 concat 加 --stream_loop -1，重啟就會從第一段
-重來。若在影片播到一半時重啟，觀眾會看到中途被切掉；等到下一個換片點才切，
-體感就是「這支播完之後從頭開始」。
+為什麼要等換片點：播出端是單一行程 concat 加 --stream_loop -1，清單只在啟動時
+讀取。更新時等目前片段播完，再把新清單旋轉到下一段才重啟，避免回到第一段。
 
 重啟 system domain 的服務需要 root，所以這支建議用 root 跑（跟 com.loopcastr.health
 一樣），才不用把密碼放在環境變數裡；非 root 時會退回用 SUDO_PASS。
@@ -167,27 +166,20 @@ def check(mode, cfg, f, args):
     log("change detected: %d new videos, %d new shorts" % (len(new_v), len(new_s)))
     notify("[%s] new content: %d videos, %d shorts, rebuilding"
            % (mode, len(new_v), len(new_s)))
-    tgt = next_boundary(f["local"])
     rc = subprocess.run([sys.executable, os.path.join(HERE, "mode_build.py"),
-                         "--mode", mode], stdin=subprocess.DEVNULL).returncode
+                         "--mode", mode, "--switch"],
+                        stdin=subprocess.DEVNULL).returncode
     if rc != 0:
         log("rebuild failed rc=%d, the playout content is unchanged" % rc)
         notify("[%s] rebuild failed rc=%d" % (mode, rc))
         return False
     json.dump({"shorts": shorts, "videos": vids, "at": int(time.time())},
               open(sp, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    if tgt:
-        wait = (tgt - datetime.datetime.now()).total_seconds()
-        if wait > args.min_wait:
-            log("waiting %.0f s for the next segment boundary (%s) before restarting"
-                % (wait, tgt.strftime("%F %T")))
-            time.sleep(wait)
-    if restart_playout():
-        log("playout restarted, now playing from the top of the list")
-        notify("[%s] rebuilt and switched back to the top of the list" % mode)
-    else:
-        log("restarting the playout failed")
-        notify("[%s] rebuilt but restarting the playout failed" % mode)
+    # mode_build --switch owns the continuity-preserving boundary wait and
+    # restart.  Do not restart a second time here, or the stream would jump
+    # back to the first segment after a successful rebuild.
+    log("rebuilt and switched while preserving the current playout position")
+    notify("[%s] rebuilt and switched while preserving the current position" % mode)
     return True
 
 

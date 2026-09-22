@@ -32,6 +32,23 @@ def service_prefix():
 SVC = service_prefix()
 LABEL = SVC + "playout"
 
+
+def active_playlist_path():
+    """Return the playlist path configured on the loaded playout service."""
+    try:
+        import plistlib
+        for path in (
+                "/Library/LaunchDaemons/%s.plist" % LABEL,
+                os.path.expanduser("~/Library/LaunchAgents/%s.plist" % LABEL)):
+            if not os.path.exists(path):
+                continue
+            with open(path, "rb") as fh:
+                d = plistlib.load(fh)
+            return str((d.get("EnvironmentVariables") or {}).get("PLAYLIST") or "")
+    except (OSError, ValueError, TypeError):
+        pass
+    return ""
+
 # 日誌格式：[playout] 2026-09-17 00:18:02 start #1
 # （2026-09-21 之前是「第 1 次啟動」，舊日誌仍然讀得到）
 START_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
@@ -53,26 +70,110 @@ def last_start():
     return last
 
 
-def next_boundary(local_json):
-    """下一個換片點（datetime）或 None。"""
-    st = last_start()
-    if not st or not os.path.exists(local_json):
-        return None
+def _segments(local_json):
+    """Load the physical segment order currently used by playout."""
     try:
-        segs = json.load(open(local_json, encoding="utf-8")).get("segments") or []
-    except (OSError, ValueError):
-        return None
+        with open(local_json, encoding="utf-8") as fh:
+            return json.load(fh).get("segments") or []
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def next_boundary_info(local_json):
+    """Return ``(next_boundary, next_segment_index)`` or ``(None, None)``.
+
+    ``local_json`` must describe the order that the running ffmpeg actually
+    started with.  ``next_segment_index`` is the segment that begins **at** that
+    boundary, not the one that is playing now: a restart is timed to the end of
+    the current segment, so starting the new list at the current index would
+    replay the segment the viewer just watched.  The index matters because the
+    newly built list is rotated to it, so a controlled restart continues the
+    channel instead of sending it back to the first video.
+    """
+    st = last_start()
+    if not st:
+        return None, None
+    segs = _segments(local_json)
+    if not segs:
+        return None, None
     total = sum(s.get("outpoint") or s["seconds"] for s in segs)
     if total <= 0:
-        return None
+        return None, None
     elapsed = (datetime.datetime.now() - st[0]).total_seconds()
     done = elapsed % total
     acc = 0.0
-    for s in segs:
+    for i, s in enumerate(segs):
         acc += s.get("outpoint") or s["seconds"]
         if acc > done:
-            return st[0] + datetime.timedelta(seconds=elapsed - done + acc)
-    return st[0] + datetime.timedelta(seconds=elapsed - done + total)
+            return (st[0] + datetime.timedelta(seconds=elapsed - done + acc),
+                    (i + 1) % len(segs))
+    return (st[0] + datetime.timedelta(seconds=elapsed - done + total), 0)
+
+
+def next_boundary(local_json):
+    """Return the next segment boundary (datetime) or ``None``."""
+    return next_boundary_info(local_json)[0]
+
+
+def _segment_signature(seg):
+    """Signature used to match a segment across a playlist rebuild."""
+    return (
+        seg.get("path") or "",
+        seg.get("id") or "",
+        round(float(seg.get("outpoint") or 0), 3),
+        round(float(seg.get("seconds") or 0), 3),
+    )
+
+
+def rotate_playlist_to(old_json, new_json, old_next_index, out_json=None):
+    """Rotate a rebuilt playlist so it continues at the old next segment.
+
+    Both lists are generated the same way: several passes over the episodes in
+    source order, each episode followed by its own transition.  Newly ready
+    episodes are inserted inside a pass, so an episode's absolute position
+    moves; its occurrence ordinal does not.  Matching by ordinal therefore
+    survives insertions and repeated passes while a plain path match would not.
+    The output is written atomically.  ``False`` means no safe match was found;
+    callers must then keep the old playout running instead of restarting from
+    the first episode.
+    """
+    old = _segments(old_json)
+    new = _segments(new_json)
+    if not old or not new or not (0 <= old_next_index < len(old)):
+        return False
+
+    target = _segment_signature(old[old_next_index])
+    ordinal = sum(1 for s in old[:old_next_index]
+                  if _segment_signature(s) == target)
+    hits = [i for i, s in enumerate(new) if _segment_signature(s) == target]
+    if not hits:
+        return False
+    start = hits[min(ordinal, len(hits) - 1)]
+
+    try:
+        with open(new_json, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        segs = doc.get("segments") or []
+        doc["segments"] = segs[start:] + segs[:start]
+        doc["_continuity_rotation"] = {
+            "source_start": start,
+            "matched_from": os.path.abspath(old_json),
+        }
+        target_path = out_json or new_json
+        tmp = target_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, target_path)
+        print("rotation: the next round continues at segment %d (%s)"
+              % (start, os.path.basename(doc["segments"][0].get("path") or "")),
+              flush=True)
+        return True
+    except (OSError, ValueError, TypeError):
+        try:
+            os.remove(tmp)
+        except (OSError, UnboundLocalError):
+            pass
+        return False
 
 
 def restart_playout():

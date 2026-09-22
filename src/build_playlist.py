@@ -20,6 +20,7 @@ Output is compatible with the existing playlist JSON, plus:
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -37,12 +38,30 @@ def run(args, timeout=180):
     return p
 
 
-def list_ids(url):
-    p = run(["--flat-playlist", "--print", "%(id)s", url])
-    ids = [x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
-    if not ids:
-        print("Could not list videos: %s" % (p.stderr or "")[:200], file=sys.stderr)
-    return ids
+def list_ids(url, attempts=3):
+    """List the source videos, keeping the longest result of a few attempts.
+
+    The flat listing intermittently comes back short (measured: 12 of 55 for
+    the same channel minutes apart).  Because the result replaces the master
+    playlist, a partial answer used to shrink a 24/7 channel silently, so ask
+    more than once and keep the longest answer.
+    """
+    best = []
+    err = ""
+    for i in range(max(1, attempts)):
+        p = run(["--flat-playlist", "--print", "%(id)s", url])
+        ids = [x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
+        if len(ids) > len(best):
+            best = ids
+        err = err or (p.stderr or "")[:200]
+        if len(best) > len(ids):
+            print("listing attempt %d returned %d ids; keeping %d"
+                  % (i + 1, len(ids), len(best)), flush=True)
+        if i + 1 < attempts:
+            time.sleep(2 + i * 2)
+    if not best:
+        print("Could not list videos: %s" % err, file=sys.stderr)
+    return best
 
 
 def meta(vid, retries=3):
@@ -96,6 +115,10 @@ def main():
                     help="keep only videos first aired within N hours (0 = no limit). "
                          "Applied after --limit.")
     ap.add_argument("--target", default="rtmp://127.0.0.1:1935/live/main")
+    ap.add_argument("--allow-shrink", action="store_true",
+                    help="write the list even when it is shorter than the existing "
+                         "one (default: refuse, so a partial listing cannot shrink "
+                         "a running channel)")
     a = ap.parse_args()
 
     url = a.url
@@ -104,10 +127,36 @@ def main():
     elif "list=" in url and "/playlist?" in url:
         url = "https://www.youtube.com/playlist?list=" + url.split("list=")[1].split("&")[0]
 
-    ids = list_ids(url)
+    # Compare against the previous source count before touching anything: the
+    # listing above can come back partial, and overwriting the master playlist
+    # with it would cut a 24/7 channel down to whatever that answer contained.
+    prev_raw = None
+    if os.path.exists(a.out):
+        try:
+            with open(a.out, encoding="utf-8") as fh:
+                old = json.load(fh)
+            if isinstance(old, dict):
+                prev_raw = old.get("source_count")
+                if prev_raw is None and not a.max_age_hours:
+                    prev_raw = len(old.get("segments") or [])
+        except (OSError, ValueError):
+            prev_raw = None
+
+    all_ids = list_ids(url)
+    raw_count = len(all_ids)
+    ids = all_ids
     if a.limit:
         ids = ids[:a.limit]
     print("Playlist has %d videos, fetching metadata one by one..." % len(ids), flush=True)
+
+    # Compare the raw listing, not the limited one: lowering --limit is a
+    # deliberate choice, while a shorter listing means yt-dlp answered partial.
+    if not a.allow_shrink and prev_raw and raw_count < prev_raw:
+        print("ERROR: the source listing looks partial: %d videos now vs %d before. "
+              "Refusing to shrink the playlist; %s is left untouched. "
+              "Pass --allow-shrink if the videos were really removed."
+              % (raw_count, prev_raw, a.out), file=sys.stderr)
+        return 3
 
     segs = []
     fail = 0
@@ -141,7 +190,7 @@ def main():
     total = sum(s["seconds"] or 0 for s in segs)
     out = {"target": a.target,
            "clients": ["web_embedded", "mweb", "default", "android_vr"],
-           "source_playlist": url, "segments": segs}
+           "source_playlist": url, "source_count": raw_count, "segments": segs}
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, indent=2)
     print("Wrote %s: %d videos, %.0fs total (%.1f h), FAIL=%d"

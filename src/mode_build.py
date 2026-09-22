@@ -70,6 +70,12 @@ def files_for(mode):
     }
 
 
+def is_active_mode(f):
+    """Is this mode the one the loaded playout service is configured to play?"""
+    return (os.path.abspath(pctl.active_playlist_path() or "") ==
+            os.path.abspath(f["local"]))
+
+
 def passes_for(cfg, f):
     """一輪裡影片要重複幾趟。
 
@@ -241,7 +247,14 @@ def batched_build(cfg, f, a, batch, bsize):
     ends = list(range(batch, total, bsize))
     if not ends or ends[-1] != total:
         ends.append(total)
-    live = False
+    # If the requested mode is already on air and the user explicitly asked
+    # to switch, keep the physical order currently used by ffmpeg and apply a
+    # continuity rotation at each batch boundary.  A build-only action stays
+    # off-air until the user switches it deliberately.
+    live = bool(a.switch) and is_active_mode(f)
+    if live:
+        sync_local_to_concat(f)
+        log("continuing the active playlist; batch updates will preserve position")
     prev = 0
     for end in ends:
         log("batch: building up to %d of %d" % (end, total))
@@ -257,13 +270,25 @@ def batched_build(cfg, f, a, batch, bsize):
         fix_manifest(f)
         ready, n = ready_mother(f)
         log("ready so far: %d segments" % n)
+
+        # f["local"] is the physical order used by the currently running
+        # ffmpeg.  Save it before rebuild_playlist overwrites it with the new
+        # canonical order; otherwise the next boundary cannot be mapped and a
+        # restart would begin at the first episode again.
+        active_before = None
+        if live and os.path.exists(f["local"]):
+            active_before = "/tmp/loopcastr-active-%s-%s.json" % (a.mode, os.getpid())
+            shutil.copyfile(f["local"], active_before)
         if rebuild_playlist(cfg, f, passes, mother=ready) != 0:
             log("rebuilding the playout list failed")
             return 1
-        if make_concat(f) != 0:
-            log("generating the concat list failed")
-            return 1
         if not live:
+            if make_concat(f) != 0:
+                log("generating the concat list failed")
+                return 1
+            if not a.switch:
+                log("batch is ready; build-only mode is not switching the playout")
+                continue
             live = True
             rc = switch(a.mode)
             if rc != 0:
@@ -271,17 +296,18 @@ def batched_build(cfg, f, a, batch, bsize):
                 return rc
             log("on air: first batch is playing")
             continue
-        tgt = pctl.next_boundary(f["local"])
-        wait = (tgt - datetime.datetime.now()).total_seconds() if tgt else 0
-        if wait > 20:
-            log("waiting %.0f s for the next segment boundary (%s) before restarting"
-                % (wait, tgt.strftime("%F %T")))
-            time.sleep(wait)
+
+        # The concat demuxer reads its list once at ffmpeg startup, so the new
+        # list is rotated to the next segment before the restart.
+        if active_before:
+            continue_from(f, active_before)
         else:
-            log("no boundary wait (%s)"
-                % ("no boundary could be computed" if not tgt else "%.0f s away" % wait))
-        how = pctl.restart_playout()
-        log("playout restarted (%s)" % how if how else "could not restart the playout")
+            log("no snapshot of the on-air list; keeping the playout untouched")
+        if active_before:
+            try:
+                os.remove(active_before)
+            except OSError:
+                pass
 
     segs = json.load(open(f["local"], encoding="utf-8"))["segments"]
     tot = sum(s.get("outpoint") or s["seconds"] for s in segs)
@@ -293,6 +319,89 @@ def batched_build(cfg, f, a, batch, bsize):
 def make_concat(f):
     return run([sys.executable, os.path.join(HERE, "make_concat_list.py"),
                 f["local"], "-o", f["concat"], "--base-dir", HERE])
+
+
+def sync_local_to_concat(f):
+    """Make the playlist JSON match the order ffmpeg actually loaded.
+
+    playout.sh regenerates the concat list from this JSON when it starts, but a
+    later rebuild rewrites the JSON while ffmpeg keeps playing the older order.
+    Without this, restarting the builder or the console would compute the next
+    boundary from the wrong list and cut the segment that is on air.  The concat
+    file is the record of what was loaded, so rotate the JSON back to its first
+    segments.  Idempotent: when both already agree this is a no-op.
+    """
+    def rel(p):
+        return p if os.path.isabs(p) else os.path.normpath(os.path.join(HERE, p))
+
+    try:
+        head = []
+        with open(f["concat"], encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith("file "):
+                    head.append(os.path.normpath(line[5:].strip().strip("'")))
+                    if len(head) >= 3:
+                        break
+        if not head:
+            return
+        with open(f["local"], encoding="utf-8") as fh:
+            doc = json.load(fh)
+        segs = doc.get("segments") or []
+        if not segs:
+            return
+        paths = [rel(s.get("path") or "") for s in segs]
+        want = head[:min(3, len(head))]
+        start = None
+        for i in range(len(segs)):
+            if [paths[(i + j) % len(segs)] for j in range(len(want))] == want:
+                start = i
+                break
+        if start in (None, 0):
+            return
+        doc["segments"] = segs[start:] + segs[:start]
+        doc["_concat_resync"] = {"start": start}
+        tmp = f["local"] + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, f["local"])
+        log("resynced the playlist to the concat list that is on air (start %d)" % start)
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def continue_from(f, active_before):
+    """Hand the freshly built list over without going back to the first video.
+
+    ``active_before`` is the order the running ffmpeg loaded; the newly built
+    ``f["local"]`` replaces it.  Wait for the end of the segment that is on air,
+    rotate the new list to the segment that starts at that moment, then restart.
+    On any doubt the old list is put back and the playout is left alone: the
+    channel keeps running rather than jumping to the top.
+    """
+    tgt, next_index = pctl.next_boundary_info(active_before)
+    if tgt is None or next_index is None:
+        log("cannot compute the next segment boundary; keeping the on-air list")
+        shutil.copyfile(active_before, f["local"])
+        return False
+    wait = (tgt - datetime.datetime.now()).total_seconds()
+    if wait > 20:
+        log("waiting %.0f s for the next segment boundary (%s) before restarting"
+            % (wait, tgt.strftime("%F %T")))
+        time.sleep(wait)
+    else:
+        log("no boundary wait (%.0f s away)" % wait)
+    if not pctl.rotate_playlist_to(active_before, f["local"], next_index, f["local"]):
+        log("cannot map the current position into the new list; keeping the on-air list")
+        shutil.copyfile(active_before, f["local"])
+        return False
+    if make_concat(f) != 0:
+        log("generating the rotated concat list failed")
+        shutil.copyfile(active_before, f["local"])
+        return False
+    how = pctl.restart_playout()
+    log("playout restarted (%s)" % how if how else "could not restart the playout")
+    return bool(how)
 
 
 def switch(mode):
@@ -359,12 +468,22 @@ def main():
         return 3
 
     fix_manifest(f)
+    # Snapshot the on-air order before the rebuild overwrites it, so an active
+    # mode can be handed over at the next segment instead of the first one.
+    live = a.switch and is_active_mode(f)
+    active_before = None
+    if live:
+        sync_local_to_concat(f)
+        if os.path.exists(f["local"]):
+            active_before = "/tmp/loopcastr-active-%s-%s.json" % (a.mode, os.getpid())
+            shutil.copyfile(f["local"], active_before)
     if rebuild_playlist(cfg, f, passes) != 0:
         log("rebuilding the playout list failed")
         return 1
-    if make_concat(f) != 0:
-        log("generating the concat list failed")
-        return 1
+    if not live:
+        if make_concat(f) != 0:
+            log("generating the concat list failed")
+            return 1
 
     segs = json.load(open(f["local"], encoding="utf-8"))["segments"]
     total = sum(s.get("outpoint") or s["seconds"] for s in segs)
@@ -372,6 +491,16 @@ def main():
         % (os.path.basename(f["concat"]), len(segs), total, total / 3600.0))
 
     if a.switch:
+        if live:
+            if active_before and continue_from(f, active_before):
+                try:
+                    os.remove(active_before)
+                except OSError:
+                    pass
+                return 0
+            log("the new list was built but not switched in; the playout keeps "
+                "running the list that is on air")
+            return 3
         return switch(a.mode)
     log("to switch the playout: ./switch_edition.sh %s" % a.mode)
     return 0
