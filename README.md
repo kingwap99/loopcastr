@@ -119,12 +119,16 @@ Change what plays in `modes.json`, not in `settings.json` - two sources of truth
     install.sh                 install/upgrade: copy programs, expand plist placeholders, create mediamtx.yml, register services
     mediamtx.example.yml       sample MediaMTX config (path allowlist: only live/main)
     src/                       all programs (.py/.sh) and default settings
+      webui.py                 local console: status, settings and build actions
+      settings.json            general settings (quality, layout, on-screen captions)
+      modes.json               broadcast mode definitions (source, length cap, shorts pool)
+      playlist.example.json    master list example (the real playlist.json comes from build_playlist.py)
     launchd/                   service definitions (__HOME__/__USER__ are placeholders expanded by install.sh)
-    docs/                      spec and operations manual (Chinese)
+    docs/                      specification and operations manual
       spec-v1.2.md             system spec: architecture, requirements, measurements, risks (core document)
       manual.md                operations manual: deploy, day-to-day, troubleshooting, limitations
-      changelog.md             measurements, fixes and refuted hypotheses, in date order
-      archive/                 earlier evaluations and corrections, including refuted hypotheses
+      changelog.md             measurements, fixes and refuted hypotheses, in date order (Traditional Chinese)
+      archive/                 earlier evaluations and corrections, including refuted hypotheses (Traditional Chinese)
 
 ### Reference deployment (measured environment)
 
