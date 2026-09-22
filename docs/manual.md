@@ -1,633 +1,731 @@
+# loopcastr operations manual
 
-# loopcastr 操作手冊（manual）
+From architecture and deployment to daily operation, troubleshooting and known limits. Design trade-offs
+and measured numbers are recorded in the [changelog](changelog.md).
 
-> 本文件為繁體中文。英文說明見 repo 根目錄 [README.md](../README.md) 的 English 一節。
-> This document is in Traditional Chinese; see the English section of [README.md](../README.md).
+> This document describes the current state and how to operate it. Day-by-day measurements, changes and
+> overturned assumptions live in the [changelog](changelog.md), which is in Traditional Chinese.
 
-從架構、部署，到日常操作、故障排除與已知限制。設計取捨與實測數字記在 [變更與實測紀錄](changelog.md)。
+## Architecture in one line
 
+    media/<mode>/*.mp4 --concat--> playout.sh (one ffmpeg) --> MediaMTX --yt_publish.sh (one long-lived ffmpeg) --> YouTube ingest
 
-> 這份是**現在的狀態與怎麼操作**。逐日的實測、改動與被推翻的假設記在 [變更與實測紀錄](changelog.md)。
-> This is the operations manual. Day-by-day measurements and corrections live in [changelog](changelog.md).
+Local files go through concat; only relaying an external YouTube live stream (where the source itself has to
+change) falls back to the takeover relay in `relay.py`.
 
-## 一句話架構
+## Files
 
-    media/<模式>/*.mp4 ──concat──> playout.sh（單一 ffmpeg）──> MediaMTX ──yt_publish.sh（單一長命 ffmpeg）──> YouTube ingest
+Install and configuration:
 
-本機檔案走 concat；只有「需要換來源」的 YouTube 直播聯播才回到 `relay.py` 的 takeover 接力。
-
-## 檔案
-
-安裝與設定：
-
-| 路徑 | 角色 |
+| Path | Role |
 |---|---|
-| `install.sh` | **安裝／升級**：複製程式、代入 plist 佔位符、產生 `mediamtx.yml`、註冊 launchd 服務 |
-| `src/settings.json` | 通用設定：畫質、fps、位元率、淡化秒數、浮水印與跑馬燈、黑尾門檻。程式讀它當**預設值**，命令列可覆寫 |
-| `src/modes.json` | 播出模式定義：各模式的來源頻道、長度上限、shorts 池、重新掃描頻率 |
-| `src/settings.json` 的 `ui.lang` | 語言：`zh`／`en`（後台右上角可切換），同時影響後台介面與畫面字樣 |
-| `src/playlist.example.json` | 母清單**範例**（3 筆假 id）。實際的 `playlist.json` 由 `build_playlist.py` 產生，已列入 `.gitignore` |
-| `mediamtx.example.yml` | MediaMTX 範例設定。刻意用**路徑白名單**（只開 `live/main`），不是 MediaMTX 預設的全開 |
+| `install.sh` | **Install / upgrade**: copy the programs, substitute the plist placeholders, generate `mediamtx.yml`, register the launchd services |
+| `src/settings.json` | General settings: quality, fps, bitrate, fade seconds, watermark and marquee, black-tail threshold. The programs read it as their **defaults** and the command line can override |
+| `src/modes.json` | Broadcast mode definitions: source channel, length cap, shorts pool and rescan interval per mode |
+| `ui.lang` in `src/settings.json` | Language: `zh` / `en` (switchable at the top right of the console); affects both the console interface and the on-screen captions |
+| `src/playlist.example.json` | **Example** master list (3 fake ids). The real `playlist.json` is produced by `build_playlist.py` and is in `.gitignore` |
+| `mediamtx.example.yml` | Example MediaMTX configuration. It deliberately uses a **path allow-list** (only `live/main`) rather than the open-everything MediaMTX default |
 
-建置內容：
+Building content:
 
-| 路徑 | 角色 |
+| Path | Role |
 |---|---|
-| `src/build_playlist.py` | 掃描播放清單或頻道，產生母清單 `playlist.json`（含每支長度） |
-| `src/build_local_content.py` | 把母清單抓成本機 `media/<模式>/<id>.mp4`：正規化、長度核對、黑尾偵測、浮水印與倒數、淡入淡出 |
-| `src/build_transitions.py` | 產生每集專屬過場 `media/<模式>/_tr_<id>.mp4`（QR 指向該集），可吃 shorts 池輪播 |
-| `src/build_test_edition.py` | 產生縮短的測試版：每集剪成固定秒數，右上角燒流水號 |
-| `src/mode_build.py` | 依 `modes.json` 跑完整條鏈：掃描 → 落地 → 過場 → 部署 → 重建清單 |
-| `src/wmtext.py`、`src/make_qr_png.py` | 浮水印文字與 QR Code 的 PNG 產生（機器上沒有 freetype，所以自己畫） |
+| `src/build_playlist.py` | Scan a playlist or channel and produce the master list `playlist.json` (with each duration) |
+| `src/build_local_content.py` | Land the master list as local `media/<mode>/<id>.mp4`: normalise, verify duration, detect black tails, watermark and countdown, fade in/out |
+| `src/build_transitions.py` | Build the per-episode transition `media/<mode>/_tr_<id>.mp4` (its QR points at that episode); can use a rotating shorts pool |
+| `src/build_test_edition.py` | Produce a shortened test edition: each episode cut to a fixed length with a sequence number burned in at the top right |
+| `src/mode_build.py` | Run the whole chain for a mode from `modes.json`: scan -> land -> transitions -> deploy -> rebuild list |
+| `src/wmtext.py`, `src/make_qr_png.py` | Generate the watermark text and QR code PNGs (the machine has no freetype, so they are drawn by hand) |
 
-內容放在哪裡（`media/` 底下）：
+Where the content lives (under `media/`):
 
-| 路徑 | 是什麼 | 共用嗎 |
+| Path | What it is | Shared? |
 |---|---|---|
-| `media/<模式>/<id>.mp4` | 正規化後的影片 | 每個模式一份（同一支影片在不同模式可有不同長度上限） |
-| `media/<模式>/_tr_<id>.mp4` | 第 1 趟的過場；`_tr_<id>_p2.mp4` 是第 2 趟 | 同上 |
-| `media/<模式>/manifest.json` | 該模式的長度／黑尾紀錄 | 同上 |
-| `media/.raw/<id>.mp4` | 原始下載檔（`--keep-raw`） | **共用**：是輸入，跟模式無關 |
-| `media/short-<id>.mp4` | shorts 池 | **共用**：同上 |
+| `media/<mode>/<id>.mp4` | The normalised video | One per mode (the same video can have a different length cap per mode) |
+| `media/<mode>/_tr_<id>.mp4` | The pass-1 transition; `_tr_<id>_p2.mp4` is pass 2 | Same |
+| `media/<mode>/manifest.json` | Duration and black-tail record for that mode | Same |
+| `media/.raw/<id>.mp4` | The original download (`--keep-raw`) | **Shared**: it is an input and has nothing to do with the mode |
+| `media/short-<id>.mp4` | The shorts pool | **Shared**: same |
 
-播出：
+Playout:
 
-| 路徑 | 角色 |
+| Path | Role |
 |---|---|
-| `src/make_concat_list.py` | 把 `playlist-local.json` 轉成 ffmpeg concat 清單 `concat.txt` |
-| `src/playout.sh` | **播出端**：單一行程 concat 循環播出，推 MediaMTX。由 `com.loopcastr.playout` 看管 |
-| `src/yt_publish.sh` | **推流端**：單一長命 ffmpeg 從 MediaMTX 推到 YouTube ingest。由 `com.loopcastr.publish` 看管 |
-| `src/switch_edition.sh` | 切換播出哪一版清單（正式／各模式／測試），並重建清單、改 plist、重啟服務 |
-| `src/relay.py` | 聯播／多來源接力引擎（takeover 零斷點換手、看門狗、來源 URL 生命週期） |
+| `src/make_concat_list.py` | Turn `playlist-local.json` into the ffmpeg concat list `concat.txt` |
+| `src/playout.sh` | **Playout**: one concat process looping the list, pushing to MediaMTX. Supervised by `com.loopcastr.playout` |
+| `src/yt_publish.sh` | **Publisher**: one long-lived ffmpeg pushing MediaMTX to YouTube ingest. Supervised by `com.loopcastr.publish` |
+| `src/switch_edition.sh` | Switch which list is broadcast (production / each mode / test), rebuilding the list, editing the plist and restarting the service |
+| `src/relay.py` | Relay and multi-source handover engine (gapless takeover, watchdog, source URL lifetime) |
 
-觀測與維運：
+Observation and maintenance:
 
-| 路徑 | 角色 |
+| Path | Role |
 |---|---|
-| `src/webui.py` | **本機控制台**（只用標準庫）：狀態、設定編輯、建置動作 |
-| `src/healthcheck.py` | 健康檢查（每 60 秒）：ready、有讀者、流量有成長；狀態變化才告警，可自動修復 |
-| `src/loopwatch.py` | 循環邊界觀測：量繞回清單開頭那一刻有沒有縫 |
-| `src/gapwatch.py` | 獨立驗收觀測器：輪詢 MediaMTX API，報「接收端離線」與 `bytesReceived` 零成長區間 |
-| `src/refreshwatch.py` | 依 `modes.json` 的 `refresh_seconds` 定期重掃，有新片就在下一個換片點切回清單開頭 |
-| `src/yt_side_monitor.py` | YouTube 端長時間監控：拉直播串流跑 blackdetect／freezedetect |
+| `src/webui.py` | **Local console** (standard library only): status, settings editing, build actions |
+| `src/healthcheck.py` | Health check (every 60 seconds): ready, has readers, traffic growing; alerts only on state changes and can heal automatically |
+| `src/loopwatch.py` | Loop-boundary observation: measure whether there is a gap at the moment the list wraps |
+| `src/gapwatch.py` | Standalone acceptance observer: poll the MediaMTX API and report receiver-offline windows and `bytesReceived` zero-growth windows |
+| `src/refreshwatch.py` | Rescan periodically according to `refresh_seconds` in `modes.json`; when new content appears, hand over at the next segment boundary |
+| `src/yt_side_monitor.py` | Long-running monitoring of the YouTube side: pull the live stream and run blackdetect / freezedetect |
 
-服務定義（模板，`__HOME__`／`__USER__`／`__YT_VIDEO_ID__` 由 `install.sh` 代入）：
+Service definitions (templates; `__HOME__` / `__USER__` / `__YT_VIDEO_ID__` are substituted by `install.sh`):
 
-| 路徑 | 角色 |
+| Path | Role |
 |---|---|
-| `launchd/com.loopcastr.mediamtx.plist` | 媒體樞紐（含 8192 fd 的 ResourceLimits） |
-| `launchd/com.loopcastr.playout.plist` | 播出端 |
-| `launchd/com.loopcastr.publish.plist` | 推流端 |
-| `launchd/com.loopcastr.health.plist` | 健康監控（以 root 執行，才能 kickstart system domain） |
-| `launchd/com.loopcastr.refresh.plist` | 自動重新掃描 |
+| `launchd/com.loopcastr.mediamtx.plist` | Media hub (with an 8192 fd ResourceLimits) |
+| `launchd/com.loopcastr.playout.plist` | Playout |
+| `launchd/com.loopcastr.publish.plist` | Publisher |
+| `launchd/com.loopcastr.health.plist` | Health monitoring (runs as root so it can kickstart the system domain) |
+| `launchd/com.loopcastr.refresh.plist` | Automatic rescan |
 
-## 為什麼播出端用 concat 而不是接力
+## Why the playout uses concat rather than a relay
 
-同樣一段「3 段本機檔案繞圈」：
+The same "3 local files in a loop":
 
-| 播法 | 換片縫 | 繞回清單開頭的縫 | 冷啟動縫 |
+| Playout style | Gap at a segment change | Gap at the wrap back to the top | Cold-start gap |
 |---|---|---|---|
-| `relay.py` 接力（每段一個 publisher） | 每段 2.0–3.1 秒 | 有 | 3.07 秒 |
-| `playout.sh` concat（全程一個 publisher） | **0** | **0** | 2.55 秒（只此一次） |
+| `relay.py` handover (one publisher per segment) | 2.0-3.1 seconds per segment | yes | 3.07 seconds |
+| `playout.sh` concat (one publisher throughout) | **0** | **0** | 2.55 seconds (once only) |
 
-接力會斷的原因很具體：**檔案播完就 EOF，MediaMTX 立刻踢掉 publisher，下一個 publisher 暖機期間接收端是離線的**。
-`--url-max-age` 或加大 `tail` 都救不了，因為那是**來源端**先結束，不是輸出端。
+The reason the relay breaks is concrete: **the file ends in EOF, MediaMTX immediately drops the publisher, and
+the receiver is offline while the next publisher warms up**. Neither `--url-max-age` nor a longer `tail` helps,
+because it is the **source** side that ends first, not the output side.
 
-實測證據（目標機，2026-09-16 05:13，55 秒涵蓋兩輪清單）：
+Measured evidence (target machine, 2026-09-16 05:13, 55 seconds covering two rounds of the list):
 
-    接收端離線時段：0 段（整場連續）
-    bytesReceived 零成長區間 0 段，最長 0.000s
+    receiver offline windows: 0 (continuous throughout)
+    bytesReceived zero-growth windows: 0, longest 0.000s
 
-日誌同時出現 DTS `48000`、`57000`，證明確實繞回第二輪，且繞回點沒有離線。
+The log also shows DTS `48000` and `57000`, proving it really did wrap into the second round and that the wrap
+point had no offline window.
 
-**唯一副作用**：concat demuxer 在每個接縫會出現 `Non-monotonic DTS` 警告（音訊封包邊界四捨五入，實測重疊約 11 ms）。ffmpeg 會自動夾正，聽感無影響；若要求時間軸完全乾淨，可先跑一次離線預接（見下方「預接成單一大檔」）。
+**The only side effect**: the concat demuxer emits `Non-monotonic DTS` warnings at every seam (audio packet
+boundaries are rounded, measured overlap about 11 ms). ffmpeg clamps them back automatically and there is no
+audible effect. If you need a perfectly clean timeline, splice offline into one file first:
 
-    # 預接成單一大檔（離線做一次，之後播出完全不碰 concat demuxer）
+    # Splice into one file (done once, offline; playout then never touches the concat demuxer)
     python3 src/make_concat_list.py playlist-local.json -o concat.txt --base-dir .
     ffmpeg -hide_banner -f concat -safe 0 -i concat.txt -c copy media/all-in-one.mp4
 
-## 部署
+## Deployment
 
-用 `install.sh`，它會把程式複製到安裝目錄、把 plist 的 `__HOME__`／`__USER__` 佔位符代入、
-產生 `mediamtx.yml`，並註冊 launchd 服務：
+Use `install.sh`. It copies the programs to the install directory, substitutes the `__HOME__` / `__USER__`
+placeholders in the plists, generates `mediamtx.yml` and registers the launchd services:
 
-    ./install.sh --dry-run     # 先看它會做什麼（不會動任何東西）
-    ./install.sh               # 預設裝到 ~/loopcastr，用 LaunchDaemon（需要 sudo）
-    ./install.sh --agents      # 裝成 LaunchAgent：不需 root，但要有圖形登入
+    ./install.sh --dry-run     # show what it would do first (changes nothing)
+    ./install.sh               # install to ~/loopcastr with LaunchDaemons (needs sudo)
+    ./install.sh --agents      # install as LaunchAgents: no root, but a graphical login is required
 
-可以重複執行；已存在的 `mediamtx.yml` 與 `stream.key` 不會被覆蓋。
-服務在還沒有播出內容（`playlist-local.json`／`concat.txt`）時不會啟動，
-避免 launchd 一直重啟一個註定失敗的行程。
+Safe to run repeatedly; an existing `mediamtx.yml` and `stream.key` are never overwritten.
+The services do not start while there is no broadcast content (`playlist-local.json` / `concat.txt`), so
+launchd does not keep restarting a process that is bound to fail.
 
-驗收（播出中，另開一個終端）：
+Acceptance check (while broadcasting, in another terminal):
 
     python3 ~/loopcastr/gapwatch.py http://127.0.0.1:9997 live/main 120
 
-## 上線前務必確認
+## Check before going live
 
-- `playlist-local.json` **必須存在且每段檔案都在磁碟上**，否則 `playout.sh` 會在建立 concat 清單時直接中止（設計如此，避免播出半份清單）。
-- `stream.key` 權限 `600`，不得進版控。
-- 本機與目標機的 `TZ` 都是 `Asia/Taipei`，日誌時間戳可直接對照。
+- `playlist-local.json` **must exist and every segment file must be on disk**, otherwise `playout.sh` stops
+  while building the concat list (by design, so half a list is never broadcast).
+- `stream.key` must be mode `600` and must never be committed.
+- Both the local and the target machine are on `TZ=Asia/Taipei`, so log timestamps line up directly.
 
-## 操作手冊
+## Operations
 
-### 日常看一眼
+### The daily glance
 
     ssh <USER>@<TARGET_HOST>
-    launchctl list | grep loopcastr          # 該有的服務都在嗎（沒有的話看控制台的「服務」區塊）
-    tail -3 ~/loopcastr/logs/health.log      # 全鏈路正常嗎
-    tail -3 ~/loopcastr/logs/alerts.jsonl    # 有沒有告警過
+    launchctl list | grep loopcastr          # are the expected services there? (if not, see the Services block in the console)
+    tail -3 ~/loopcastr/logs/health.log      # is the whole chain healthy?
+    tail -3 ~/loopcastr/logs/alerts.jsonl    # has anything alerted?
 
-`health.log` 每 60 秒一行。看到 `OK 全鏈路正常（流量 +N bytes / 6s）` 就是正常，N 大約 2,000,000。
+`health.log` writes one line every 60 seconds. A line like `OK chain healthy (traffic +N bytes / 6s)` means
+healthy; N is around 2,000,000. In Chinese mode the same line reads `OK 全鏈路正常（流量 +N bytes / 6s）`.
 
-### 換直播金鑰
+### Changing the stream key
 
-`yt_publish.sh` 只在**啟動時**讀一次金鑰，改了檔案一定要重啟：
+`yt_publish.sh` reads the key **only at startup**, so the service must be restarted after the file changes:
 
-    printf %s 新金鑰 > ~/loopcastr/stream.key && chmod 600 ~/loopcastr/stream.key
+    printf %s <new key> > ~/loopcastr/stream.key && chmod 600 ~/loopcastr/stream.key
     launchctl kickstart -k gui/$(id -u)/com.loopcastr.publish
 
-### 加新集數
+### Adding new episodes
 
-平常走控制台就好：填好該模式的來源網址 → 按「建置並切換（開始直播）」。
-它會依 `modes.json` 跑完整條鏈（掃描 → 落地 → 過場 → 部署 → 重建清單 → 切換）。
+Normally just use the console: fill in the mode's source URL and press "Build and switch (go live)". It runs
+the whole chain from `modes.json` (scan -> land -> transitions -> deploy -> rebuild list -> switch).
 
-要在命令列做同一件事：
+The same thing on the command line:
 
     cd ~/loopcastr
-    python3 mode_build.py --mode news --switch     # 掃描＋落地＋過場＋切換
-    python3 mode_build.py --mode news --scan-only  # 只重新掃描母清單
+    python3 mode_build.py --mode news --switch     # scan + land + transitions + switch
+    python3 mode_build.py --mode news --scan-only  # rescan the master list only
 
-只有「手動塞幾支自己準備的片段」才需要碰母清單 `playlist-<模式>.json` 的 `segments`
-（`type: vod`、`url`、`seconds`），再自己落地與重建清單：
+You only touch the `segments` of the master list `playlist-<mode>.json` (`type: vod`, `url`, `seconds`) when
+hand-placing a few clips of your own, and then land and rebuild the list yourself:
 
     python3 build_local_content.py --playlist playlist-news.json --target 720 --keep-raw \
       --media-dir media/news --out-playlist playlist-news-local.json
     python3 make_concat_list.py playlist-news-local.json -o concat-news.txt --base-dir ~/loopcastr
     ./switch_edition.sh news
 
-`build_local_content.py --status` 隨時可以看還缺哪幾支。
+`build_local_content.py --status` shows at any time which episodes are still missing.
 
-### 只想重掃黑尾（不重新下載）
+### Rescanning black tails only (without downloading again)
 
     python3 build_local_content.py --rescan
 
-### 服務開關
+### Starting and stopping services
 
-先確認是哪一種安裝，指令的 domain 與路徑都不一樣：
+First work out which kind of install this is: the launchd domain and the paths differ.
 
-> **改名前安裝的舊機器**：這套系統 2026-09-21 由 `ytpl2ytstream` 改名為 `loopcastr`。
-> 在那之前裝的機器目錄是 `~/ytpl`、服務是 `com.ytpl.*`（指令裡的路徑與 label 都要照舊）。
-> 程式本身兩邊都認（label 前綴是掃目錄裡實際的 plist 決定的），所以更新程式不會壞；
-> 要換成新名字得重新安裝一次（或手動搬目錄與改 label）。
+> **Machines installed before the rename**: this system was renamed from `ytpl2ytstream` to `loopcastr` on
+> 2026-09-21. Machines installed before that have the directory `~/ytpl` and the services `com.ytpl.*` (the
+> paths and labels in the commands below then have to follow the old names). The programs accept both (the
+> label prefix is read from the plist actually present in the directory), so updating the programs does not
+> break anything; switching to the new names needs a reinstall (or moving the directory and renaming the
+> labels by hand).
 
-| 安裝方式 | domain | plist 位置 | 要不要 sudo |
+| Install style | Domain | Plist location | sudo? |
 |---|---|---|---|
-| `install.sh --agents` | `gui/$(id -u)` | `~/Library/LaunchAgents/` | 不用 |
-| `install.sh` | `system` | `/Library/LaunchDaemons/` | 要 |
+| `install.sh --agents` | `gui/$(id -u)` | `~/Library/LaunchAgents/` | no |
+| `install.sh` | `system` | `/Library/LaunchDaemons/` | yes |
 
-以 LaunchAgent（gui）為例：
+With a LaunchAgent (gui) install:
 
-    # 停
+    # stop
     launchctl bootout gui/$(id -u)/com.loopcastr.publish
     launchctl bootout gui/$(id -u)/com.loopcastr.playout
-    # 起
+    # start
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.loopcastr.publish.plist
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.loopcastr.playout.plist
-    # 重啟（不卸載）
+    # restart (without unloading)
     launchctl kickstart -k gui/$(id -u)/com.loopcastr.playout
 
-LaunchDaemon 版本就是把 `gui/$(id -u)` 換成 `system`、路徑換成 `/Library/LaunchDaemons/`，前面加 `sudo`。
-控制台的服務區塊只處理 gui domain（它不以 root 執行），system domain 要自己來。
+For a LaunchDaemon install, replace `gui/$(id -u)` with `system`, the paths with `/Library/LaunchDaemons/`,
+and prefix the commands with `sudo`.
 
-播出端重啟會從第一段重新開始，並有約 2.5 秒的冷啟動縫。
+The Services block in the console only handles the gui domain (it does not run as root), so the system domain is
+up to you.
 
-### 本機控制台（webui.py）
+Restarting the playout starts again from the first segment and leaves a cold-start gap of about 2.5 seconds.
 
-不用 ssh、不用背指令的介面。只用標準庫，不必額外安裝任何東西。
+### Local console (webui.py)
+
+An interface for people who would rather not ssh in and memorise commands. Standard library only, so nothing has
+to be installed.
 
     cd ~/loopcastr
     python3 webui.py                 # http://127.0.0.1:8787
     python3 webui.py --port 9000
 
-    # 要讓它常駐
+    # to keep it running
     nohup python3 ~/loopcastr/webui.py > ~/loopcastr/logs/webui.log 2>&1 &
 
-區塊（由上而下就是操作順序）：
+Blocks (top to bottom is also the order of operation):
 
-| 區塊 | 內容 |
+| Block | Contents |
 |---|---|
-| ① 來源設定 | 每個模式一張卡片：播放清單網址、shorts 網址、影片支數與長度上限、掃描間隔。卡片右上角有該模式的狀態標籤 |
-| ② 開始直播 | 建置／只掃描／建置並切換、重建 concat、檢查缺檔、**停止建置**。背景執行並回報進度（建置可能數十分鐘） |
-| 播出狀態／服務行程／內容／日誌 | 服務行程、MediaMTX ready／讀者數／流量、單輪長度與下次循環時間、concat 缺檔、media 大小、health 與 alerts 尾端 |
-| 畫質與版面 | 由 schema 產生的表單（位元率、preset、文字與 QR 尺寸、淡化秒數、黑尾門檻…），存檔後下次建置生效 |
-| 進階設定 | `settings.json` 與 `modes.json` 原始 JSON。存檔前驗 JSON，舊版留成 `.bak` |
-| 服務 | 每個 launchd 服務是「執行中／已載入沒在跑／沒有載入」，沒載入的可以按「啟動」（見下方「服務」一節） |
+| 1 Sources | One card per mode: playlist URL, shorts URL, video count and length cap, rescan interval. The mode's status chip sits at the top right of the card |
+| 2 Go live | Build / scan only / build and switch, rebuild concat, check for missing files, **stop build**. Runs in the background and reports progress (a build can take tens of minutes) |
+| Playout status / services / content / logs | Service processes, MediaMTX ready / readers / traffic, round length and next loop time, missing concat entries, media size, the tail of health and alerts |
+| Quality and layout | A form generated from the schema (bitrate, preset, text and QR sizes, fade seconds, black-tail threshold...); saving takes effect on the next build |
+| Advanced settings | The raw JSON of `settings.json` and `modes.json`. The JSON is validated before saving and the previous version is kept as `.bak` |
+| Services | Every launchd service is running / loaded but not running / not loaded; a not-loaded one can be started (see the Services section below) |
 
-#### 停止建置
+#### Stop build
 
-建置可能跑好幾十分鐘，中途想改參數就按「停止建置」。
+A build can run for tens of minutes, so press "Stop build" when you want to change parameters halfway through.
 
-- 停的是**整棵行程樹**：`mode_build.py` → `build_local_content.py` → `ffmpeg`。
-  只殺最上層的話，底下兩個會變孤兒繼續寫同一個檔案。
-- 先送 SIGTERM，3 秒內沒收工就補 SIGKILL（實測 ffmpeg 在疊圖的指令下不吃 SIGTERM）。
-- **被中斷的輸出檔一律刪掉。** ffmpeg 收到 SIGTERM 有時會正常收尾，留下一個讀得出來、
-  但只有幾十秒的檔案；留著會被下一輪當成完成品播出去。已經轉好的檔案不受影響，
-  下次建置從缺的補（原始檔在 `media/.raw/`，不會重新下載）。
-- 收尾完成前按「開始」會被擋下（上面那排按鈕也會變灰），等狀態回到「已完成／待機」再按。
+- It stops the **whole process tree**: `mode_build.py` -> `build_local_content.py` -> `ffmpeg`. Killing only the
+  top level leaves the other two orphaned, still writing the same file.
+- SIGTERM first, then SIGKILL if it has not finished within 3 seconds (measured: ffmpeg does not take SIGTERM
+  under an overlay command).
+- **Interrupted output files are always deleted.** ffmpeg sometimes finishes cleanly on SIGTERM and leaves a file
+  that reads fine but is only tens of seconds long; keeping it would make the next round broadcast it as complete.
+  Files that were already finished are untouched and the next build fills in what is missing (the originals in
+  `media/.raw/` mean nothing is downloaded again).
+- Pressing start while the stop is still finishing is refused (the buttons above also grey out); wait until the
+  state reads done / idle.
 
-#### 標題與「看直播畫面」
+#### The title and "watch the stream"
 
-頁面標題的專案名（`loopcastr`）連到 GitHub 專案頁，另開分頁。
-標題下面那顆「▶ 看直播畫面」開的是 MediaMTX 的 HLS 頁：
+The project name in the page title (`loopcastr`) links to the GitHub project in a new tab.
+The "watch the stream" button below the title opens the MediaMTX HLS page:
 
-    http://<主機>:<hlsAddress 的埠>/<路徑>/      # 本機預設 http://127.0.0.1:8888/live/main/
+    http://<host>:<port of hlsAddress>/<path>/      # locally http://127.0.0.1:8888/live/main/ by default
 
-主機名稱由瀏覽器自己填，所以從別台機器開控制台也通。
-位址與是否顯示都讀 `mediamtx.yml`：`hls: no`（repo 預設）時按鈕不會出現，
-會改成一行灰字說明為什麼沒有。要開就改 `hls: yes` 並重啟 mediamtx。
+The host name is filled in by the browser, so opening the console from another machine works too.
+The address and whether the button appears at all are read from `mediamtx.yml`: with `hls: no` (the repo default)
+the button is replaced by a grey line explaining why there is none. To enable it, set `hls: yes` and restart
+mediamtx.
 
-#### 安全設計
+#### Security design
 
-- **預設只綁 `127.0.0.1`。** 要對外開放必須提供 token，否則拒絕啟動：
+- **Binds to `127.0.0.1` by default.** Exposing it requires a token, otherwise it refuses to start:
 
       openssl rand -hex 16 > ~/loopcastr/webui-token && chmod 600 ~/loopcastr/webui-token
       python3 webui.py --host 0.0.0.0
 
-  之後用 `?token=<值>` 或 `X-Ytpl-Token` 標頭存取。
-- **所有寫入都要求自訂標頭 `X-Ytpl: 1`**：跨站表單帶不了這個標頭，等於擋掉 CSRF。
-- **不以 root 執行，也不保管密碼。** 需要重啟 system domain 服務時只試 `sudo -n`（非互動），失敗就顯示要加的 sudoers 白名單，不會把密碼餵進程式：
+  Then access it with `?token=<value>` or the `X-Ytpl-Token` header.
+- **Every write requires the custom header `X-Ytpl: 1`**: a cross-site form cannot set it, which blocks CSRF.
+- **It never runs as root and stores no password.** When a system-domain service has to be restarted it only tries
+  `sudo -n` (non-interactive) and, on failure, prints the sudoers line to add instead of feeding a password into
+  the program:
 
       # /etc/sudoers.d/loopcastr-webui
-      <你的帳號> ALL=(root) NOPASSWD: /bin/launchctl kickstart -k system/com.loopcastr.playout
-- **stream key 只進不出**：可以寫入，但頁面永遠不會把它顯示出來。
-- 動作只呼叫既有 script（argv 清單、不經 shell）；模式名稱必須存在於 `modes.json`，不接受任意路徑。
+      <your account> ALL=(root) NOPASSWD: /bin/launchctl kickstart -k system/com.loopcastr.playout
+- **The stream key is write-only**: it can be written, but the page never displays it.
+- Actions only call existing scripts (an argv list, never through a shell); a mode name has to exist in
+  `modes.json` and arbitrary paths are rejected.
 
-#### settings.json 是什麼
+#### What settings.json is
 
-它是「給人改的」那一份，也是這支控制台在編輯的東西。程式讀它當**預設值**，
-命令列參數永遠可以逐次覆寫；檔案不存在時，行為與沒有這個機制時完全相同。
+It is the copy meant to be edited by hand, and it is what the console edits. The programs read it as their
+**defaults**, the command line can always override per run, and when the file is absent the behaviour is exactly
+as if the mechanism did not exist.
 
-| 區塊 | 內容 |
+| Section | Contents |
 |---|---|
-| `media` | `target`（720／1080／480）、`fps`、`venc`、`abr`、`audio_fade`（換片淡入淡出秒數）、`max_seconds` |
-| `overlay` | `date_label`、位置（`overlay_y`／`overlay_margin`／`band_left`）、跑馬燈（`marquee_speed`／`marquee_gap`）、按鈕（`link_button`／`link_caption`）、`countdown`、`transition_caption`。**每個字樣都有一個 `_en` 對應值**（例如 `date_label_en`），`ui.lang=en` 時用那一組 |
-| `ui` | `lang`：`zh`（中文）／`en`（英文）。後台介面與畫面字樣都看這個，**一次只顯示一種**；控制台右上角的「中文／English」就是改它 |
-| `content` | `black_tail_min`（片尾黑畫面幾秒算黑尾） |
+| `media` | `target` (720 / 1080 / 480), `fps`, `venc`, `abr`, `audio_fade` (fade in/out seconds at a segment change), `max_seconds` |
+| `overlay` | `date_label`, position (`overlay_y` / `overlay_margin` / `band_left`), marquee (`marquee_speed` / `marquee_gap`), button (`link_button` / `link_caption`), `countdown`, `transition_caption`. **Every caption has an `_en` counterpart** (for example `date_label_en`) used when `ui.lang=en` |
+| `ui` | `lang`: `zh` (Chinese) / `en` (English). Both the console interface and the on-screen captions follow it, and **only one language is shown at a time**; the Chinese / English switch at the top right of the console changes it |
+| `content` | `black_tail_min` (how many seconds of black at the tail count as a black tail) |
 
-要改「播什麼」請改 `modes.json`，不要在 `settings.json` 裡塞來源資訊 —— 兩份真值會互相打架。
+To change *what* is broadcast, edit `modes.json`; do not put source information into `settings.json`, or the two
+sources of truth will fight each other.
 
-### 故障排除
+### Troubleshooting
 
-| 症狀 | 先看 | 常見原因 |
+| Symptom | Look at first | Usual cause |
 |---|---|---|
-| YouTube 沒畫面，但控制台的「看直播畫面」有內容 | `launchctl list` 裡有沒有 `com.loopcastr.publish` | **推流服務沒被載入**（金鑰貼好了也沒用，因為沒人去用它）。控制台服務區塊按「啟動」 |
-| 觀眾端黑畫面 | `python3 build_local_content.py --rescan` | 某支影片本身有長黑尾 |
-| 黑畫面但 health 正常 | 對本地 HLS 跑 blackdetect | 內容層問題，傳輸與時間軸都看不出來 |
-| YouTube 沒畫面但本地正常，且 publish 有在跑 | `tail ~/loopcastr/logs/publish.log` | 金鑰失效、直播活動結束、或 ingest 被拒 |
-| health 一直 FAIL | `cat ~/loopcastr/logs/health-state.json` | 看 `problems` 欄位；連續 3 次會自動重啟對應服務 |
+| YouTube shows nothing but the console's "watch the stream" has content | whether `com.loopcastr.publish` is in `launchctl list` | **the publisher service is not loaded** (a valid stream key is useless if nothing uses it). Press start in the console Services block |
+| Viewers see a black picture | `python3 build_local_content.py --rescan` | one of the videos itself has a long black tail |
+| Black picture but health is fine | run blackdetect against the local HLS | a content-layer problem: neither the transfer nor the timeline shows it |
+| YouTube shows nothing while local is fine and publish is running | `tail ~/loopcastr/logs/publish.log` | the key expired, the live event ended, or ingest was refused |
+| health keeps failing | `cat ~/loopcastr/logs/health-state.json` | read the `problems` field; three failures in a row restart the matching service automatically |
 
-### 已知限制
+### Known limitations
 
-- **重開機需要人工解鎖**：目標機開了 FileVault 且沒有自動登入（見規格書 D16）。
-- **連續播出約 49.7 天**會遇到 FLV 32 位元時間戳回繞，建議每月重啟一次播出端。
-- **換片點有約 11 ms 的音訊時間戳重疊**（`Non-monotonic DTS` 警告），ffmpeg 會自動夾正，聽感無影響。要完全消除需先離線預接成單一大檔。
+- **A reboot needs a human to unlock the disk**: the target machine has FileVault on and no automatic login (see D16 in the spec).
+- **About 49.7 days of continuous playout** hits the FLV 32-bit timestamp wrap, so restarting the playout monthly is recommended.
+- **A segment change leaves about 11 ms of overlapping audio timestamps** (the `Non-monotonic DTS` warning). ffmpeg clamps it back automatically and there is no audible effect. Removing it entirely needs an offline splice into one file.
 
-### 服務：system domain（`install.sh` 的 LaunchDaemon 安裝）
+### Services: system domain (a LaunchDaemon install from install.sh)
 
-這種安裝的服務在 /Library/LaunchDaemons/，操作要加 sudo，domain 是 system 不是 gui：
+With that install style the services live in /Library/LaunchDaemons/, the commands need sudo and the domain is
+`system` rather than `gui`:
 
     sudo launchctl list | grep loopcastr
     sudo launchctl kickstart -k system/com.loopcastr.playout
     sudo launchctl bootout system/com.loopcastr.playout
     sudo launchctl bootstrap system /Library/LaunchDaemons/com.loopcastr.playout.plist
 
-playout、publish、mediamtx 以 <USER> 身分執行；health 以 root 執行，因為只有 root 能對 system domain 做 kickstart（那是自動修復的必要條件）。
+playout, publish and mediamtx run as <USER>; health runs as root, because only root can kickstart the system
+domain (which is a precondition for the automatic healing).
 
-改成 LaunchDaemon 安裝時，舊的 LaunchAgent 版本建議先移走（例如 `~/loopcastr/launchagents-backup/`），否則兩邊會同時被載入、搶同一條串流。
+When moving to a LaunchDaemon install, move the old LaunchAgent versions away first (for example to
+`~/loopcastr/launchagents-backup/`), otherwise both get loaded and fight over the same stream.
 
-### 循環邊界觀測（loopwatch.py）
+### Loop-boundary observation (loopwatch.py)
 
-播出端是單一行程 concat 加 -stream_loop -1，時間軸會「連續累加」—— 繞回時 DTS 不會掉回 0，所以不能用 DTS 當訊號。這支改用「開播時間 ＋ 單輪長度」推算循環點，在事件前後高頻取樣 MediaMTX API：
+The playout is one concat process with `-stream_loop -1` and its timeline accumulates continuously, so DTS does
+not fall back to 0 at the wrap and DTS cannot be used as the signal. This script derives the loop point from
+"start time + one-round length" and samples the MediaMTX API at high frequency around it:
 
     python3 loopwatch.py --lead 45 --tail 90
-    python3 loopwatch.py --at 04:19:07      # 也可直接指定時刻
+    python3 loopwatch.py --at 04:19:07      # or name the moment directly
 
-輸出會列出跨循環點的接收端離線區段與 bytesReceived 零成長區段。單輪長度取自 playlist-local.json（含 outpoint 修正），所以換清單或改長度上限後不用改參數。
+The output lists the receiver-offline windows and the `bytesReceived` zero-growth windows across the loop point.
+The round length comes from playlist-local.json (including any outpoint trims), so changing the list or the
+length cap needs no parameter change.
 
-### 過場影片（每集一份）
+### Transition clips (one per episode)
 
-每一集之後（含最後一集之後）插入一段過場。**過場是一集一份**：`media/<模式>/_tr_<影片id>.mp4`，
-內容是 short 輪播（或乾淨底）＋ 標題列 ＋ 一顆指向**該集網址**的 QR，讓觀眾掃碼去看剛播完的那一集。
+A transition is inserted after every episode, including after the last one. **There is one per episode**:
+`media/<mode>/_tr_<video id>.mp4`, containing a rotating short (or the clean base) plus a title bar and a QR code
+pointing at **that episode's URL**, so viewers can scan through to the episode that just finished.
 
-命名用**影片 ID** 而不是序號：序號在換清單時會互相覆蓋，切回舊清單還會拿到錯的 QR。
-一輪跑多趟（`--passes`）時第 2 趟之後加 `_pN`，因為同一支影片在不同趟要配不同的 short。
+The name uses the **video id**, not an index: indices overwrite each other when the list changes and switching back
+to an old list would pick up the wrong QR. When a round runs several passes (`--passes`), pass 2 and later add
+`_pN`, because the same video pairs with a different short in each pass.
 
-`build_local_content.py` 依序在每一集後面插入對應的 `_tr_<id>.mp4`；萬一某集沒有專屬檔，
-會退回共用的 `media/<模式>/_transition.mp4`（舊機制，仍然可用）。
+`build_local_content.py` inserts the matching `_tr_<id>.mp4` after each episode; if an episode has no dedicated
+file it falls back to the shared `media/<mode>/_transition.mp4` (the older mechanism, still usable).
 
-    python3 build_transitions.py --parallel 3 --verify 5     # 全部重做，做完抽驗
+    python3 build_transitions.py --parallel 3 --verify 5     # rebuild everything, then spot-check
 
-    # 舊機制：一體適用的共用過場（只有在沒有每集 QR 時才需要）
-    python3 build_local_content.py --transition <YouTube URL 或 video id>
-    python3 build_local_content.py --no-transition           # 暫時停用（檔案留著，不插入）
+    # The older mechanism: one shared transition for everything (only needed when there is no per-episode QR)
+    python3 build_local_content.py --transition <YouTube URL or video id>
+    python3 build_local_content.py --no-transition           # temporarily disable it (files stay, not inserted)
 
-過場會跟其他片段一樣被正規化成 1280x720 / H.264 High L3.1 / 30fps / AAC-LC 48k 立體，
-所以 concat 一樣是純 `-c copy`、不需要轉碼。
+Transitions are normalised like every other segment (1280x720 / H.264 High L3.1 / 30fps / AAC-LC 48k stereo), so
+concat stays a plain `-c copy` with no transcoding.
 
-### 正式版／測試版切換
+### Switching between production and test editions
 
-測試用的清單是暫時的，測完一定要切回來，否則頻道會一直播測試片段。
+The test list is temporary, so switch back after testing or the channel keeps playing test clips.
 
-    ./switch_edition.sh            # 看目前是哪一版
-    ./switch_edition.sh live       # 切回正式版（playlist-local.json）
-    SUDO_PASS=xxx ./switch_edition.sh test    # 切到測試版
+    ./switch_edition.sh            # show which list is active
+    ./switch_edition.sh live       # switch back to production (playlist-local.json)
+    SUDO_PASS=xxx ./switch_edition.sh test    # switch to the test edition
 
-切換會重建 concat 清單、改寫播出端 plist、重啟服務，並自動重掛 loopwatch（單輪長度變了，循環點要重算）。實測切換期間推流只斷 4 秒，YouTube 端維持 `is_live`。
+Switching rebuilds the concat list, rewrites the playout plist, restarts the service and reattaches loopwatch (a
+different round length means the loop point is recomputed). Measured: the publisher only drops for 4 seconds and
+the YouTube side stays `is_live`.
 
-### YouTube 端長時間監控（T-12）
+### Long-running monitoring of the YouTube side (T-12)
 
-所有「零縫」量測都是 MediaMTX 端。這支用來盯 YouTube 端那層轉碼與分發：
+Every "zero gap" measurement is taken at MediaMTX. This script watches the transcoding and distribution layer on
+the YouTube side:
 
     python3 yt_side_monitor.py --id <video id> --hours 3
 
-它會持續拉 YouTube 的直播串流跑 blackdetect 與 freezedetect，每筆事件都補上實際時間，方便跟本地事件對照。直播位址過期時會自動重新解析續讀。
+It keeps pulling the YouTube live stream and runs blackdetect and freezedetect, stamping every event with the
+wall-clock time so it can be matched against local events. When the live address expires it resolves a new one and
+continues.
 
-### 畫面上的 QR Code 有哪幾顆
+### Which QR codes appear on screen
 
-| 位置 | 內容 | 出現時機 |
+| Position | Contents | When |
 |---|---|---|
-| 右上角 | 該集原片 `https://youtu.be/<id>`，說明文字「▶ 看原片」（集數）／「去追劇」（過場） | 集數與過場都有，位置與格式**完全一致** |
-| 右下角 | 贊助連結（`settings.json` 的 `overlay.sponsor_url`） | 有填才出現；`overlay.sponsor_code` 填指定值可關掉 |
+| Top right | The episode's original `https://youtu.be/<id>` with the caption "▶ 看原片" (watch original) on episodes and "去追劇" (watch more) on transitions | On episodes and transitions, with **identical** position and format |
+| Bottom right | The sponsor link (`overlay.sponsor_url` in `settings.json`) | Only when set; filling `overlay.sponsor_code` with the magic value turns it off |
 
-QR 的 PNG 由 `make_qr_png.py` 產生（機器上沒有 qrencode，所以只裝純 Python 的 `qrcode`
-拿矩陣，PNG 自己用 zlib + struct 寫）：
+The QR PNGs are produced by `make_qr_png.py` (the machine has no qrencode, so only the pure-Python `qrcode`
+package is used for the matrix and the PNG is written by hand with zlib + struct):
 
-    python3 make_qr_png.py "<網址>" out.png --scale 8 --border 4
+    python3 make_qr_png.py "<url>" out.png --scale 8 --border 4
 
-過場的 QR 是 `build_transitions.py` 每次重建時重新疊上去的，要改內容就改參數重跑，
-不要去改已經疊過的檔案（會愈疊愈花）：
+The transition QR is overlaid fresh by `build_transitions.py` on every rebuild, so change the parameters and rerun
+rather than editing an already-overlaid file (that gets muddier every time):
 
     python3 build_transitions.py --button-caption "去追劇" --parallel 3
 
-驗證一定要做 —— 從**編碼後的影片**抽格解碼，不是只看畫面有沒有東西：
+Always verify by decoding a frame from the **encoded video**, not by looking at the picture:
 
    python3 -c "import cv2,subprocess;subprocess.run(['ffmpeg','-y','-ss','10','-i','media/news/_tr_<id>.mp4','-frames:v','1','/tmp/f.png']);print(cv2.QRCodeDetector().detectAndDecode(cv2.imread('/tmp/f.png'))[0])"
 
-### 用 shorts 輪播當過場
+### Using a rotating shorts pool as transitions
 
-過場不一定要用固定一支影片，也可以吃一個 shorts 池輪流播：
+A transition does not have to be one fixed clip; it can rotate through a pool of shorts:
 
     python3 build_transitions.py --playlist playlist-tucheng3.json \
       --shorts-url "https://www.youtube.com/<SHORTS_CHANNEL>/shorts" \
       --shorts-count 3 --seconds 90 --parallel 3 --verify 3
 
-它會抓前 N 支 shorts、正規化成與其他片段一致的參數（1280x720 / H.264 High L3.1 / 30fps / AAC-LC），再依序把每集的 QR 疊上去。
-配法是「第 p 趟的第 i 集用池子裡第 `(p × 集數 + i - 1) % N` 支」——
-所以 30 支影片配 50 支 shorts、跑 2 趟時，第 2 趟會接著從第 31 支 short 播下去，而不是重頭輪。
+It fetches the first N shorts, normalises them to the same parameters as every other segment (1280x720 / H.264
+High L3.1 / 30fps / AAC-LC) and overlays each episode's QR in turn. The pairing is "pass p, episode i uses pool
+entry `(p x episodes + i - 1) % N`", so 30 videos with 50 shorts over 2 passes continues from short 31 in pass 2
+instead of starting the rotation over.
 
-**直式短片會被縮小補黑邊**（pillarbox），不裁切也不變形。實測 1080x1920 的 short 縮成 404x720、左右各留約 438px 黑邊。
+**Vertical shorts are scaled down and pillarboxed**, never cropped or distorted. Measured: a 1080x1920 short
+becomes 404x720 with about 438px of black on each side.
 
-`--seconds` 是每段過場的長度上限；短片的實際長度若更短就照原長。
+`--seconds` is the length cap of each transition; a shorter clip is used at its own length.
 
-過場上也會有**標題跑馬燈**（與集數相同的樣式），但左界給 0 —— 直式短片兩側本來就是黑邊，不需要像集數那樣讓開 logo 的空間。
+Transitions also carry the **title marquee** (the same style as episodes) but with the left bound at 0: a vertical
+short is pillarboxed anyway, so no space has to be left for a logo as on episodes.
 
-過場的 QR 與集數用**同一個元件**、**同樣的位置**（右上角）與排版，不做任何區分；
-差別只在說明文字：集數是「看原片」，過場是「**去追劇**」
-（`--button-caption` 可改，`--no-button` 可整個關掉）。
+The transition QR uses the **same component**, the **same position** (top right) and the same layout as episodes,
+with no distinction at all; only the caption differs: "watch original" on episodes and "**去追劇**" (watch more) on
+transitions (`--button-caption` changes it, `--no-button` turns it off entirely).
 
-### 剩餘播放時間倒數
+### The remaining-time countdown
 
-集數的 QR 按鈕下方有一個每秒更新的「剩餘 MM:SS」標籤。
+Below the episode's QR button there is a "remaining MM:SS" badge that updates every second.
 
-影片畫面不能直接畫字（沒有 freetype），倒數又必須隨時間變化，所以做法是**事先把每一秒的圖都畫好**（`make_countdown_frames`），再交給 ffmpeg 用 `-framerate 1` 的序列輸入；overlay 會依時間自己換圖。180 秒的影片就是 180 張圖。
+Text cannot be drawn onto the video directly (no freetype) and the countdown has to change over time, so every
+second is pre-rendered (`make_countdown_frames`) and handed to ffmpeg as a `-framerate 1` sequence input, which
+makes overlay swap images by time. A 180-second video means 180 images.
 
-停用：`--no-countdown`。
+Disable it with `--no-countdown`.
 
-輪播池預設抓 **30 支** shorts（上限也是 30）。這代表下載量，抓滿 30 支大約 10–15 分鐘；已經抓過的會跳過。
+The rotation pool takes the newest **30** shorts by default (30 is also the maximum). That is the download cost:
+filling all 30 takes roughly 10-15 minutes, and anything already fetched is skipped.
 
-⚠️ 疊圖用了 `-loop 1`，所以長度上限一定要取「指定上限」與「base 本身長度」的**較小值**。只給 `-t` 上限的話，比它短的 base 會被撐長、尾巴變成凍結的最後一格（實測：53 秒的 short 變成 90 秒）。
+WARNING: the overlay uses `-loop 1`, so the length cap must be the **smaller** of the requested cap and the length
+of the base itself. With only a `-t` cap a shorter base is stretched and its tail becomes a frozen last frame
+(measured: a 53-second short became 90 seconds).
 
-### 畫面浮水印：標題 ＋ 首播日期
+### The watermark: title plus first-air date
 
-每支影片的右上角會顯示「**原影片標題　首播日期：YYYY-MM-DD**」。標題太長（超過畫面寬度扣掉邊界）時**自動改成跑馬燈**，以 120 px/s 由右往左捲動。
+Every video shows "**original title　First aired: YYYY-MM-DD**" at the top right. When the title is too long (wider
+than the frame minus the margins) it **automatically becomes a marquee**, scrolling right to left at 120 px/s.
 
-實作在 `build_local_content.py`：
+The implementation is in `build_local_content.py`:
 
-- 標題取自 `playlist-*.json` 的 `segments[].title`（由 `build_playlist.py` 逐支抓回）
-- 文字用 `wmtext.py` 畫成 PNG（PIL ＋ 系統 STHeiti 字型，所以支援中文）
-- 放得下就用 `overlay=x=W-w-40`；放不下就換成 `overlay=x='W-mod(t*120,W+w+220)'`
+- the title comes from `segments[].title` in `playlist-*.json` (fetched per video by `build_playlist.py`)
+- the text is rendered to a PNG by `wmtext.py` (PIL plus the system STHeiti font, so CJK works)
+- when it fits it uses `overlay=x=W-w-40`; when it does not it becomes `overlay=x='W-mod(t*120,W+w+220)'`
 
-驗證跑馬燈有沒有真的在動：拿標題開頭的幾個字當模板，在不同時間點用模板比對找位置，應該要與公式吻合。
+To check that the marquee really moves, take the first few characters of the title as a template, match it at
+different times to find its position, and compare against the formula.
 
-調整浮水印時**務必加 `--keep-raw`**：原始下載檔會留在 `media/.raw/`，可以重複轉檔而不用重新下載，也不會多一次畫質損失。
+**Always add `--keep-raw` while tuning the watermark**: the original downloads stay in `media/.raw/`, so files can
+be re-encoded without downloading again and without another quality loss.
 
-### 畫面按鈕：連到原影片
+### The on-screen button: linking to the original video
 
-標題列下方（右上角）有一個「▶ 看原片」按鈕，內含小 QR 與短網址 youtu.be/<id>。
+Below the title bar (top right) there is a "▶ 看原片" (watch original) button containing a small QR and the short
+URL youtu.be/<id>.
 
-**必須說清楚的限制**：直播影片的像素不能被點擊，所以這是**視覺提示**而不是真的按鈕。要讓觀眾「一點就到」，只能靠 YouTube 自己的機制：
+**The limitation has to be stated plainly**: the pixels of a live video cannot be clicked, so this is a **visual
+hint** rather than a real button. Making a viewer arrive in one click can only come from YouTube itself:
 
-| 方式 | 可點擊 | 需要什麼 |
+| Method | Clickable | What it needs |
 |---|---|---|
-| 說明欄放連結 | 是 | 在 Studio 設定，或用 YouTube Data API（需 OAuth） |
-| 聊天室貼連結 | 是 | YouTube Data API（需 OAuth） |
-| 影片資訊卡 | 是 | 只能在 Studio 手動加，API 不支援 |
-| 畫面按鈕＋QR（本系統） | 否 | 已具備，掃碼或照打短網址 |
+| A link in the description | yes | set in Studio, or the YouTube Data API (OAuth) |
+| A link in the chat | yes | the YouTube Data API (OAuth) |
+| An info card | yes | only by hand in Studio; the API does not support it |
+| On-screen button plus QR (this system) | no | already present; scan the code or type the short URL |
 
-跑馬燈的可視範圍是「左界 ~ 按鈕左緣」：
+The marquee's visible range is "left bound to the left edge of the button":
 
-- **左界固定留畫面寬度的 1/7**（1280 ÷ 7 ≈ 182 px），讓開原片左上角的 logo。不自動判定，因為自動判定容易誤判；要覆寫用 `--band-left <像素>`。
-- **右界**是連結按鈕的左緣，每支會因網址字母寬度而略有不同。
+- **The left bound always frees 1/7 of the frame width** (1280 / 7 is about 182 px) for the source's top-left logo.
+  It is not detected automatically because that misjudges easily; override it with `--band-left <pixels>`.
+- **The right bound** is the left edge of the link button, which differs slightly per video with the width of the
+  URL's characters.
 
-實作上不是「限制文字起點」就好 —— 文字往左捲出去時照樣會壓過 logo。所以是「可無縫捲動的長條圖 ＋ 固定視窗裁切」，文字永遠不會畫到視窗之外。驗證方式是用全黑畫面跑同一條濾鏡，檢查每一格的非黑像素有沒有超出視窗。
+In practice, clamping the start of the text is not enough: as the text scrolls out to the left it still paints over
+the logo. So it is a "seamlessly scrollable strip plus a fixed crop window" and the text can never be drawn outside
+the window. Verify by running the same filter chain over an all-black clip and checking that no non-black pixel of
+any frame falls outside the window.
 
-停用：--no-link-button。跑馬燈的 y 由 40 改為 10（上移半行）。
+Disable it with `--no-link-button`. The marquee y moves from 40 to 10 (half a line up).
 
     python3 build_local_content.py --playlist playlist-tucheng3.json \
       --target 720 --max-seconds 180 --keep-raw
 
-**驗證一定要從編碼後的影片解碼**，只看畫面有東西不算數：
+**Verification must decode the encoded video**; pixels on screen are not proof:
 
-    # build_transitions.py --verify 5 會自己抽樣驗證並印出結果
+    # build_transitions.py --verify 5 samples and reports on its own
 
-QR 內容用短網址 `https://youtu.be/<id>`（比 watch?v= 短，模組少、比較好掃）。
+The QR holds the short URL `https://youtu.be/<id>` (shorter than watch?v=, fewer modules, easier to scan).
 
-改了過場之後要重建清單並重啟播出端（用控制台的「重建 concat 清單」＋「重啟 playout」也一樣）：
+After changing transitions, rebuild the list and restart the playout (the console's "rebuild concat" plus
+"restart playout" does the same):
 
     cd ~/loopcastr
-    python3 make_concat_list.py playlist-<模式>-local.json -o concat-<模式>.txt --base-dir ~/loopcastr
-    launchctl kickstart -k gui/$(id -u)/com.loopcastr.playout     # LaunchDaemon 安裝改成 system/，前面加 sudo
+    python3 make_concat_list.py playlist-<mode>-local.json -o concat-<mode>.txt --base-dir ~/loopcastr
+    launchctl kickstart -k gui/$(id -u)/com.loopcastr.playout     # for a LaunchDaemon install use system/ and sudo
 
-播出端重啟會**從第一段重新開始**，觀眾端會看到內容跳回開頭。
+Restarting the playout **starts again from the first segment**, so viewers see the content jump back to the top.
 
-### 換片時的聲音淡入淡出
+### Audio fade in and out at a segment change
 
-播出端是 concat ＋ `-c copy`，接縫不可能即時插入濾鏡，所以淡化**必須在落地時就烤進每一段檔案**：每段開頭淡入 **2.5 秒**、結尾淡出 **2.5 秒**（`build_local_content.py` 的 `AUDIO_FADE`）。
+The playout is concat plus `-c copy`, so no filter can be inserted at the seam on the fly: the fade **has to be
+baked into every file at landing time**, 2.5 seconds in at the start and 2.5 seconds out at the end
+(`AUDIO_FADE` in `build_local_content.py`).
 
-集數與過場**每一段都有**，所以接縫兩邊都會收乾淨：前一段淡出、後一段淡入，繞回清單開頭時也一樣。沒有音軌的來源會自動跳過；長度 ≤ 3 秒的片段不套用，避免整段只剩淡化。
+Episodes and transitions **all carry it**, so both sides of a seam close cleanly: the previous segment fades out,
+the next fades in, and the wrap back to the top behaves the same. Sources without an audio track are skipped, and
+clips of 3 seconds or less get no fade at all so that nothing is left but fades.
 
-實測（目標機，2026-09-19）：把輸出音訊解成 PCM、每 0.1 秒算 RMS，再與未淡化的來源逐窗相減，得到實際增益曲線：
+Measured (target machine, 2026-09-19): decoding the output audio to PCM, computing RMS every 0.1 seconds and
+subtracting the un-faded source window by window gives the actual gain curve:
 
-    淡入  -29.2  -23.9  -20.9  -16.3  -14.8  -13.1  ...  （1.0 秒處 -7.5）  ...  0 dB
-    淡出  ...  （尾前 1.0 秒 -7.6）  ...  最後一窗 -24.4 dB
+    fade in   -29.2  -23.9  -20.9  -16.3  -14.8  -13.1  ...  (-7.5 at 1.0 s)  ...  0 dB
+    fade out  ...  (-7.6 one second before the end)  ...  last window -24.4 dB
 
-六段（3 集 + 3 段過場）在「**淡入 1.0 秒處**」都量到 **-7.3 ~ -7.8 dB**，與 2.5 秒線性淡化（20·log₁₀t）的理論值 -7.5 dB 吻合。這個檢查點就是分辨秒數的關鍵：**1 秒淡化在這裡會是 0 dB，2.5 秒是 -7.5 dB**，相差 7.5 dB，不會被內容變化干擾。過場的標題列像素與舊版一致（20961 vs 20958 等），QR 各自解回正確網址。
+All six segments (3 episodes plus 3 transitions) measured **-7.3 to -7.8 dB at 1.0 second into the fade**, matching
+the theoretical -7.5 dB of a 2.5-second linear fade (20*log10(t)). That checkpoint is what distinguishes the
+duration: **a 1-second fade would read 0 dB here and a 2.5-second fade reads -7.5 dB**, a 7.5 dB difference that
+content variation cannot hide. The transition's title-bar pixels match the previous version (20961 vs 20958 and so
+on) and every QR still decodes to the right URL.
 
-調整秒數只要改 `AUDIO_FADE`；改完要重跑 `build_local_content.py`（加 `--keep-raw` 就不用重新下載，3 集約 100 秒）與 `build_transitions.py`（3 段約 15 秒）。
+Changing the duration only means editing `AUDIO_FADE`; afterwards rerun `build_local_content.py` (with
+`--keep-raw` no download is needed; about 100 seconds for 3 episodes) and `build_transitions.py` (about 15 seconds
+for 3 transitions).
 
-#### 播出中換檔：先寫暫存目錄，再原子置換
+#### Replacing files while on air: staging first, then an atomic swap
 
-`build_local_content.py --out-dir` 與 `build_transitions.py --out-dir` 會把成品寫到指定目錄。播出端是單一行程 concat 加 `-stream_loop -1`，**每個循環都會重新開啟檔案**；直接覆寫正在播的那一支，會讓它讀到寫到一半的內容（沒有 moov，ffmpeg 開不起來，播出端就會重啟並從第一段重來）。先寫到暫存目錄、驗完再 `mv` 進 `media/`，`mv` 在同一個 volume 上是原子置換，播出端只會拿到完整的舊檔或新檔。
+`build_local_content.py --out-dir` and `build_transitions.py --out-dir` write their output to a given directory.
+The playout is one concat process with `-stream_loop -1` that **reopens files every loop**, so overwriting a file
+that is on air would let it read a half-written file (no moov, ffmpeg cannot open it, and the playout restarts
+from the first segment). Write to a staging directory first and `mv` into `media/` after verification: on the same
+volume `mv` is an atomic replace, so the playout only ever sees a complete old or new file.
 
     python3 build_local_content.py --playlist playlist-tucheng3.json --target 720 \
       --max-seconds 180 --keep-raw --out-dir /tmp/stage-ep --out-playlist /tmp/pl.json
     python3 build_transitions.py --playlist playlist-tucheng3.json \
       --shorts-url "https://www.youtube.com/<SHORTS_CHANNEL>/shorts" --shorts-count 30 \
       --seconds 90 --button-caption 去追劇 --parallel 2 --out-dir /tmp/stage-tr
-    # 驗證通過後
+    # after verification passes
     mv /tmp/stage-ep/*.mp4 media/
     mv /tmp/stage-tr/_tr_*.mp4 media/
 
-⚠️ **暫存目錄請放 `/tmp`，不要放在 `media/` 底下。** 2026-09-19 實測：寫到 `media/.stage*/` 時，ffmpeg 連續三次在收尾階段停滯（檔案大小不再變動、CPU 0%、moov 沒寫出來、主執行緒停在 `sch_wait`），改寫到 `/tmp` 之後同樣的工作 13 秒就完成。同一時間看到 `mediaanalysisd` 吃到 **111% CPU**，正在重複分析我們一直被重寫的 mp4；`/tmp` 不在 Spotlight 索引範圍內。
+WARNING: **keep the staging directory in `/tmp`, not under `media/`.** Measured on 2026-09-19: writing to
+`media/.stage*/` made ffmpeg stall while finishing three times in a row (file size frozen, 0% CPU, no moov, main
+thread parked in `sch_wait`), while the same work written to `/tmp` finished in 13 seconds. At the same time
+`mediaanalysisd` was burning **111% CPU** re-analysing the mp4 files we kept rewriting; `/tmp` is outside the
+Spotlight index.
 
-對策：把 `~/loopcastr` 加進 Spotlight 的隱私清單。這會順便省掉那顆一直在跑的 `mediaanalysisd`（實測累積 346 分鐘 CPU 時間）——多線播出時那些都是白佔的 CPU。
+The countermeasure is to add `~/loopcastr` to the Spotlight privacy list. That also gets rid of the constantly
+running `mediaanalysisd` (measured: 346 minutes of accumulated CPU time), all of which is wasted when several
+channels run.
 
-另外，若單次建置中途卡住，**不加 `--force` 重跑就有續傳效果**：要不要處理是以「輸出目錄裡有沒有這個檔案」判斷的，已完成的那幾支會自動跳過，只補沒完成的那一支。
+Also, if a single build gets stuck halfway, **rerunning without `--force` resumes**: whether work has to be done
+is decided by whether the file is already in the output directory, so finished episodes are skipped and only the
+unfinished one is redone.
 
-### 容量與資源（fd 上限、HLS）
+### Capacity and resources (fd limit, HLS)
 
-要把同時直播的線數拉上去之前，先處理兩個會在 100 線附近咬人的設定。
+Before pushing up the number of simultaneous channels, deal with two settings that bite around 100 channels.
 
-| 項目 | 原本 | 現在 | 為什麼 |
+| Item | Before | Now | Why |
 |---|---|---|---|
-| `maxfiles` | 256 | **8192** | MediaMTX 每多一條路徑＋讀者約 +2 個 fd（實測：1 條 61、13 條 85），256 大約 97 線就爆 |
-| MediaMTX `hls` | `yes` ＋ `hlsAlwaysRemux: yes` | **`no`** | 沒有人在用 HLS，但每條路徑都會白做一次 remux（實測每路徑約 +1.1% CPU） |
+| `maxfiles` | 256 | **8192** | MediaMTX adds about 2 fds per extra path plus reader (measured: 61 for 1 path, 85 for 13), so 256 blows up at roughly 97 channels |
+| MediaMTX `hls` | `yes` plus `hlsAlwaysRemux: yes` | **`no`** | nobody uses HLS, yet every path still does one wasted remux (measured: about +1.1% CPU per path) |
 
-上表的 `hls: no` 是**多線產能**的取捨（也正好是 repo 的預設值）。單機自用時
-把 `hls: yes` 開回來，控制台標題下面就會多一顆「▶ 看直播畫面」可以直接看播出結果，
-代價就是上面那個每路徑約 +1.1% CPU。
+The `hls: no` above is a **multi-channel capacity** trade-off (and happens to be the repo default). For a
+single-channel setup, turning `hls: yes` back on adds a "watch the stream" button under the console title so the
+output can be viewed directly, at the cost of that ~+1.1% CPU per path.
 
 ```bash
-# fd 上限：系統預設 ＋ 服務層（plist 才是重開機後仍然有效的那一層）
+# fd limit: the system default plus the service layer (only the plist survives a reboot)
 sudo launchctl limit maxfiles 8192 unlimited
-# mediamtx plist 加上：
-#   SoftResourceLimits / HardResourceLimits → NumberOfFiles = 8192
+# add to the mediamtx plist:
+#   SoftResourceLimits / HardResourceLimits -> NumberOfFiles = 8192
 sudo launchctl bootout system/com.loopcastr.mediamtx
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.loopcastr.mediamtx.plist
 ```
 
-實測驗證（2026-09-19 06:47–06:50）：
+Measured verification (2026-09-19 06:47-06:50):
 
-- 新開 shell 的 `ulimit -n` 由 256 → **8192**
-- `:8888` 不再 listening（HLS 確實關閉）
-- 重啟 MediaMTX 期間 YouTube 端斷約 **10–20 秒**：health 在 06:47:58 記到一次 `FAIL 沒有讀者`，06:49:04 恢復 `OK`。playout 與 publish 都由 launchd 自動接回，**不需要人工 kickstart**
-- ⚠️ playout 重啟會**從第一段重新開始**（觀眾端會看到內容跳回開頭），這是播出端重啟的既有行為，不是這次改動造成的
+- `ulimit -n` in a new shell went from 256 to **8192**
+- `:8888` is no longer listening (HLS really is off)
+- the YouTube side dropped for about **10-20 seconds** while MediaMTX restarted: health recorded one
+  `FAIL no readers` at 06:47:58 and recovered to `OK` at 06:49:04. Both playout and publish reconnected by
+  themselves through launchd, with **no manual kickstart**
+- WARNING: restarting the playout **starts again from the first segment** (viewers see the content jump back to the
+  top). That is the existing behaviour of a playout restart, not something this change introduced
 
-多線與代客服務的產能規劃不在本 repo 範圍內。
+Capacity planning for many channels or for running this as a service for other people is out of scope for this repo.
 
-### 三種播出模式
+### The three broadcast modes
 
-模式定義在 `modes.json`，整條內容鏈交給 `mode_build.py` 建置：
+Modes are defined in `modes.json` and the whole content chain is built by `mode_build.py`:
 
-| 模式 | 影片 | 每支長度 | shorts 池 | 自動重新掃描 |
+| Mode | Videos | Length per video | Shorts pool | Automatic rescan |
 |---|---|---|---|---|
-| `news` 新聞模式 | 來源頻道最新 N 支 | 全長 | 最新 15 支 | 每 300 秒 |
-| `promotion` 推廣模式 | 來源頻道最新 30 支 | 最多 450 秒（不必播完） | 最新 50 支 | 每 1800 秒 |
-| `test` 測試模式 | 3 支 | 180 秒 | 6 支 | 不掃描 |
+| `news` | the newest N videos of the source channel | full length | newest 15 | every 300 seconds |
+| `promotion` | the newest 30 videos of the source channel | at most 450 seconds (need not finish) | newest 50 | every 1800 seconds |
+| `test` | 3 | 180 seconds | 6 | no rescan |
 
-上表是 `src/modes.json` 的**範例值**；實際值就是你在控制台「① 來源設定」填的那些，
-存在部署目錄的 `modes.json`（改完下次建置生效）。
+The table shows the **example values** in `src/modes.json`; the real values are what you fill in under block 1 of
+the console and are stored in the deployed `modes.json` (a change takes effect on the next build).
 
-每個模式還有一個 `max_age_hours`（0＝不限）：**只播首播時間在 N 小時內的影片**。
-判斷順序是「先用 `video_limit` 取前 N 支，再過濾年齡」，所以「只播最近 24 小時」要配一個
-夠大的 `video_limit`。過濾後一支都不剩時，掃描會直接失敗（`exit 2`）並且**不覆蓋**原本的清單 ——
-播出端拿到空的 concat 清單會中止，寧可這輪不換。
+Every mode also has `max_age_hours` (0 means no limit): **only videos first aired within N hours are played**. The
+order is "take the first N with `video_limit`, then filter by age", so "only the last 24 hours" needs a
+`video_limit` large enough. When the filter leaves nothing, the scan fails outright (`exit 2`) and **does not
+overwrite** the existing list: an empty concat list would stop the playout, so it is better to skip this round.
 
-畫面右上角的首播時間格式是 `YYYY/MM/DD HH:MM`（本機時區）。來源是 yt-dlp 的
-`release_timestamp`；沒有的話退回 `timestamp`，再沒有就只顯示日期 ＋ `00:00`。
+The first-air time on screen uses `YYYY/MM/DD HH:MM` in the machine's time zone, taken from yt-dlp's
+`release_timestamp`; failing that it falls back to `timestamp`, and failing that to the date plus `00:00`.
 
-    python3 mode_build.py --mode promotion            # 掃描 → 落地 → 過場 → 部署 → 重建清單
-    python3 mode_build.py --mode promotion --switch   # 上面全部做完，再切換播出端
+    python3 mode_build.py --mode promotion            # scan -> land -> transitions -> deploy -> rebuild list
+    python3 mode_build.py --mode promotion --switch   # all of the above, then switch the playout
     python3 mode_build.py --mode promotion --scan-only
 
-    ./switch_edition.sh promotion                     # 清單已建好時，只切換播出端
+    ./switch_edition.sh promotion                     # when the list is already built, just switch the playout
 
-`mode_build.py` 的流程刻意分成「暫存 → 驗證 → mv」：影片先寫到 `/tmp/stage-ep-<模式>/`、過場寫到 `/tmp/stage-tr-<模式>/`，逐檔驗過長度才 mv 進 `media/<模式>/`（為什麼不直接寫 `media/`：播出端是單一行程 concat，直接覆寫正在播的檔案會讓它讀到沒有 moov 的半成品）。中途卡住或中斷時，**不加 `--force` 重跑會自動續傳**（要不要做是以暫存目錄裡有沒有這個檔案判斷）。
+`mode_build.py` deliberately stages: videos go to `/tmp/stage-ep-<mode>/` and transitions to
+`/tmp/stage-tr-<mode>/`, and each file is verified for duration before being moved into `media/<mode>/` (why not
+write straight to `media/`: the playout is one concat process and overwriting a file that is on air would let it
+read a half-written file with no moov). If a build gets stuck or interrupted, **rerunning without `--force`
+resumes automatically** (whether work is needed is decided by whether the file is in the staging directory).
 
-#### 邊轉檔邊開播：`first_batch`
+#### Going live while still transcoding: `first_batch`
 
-整批建置要等全部轉完才開播（news 55 支全長要好幾小時）。設了 `first_batch` 之後：
+A whole batch has to finish before going on air (55 full-length news videos take hours). With `first_batch` set:
 
-    scan（全部）→ 做前 N 支＋它們的過場 → 部署 → 用「已就緒的子集」重建清單 → **開播**
-      → 下一批 → 部署 → 重建清單 → 等下一個換片點 → 重啟播出端 → …
+    scan (everything) -> build the first N plus their transitions -> deploy -> rebuild the list from the ready
+    subset -> **go live**
+      -> next batch -> deploy -> rebuild the list -> wait for the next segment boundary -> restart the playout -> ...
 
-控制台「① 來源設定」的「先做幾支就開播（0＝全部做完才切換）」就是這個值。
-實測 `test` 模式（`first_batch=2`）：第一批做完約 25 秒就上線，之後每批擴充一次，
-每次都在**下一個換片點**重啟，所以觀眾看到的是「先播這幾支、之後自動變成完整清單」，
-不會看到內容跳回開頭。
+The console field "go on air after this many videos (0 = wait for everything)" is this value. Measured on the
+`test` mode (`first_batch=2`): the first batch was on air after about 25 seconds, then each batch extended it,
+restarting at the **next segment boundary** every time, so the viewer sees a few videos first and the full list
+later without the content jumping back to the top.
 
-注意：**concat 清單是播出端啟動時讀一次**（實測：播放中 append 進清單的片段完全不會被播到），
-所以每次擴充都必須重啟播出端 —— 換片點重啟是為了不讓觀眾看到中斷，不是為了省掉重啟。
+Note that **the concat list is read once when the playout starts** (measured: segments appended to the list while
+it is playing are never played), so every extension has to restart the playout. Restarting at a boundary is about
+not cutting the viewer off, not about avoiding the restart.
 
-代價：每次擴充都會重啟播出端一次，**推流端（YouTube）也會跟著重連一次**（幾秒）。
-批次開大一點（`batch_size`，預設 10）可以少幾次；實測 `.22` 的 publish log 會看到
-`connect #N` 一直往上加，那是正常的。
+The cost: every extension restarts the playout once and **the publisher (YouTube) reconnects once as well** (a few
+seconds). Larger batches (`batch_size`, default 10) mean fewer restarts; measured on `.22`, the publish log shows
+`connect #N` climbing, which is normal.
 
-#### 重新建置時不會重編已經做好的
+#### A rebuild does not re-encode what is already done
 
-每支影片與過場都記了「編碼參數指紋 ＋ 檔案大小」，重新建置時如果 media 裡那一份還在、
-指紋一樣、大小也一樣就跳過。改了畫質／浮水印／長度上限…指紋就會變，那些檔案才重做。
+Every video and transition records an "encoding parameter fingerprint plus file size". On a rebuild, if the copy in
+media is still there with the same fingerprint and the same size it is skipped. Changing quality, watermark or a
+length cap changes the fingerprint, and only those files are redone.
 
-    python3 mode_build.py --mode news            # 只補缺的（指紋沒變的不重做）
-    python3 mode_build.py --mode news --force    # 全部重做
+    python3 mode_build.py --mode news            # fill in what is missing (unchanged fingerprints are not redone)
+    python3 mode_build.py --mode news --force    # redo everything
 
-#### 重新掃描與「下一支就從頭開始」
+#### Rescanning and handing over
 
-`refreshwatch.py` 依 `refresh_seconds` 用 flat 模式重新掃描來源（幾秒鐘就好），比對影片 ID 與 shorts ID，**有變化才重建**：
+`refreshwatch.py` rescans the source in flat mode according to `refresh_seconds` (a few seconds), compares video
+and shorts ids and **rebuilds only when something changed**:
 
-    sudo python3 refreshwatch.py --mode promotion     # 前景常駐
+    sudo python3 refreshwatch.py --mode promotion     # run in the foreground
 
-重建完成後**等到下一個換片點**才重啟播出端。播出端是單一行程 concat，重啟就是從第一段重來；若在影片播到一半時重啟，觀眾會看到中途被切掉，等到換片點才切，體感就是規格說的「再下一支影片就從頭開始輸播」。換片點是用「開播時間 ＋ 各段累加長度」推算的（跟 `loopwatch.py` 同一套）。
+After a rebuild it **waits for the next segment boundary** before restarting the playout. The concat list is read
+only when ffmpeg starts, so an update has to restart the process; waiting for the boundary keeps viewers from
+seeing a segment cut in half. The new list is then **rotated** so that the restart continues at the segment that
+was next in the old list, which is what keeps the channel from jumping back to the first video. The boundary is
+derived from "start time plus summed segment lengths" (the same calculation as `loopwatch.py`).
 
-重啟 system domain 的服務需要 root，所以這支要用 root 跑（跟 `com.loopcastr.health` 同一個理由）；非 root 時會退回用 `SUDO_PASS`。
+If the current position cannot be mapped into the new list, nothing is restarted at all: the playout keeps running
+the list that is on air and the build log says why. That is deliberate - a channel that keeps playing the old list
+is better than one that suddenly restarts from the top.
 
-#### 已知取捨
+Restarting a system-domain service needs root, so run this as root (the same reason as `com.loopcastr.health`); as
+a non-root user it falls back to `SUDO_PASS`.
 
-1. **內容已經每個模式一份**（`media/<模式>/`，見上面「內容放在哪裡」）。同一支影片在
-   不同模式可以有不同長度上限而不互相蓋掉。**共用**的只有輸入：`media/.raw/` 與 shorts 池。
-2. **shorts 池的輪替有上限。** 配法是「第 p 趟的第 i 集用池子裡第 `(p × 集數 + i - 1) % N` 支」，
-   `passes` 預設由 `ceil(池子 ÷ 集數)` 自動算、上限 5。所以池子裡前「集數 × passes」支一定輪得到，
-   超出的那幾支這一輪不會出現（例：30 集配 200 支 shorts → 只用到前 150 支）。
-   要全部都輪到就把 `shorts_passes` 調大，或把 `shorts_count` 縮小。
-3. **播放順序是「固定序循環」。** 重建時照來源順序取前 `video_limit` 支（頻道就是最新在前），
-   之後每一輪都是同一個順序；新片上架要重新掃描才會進來，進來之後順序會整批往前挪。
+#### Known trade-offs
 
-### 服務：先確認「有沒有被載入」
+1. **Content is already one copy per mode** (`media/<mode>/`, see "Where the content lives" above). The same video
+   can have a different length cap per mode without overwriting anything. Only the inputs are **shared**:
+   `media/.raw/` and the shorts pool.
+2. **The shorts rotation has a ceiling.** The pairing is "pass p, episode i uses pool entry
+   `(p x episodes + i - 1) % N`", and `passes` defaults to `ceil(pool / episodes)` capped at 5. So the first
+   "episodes x passes" entries always come up, while the rest do not appear in that round (for example 30 episodes
+   with 200 shorts uses only the first 150). To rotate through everything, raise `shorts_passes` or lower
+   `shorts_count`.
+3. **Playback order is a fixed loop.** A rebuild takes the first `video_limit` videos in source order (newest first
+   for a channel) and every round after that keeps the same order; new uploads only appear after a rescan, and when
+   they do the whole order shifts forward.
 
-要推上 YouTube 一定要有 `com.loopcastr.publish`。沒有它，畫面只到 MediaMTX ——
-控制台的「看直播畫面」看得到內容、但 YouTube 端是黑的，因為根本沒有東西連上 YouTube ingest。
+### Services: check whether they are loaded first
 
-控制台最下面的「服務」區塊分三種狀態：
+`com.loopcastr.publish` is mandatory for anything to reach YouTube. Without it the picture only reaches MediaMTX:
+the console's "watch the stream" shows content while YouTube stays black, because nothing is connected to the
+YouTube ingest at all.
 
-| 顯示 | 意思 | 可以做什麼 |
+The Services block at the bottom of the console shows three states:
+
+| Display | Meaning | What you can do |
 |---|---|---|
-| 執行中 pid N | launchd 有這個 job，行程也在 | 重啟 |
-| 已載入（沒在跑） | job 在，行程被 KeepAlive 拉起來中 | 重啟 |
-| 沒有載入 | launchd 根本沒有這個 job | **啟動**：把 `~/loopcastr/<label>.plist` 複製到 `~/Library/LaunchAgents` 再 `launchctl bootstrap` |
+| running pid N | launchd has the job and the process is there | restart |
+| loaded (not running) | the job is there and KeepAlive is bringing the process up | restart |
+| not loaded | launchd does not have the job at all | **start**: copy `~/loopcastr/<label>.plist` to `~/Library/LaunchAgents` and `launchctl bootstrap` it |
 
-「沒有載入」是資料目錄裡有 plist、但沒有裝進 launchd 的狀態（例如只裝了三個服務的精簡安裝）。
-要自己確認：
+"Not loaded" means the plist is in the data directory but was never registered with launchd (a minimal install
+that only set up three services, for example). Check it yourself with:
 
     launchctl list | grep loopcastr
 
-`com.loopcastr.health` 與 `com.loopcastr.refresh` 原本是設計成系統 domain 的服務
-（要 root 才能重啟播出端），控制台不以 root 執行，這兩個要自己來：
+`com.loopcastr.health` and `com.loopcastr.refresh` were designed as system-domain services (restarting the playout
+needs root) and the console does not run as root, so those two are up to you:
 
     sudo cp ~/loopcastr/com.loopcastr.health.plist /Library/LaunchDaemons/
     sudo launchctl bootstrap system /Library/LaunchDaemons/com.loopcastr.health.plist
 
-換過 stream key 之後要重啟 publish 才會生效（`yt_publish.sh` 啟動時讀一次金鑰檔）：
-按服務區塊的「重啟 publish」，或
+After changing the stream key the publisher has to be restarted for it to take effect (`yt_publish.sh` reads the
+key file once at startup): press restart on the publish service in the Services block, or
 
     launchctl kickstart -k gui/$(id -u)/com.loopcastr.publish

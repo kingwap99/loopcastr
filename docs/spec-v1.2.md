@@ -1,100 +1,100 @@
-# 24/7 YouTube 直播頻道系統規格書 v1.1
+# 24/7 YouTube live channel system specification v1.2
 
-> 本文件為繁體中文。英文說明見 repo 根目錄 [README.md](../README.md) 的 English 一節。
-> This document is in Traditional Chinese; see the English section of [README.md](../README.md).
+> This specification is in English. The day-by-day measurements behind it are in the
+> [changelog](changelog.md), which is in Traditional Chinese.
 
-## 0. 文件資訊
+## 0. Document information
 
-| 項目 | 內容 |
+| Item | Contents |
 |---|---|
-| 文件名稱 | 24/7 YouTube 直播頻道系統規格書 |
-| 版本 | v1.2（動工中；取代 v1.0、v1.1） |
-| 日期 | 2026-09-16 |
-| 狀態 | **動工中**：M1／M2／M3 已實測通過並部署至目標機；**M4 進行中**（53 支內容落地執行中） |
-| 依據文件 | v1.0、v1.1，加上本輪（2026-09-16 20:00–20:15）在目標機的實測 |
-| 撰寫原則 | 只寫**已實測**或**已決定**的內容；未量測者標【待驗證】，推導者標【推論】 |
+| Document | 24/7 YouTube live channel system specification |
+| Version | v1.2 (work in progress; supersedes v1.0 and v1.1) |
+| Date | 2026-09-16 |
+| Status | **Work in progress**: M1 / M2 / M3 are measured, passed and deployed to the target machine; **M4 is under way** (53 videos being landed) |
+| Basis | v1.0 and v1.1 plus this round's measurements on the target machine (2026-09-16 20:00-20:15) |
+| Writing rule | Only **measured** or **decided** content; unmeasured items are marked [to verify], derived ones [inferred] |
 
-v1.2 相對 v1.1 的四個實質更正：
+The four substantive corrections in v1.2 over v1.1:
 
-1. **更正 R-09（最重要）**：v1.1 寫「匿名解析一律被擋、只有 cookie 能解」，這是**錯的**。同一批影片 05:11 全滅、20:02 用完全相同的條件全部成功 —— 那是**暫時性的 IP 標記**，不是永久封鎖，**不需要 cookie**。封鎖期間另有備援：`player_client=android`（上限 360p）。
-2. **新增必要步驟：內容正規化**。實測原始參數不一致（1280×720／1280×718／另有一批 480p），concat 的 `-c copy` 無法直接拼。落地時必須轉成統一參數（3.6）。
-3. **修掉兩個靜默錯誤**：ffmpeg 讀 stdin 導致輸出被截斷（137s／163s，無任何錯誤訊息）；HLS(m3u8) 路徑只涵蓋半支影片。
-4. **M4 開跑**：53 支落地執行中。
+1. **R-09 corrected (the important one)**: v1.1 said anonymous resolution was always blocked and only cookies could get through. That is **wrong**. The same batch of videos failed completely at 05:11 and succeeded at 20:02 under identical conditions, so it is a **temporary IP flag**, not a permanent block, and **no cookie is needed**. There is a fallback during a block: `player_client=android` (capped at 360p).
+2. **A necessary step was missing: content normalisation.** Measured: the source parameters are inconsistent (1280x720 / 1280x718 / another batch at 480p) and concat's `-c copy` cannot splice them directly. Landing has to convert to uniform parameters (3.6).
+3. **Two silent bugs fixed**: ffmpeg reading stdin truncated the output (137s / 163s with no error message at all); the HLS (m3u8) path covered only half a video.
+4. **M4 started**: 53 videos being landed.
 
 ---
 
-## 1. 專案目標與範圍
+## 1. Project goals and scope
 
-### 1.1 目標
+### 1.1 Goals
 
-把同一個團體（同一創作者）已授權的 YouTube 作品，組成一個**24/7 不中斷**的直播頻道，並具備把外部正在進行的直播**聯播**進來的能力。
+Turn the licensed YouTube work of a single group (a single creator) into a **24/7 uninterrupted** live channel, with the ability to **relay** an external live stream into it.
 
-### 1.2 範圍內
+### 1.2 In scope
 
-1. 從 YouTube 取得來源媒體。經 R-09 之後，實務上是**先落地成本機檔案**再播出。
-2. 依播放清單順序連續播出，全天候不中斷。
-3. 段與段之間、以及一輪與下一輪之間，不得讓接收端中斷。
-4. 來源失效、卡住、需重新解析時自動恢復。
-5. 輸出推送到 YouTube 直播 ingest。
-6. 聯播：把一條正在直播的 YouTube 訊號拉進來再推出去。
+1. Obtain the source media from YouTube. After R-09 this means **landing it as local files** first and broadcasting from there.
+2. Play continuously in playlist order, around the clock without interruption.
+3. No interruption at the receiver between segments, or between one round and the next.
+4. Recover automatically when a source fails, stalls or has to be resolved again.
+5. Push the output to the YouTube live ingest.
+6. Relaying: pull in a YouTube signal that is already live and push it out again.
 
-### 1.3 範圍外（已明確排除，不再重複評估）
+### 1.3 Out of scope (explicitly excluded, not re-evaluated)
 
-| 排除項目 | 原因 | 出處 |
+| Excluded | Reason | Source |
 |---|---|---|
-| SPX-GC | 使用者已指示放棄 | 條件更新 |
-| CasparCG | 不支援 Apple Silicon | 條件更新 |
-| OBS 插件（現成或自製） | 使用者已指示自行實作 | v3 結論 |
-| Liquidsoap 作為**決策層** | 三關全過但拿不到額外能力，且工作機要升 10 個相依 | v4.5 |
-| 自行架設轉碼農場 | 目標機為 8 GB M1 單機 | — |
+| SPX-GC | the user decided against it | updated requirements |
+| CasparCG | no Apple Silicon support | updated requirements |
+| OBS plugins (existing or self-written) | the user decided to implement it directly | v3 conclusion |
+| Liquidsoap as the **decision layer** | it passed all three gates but bought no extra capability and needed 10 dependency upgrades on the work machine | v4.5 |
+| Building a transcoding farm | the target machine is a single 8 GB M1 | - |
 
 ---
 
-## 2. 名詞定義
+## 2. Glossary
 
-| 名詞 | 定義 |
+| Term | Definition |
 |---|---|
-| **來源（source）** | 一段要被播出的媒體；在聯播模式下是 yt-dlp 解析出來的直連 URL |
-| **段（segment）** | 播放清單中的一個項目，型別為 `vod` / `live` / `filler` / `file` |
-| **解析（resolve）** | 用 yt-dlp 把 videoId／watch URL 轉成可直連的媒體 URL |
-| **接力（relay）** | 每段由**各自的** ffmpeg 發佈程序依序接手輸出 |
-| **拼接（concat）** | **同一個** ffmpeg 依序讀完整份清單，中間不換發佈程序 |
-| **落地／離線化（landing）** | 把來源預先抓成本機檔案 `media/<id>.mp4`，播出時完全不碰網路來源 |
-| **換手（takeover）** | 新發佈程序先接手，舊的才被收掉；MediaMTX 的 takeover 是同秒瞬間 |
-| **墊片（filler）** | 來源不可用時頂上的備援片段 |
-| **推流鏈（publisher chain）** | `playout.sh → MediaMTX → yt_publish.sh → YouTube` 這條固定三跳 |
-| **工作機** | 使用者日常 MacBook（`<WORK_HOST>`） |
-| **目標機** | 目標機（hostname `<HOSTNAME>.local`，<MODEL>，M1，8 GB，macOS 27.0） |
+| **source** | One piece of media to be broadcast; in relay mode it is a direct URL resolved by yt-dlp |
+| **segment** | One entry in the playlist, of type `vod` / `live` / `filler` / `file` |
+| **resolve** | Turn a videoId or watch URL into a directly playable media URL with yt-dlp |
+| **relay** | Each segment is published by **its own** ffmpeg process in turn |
+| **concat** | **One** ffmpeg reads the whole list in order, with no change of publisher |
+| **landing** | Fetch a source to a local file `media/<id>.mp4` in advance, so playout never touches a network source |
+| **takeover** | The new publisher attaches first and the old one is then dropped; MediaMTX takeover happens within the same second |
+| **filler** | A backup clip used when a source is unavailable |
+| **publisher chain** | The fixed three hops `playout.sh -> MediaMTX -> yt_publish.sh -> YouTube` |
+| **work machine** | The user's daily MacBook (`<WORK_HOST>`) |
+| **target machine** | The target machine (hostname `<HOSTNAME>.local`, <MODEL>, M1, 8 GB, macOS 27.0) |
 
 ---
 
-## 3. 系統架構
+## 3. System architecture
 
-### 3.1 元件
+### 3.1 Components
 
-| 元件 | 實作 | 角色 |
+| Component | Implementation | Role |
 |---|---|---|
-| 母清單 | `playlist.json` | 描述要播什麼、順序、每段來源與長度（來源為 YouTube URL） |
-| 內容落地 | `build_local_content.py` | 把母清單抓成本機 `media/<id>.mp4`，ffprobe 量長度，產生 `playlist-local.json` |
-| 清單轉換 | `make_concat_list.py` | `playlist-local.json` → ffmpeg `concat.txt` |
-| **播出端** | `playout.sh` | 單一行程 concat 循環播出 → MediaMTX |
-| **推流端** | `yt_publish.sh` | 單一長命 ffmpeg，MediaMTX → YouTube ingest |
-| 接力引擎（聯播） | `relay.py` | 解析來源、排程、takeover 換手、看門狗、URL 生命週期、事件記錄 |
-| 解析器 | `yt-dlp` | watch URL → 直連媒體 URL（**目前被 R-09 擋住**） |
-| 本地媒體樞紐 | `MediaMTX` | 接收 RTMP、提供 takeover 讓換手零斷點、提供 HLS 驗收、提供 HTTP API 觀測 |
-| 編碼／封裝 | `ffmpeg` | remux（`-c copy`）為主，必要時轉碼 |
-| 驗收觀測 | `gapwatch.py` | 獨立輪詢 API，回報「接收端離線」與 `bytesReceived` 零成長區間 |
-| 行程看管 | `launchd` | `com.loopcastr.mediamtx` / `com.loopcastr.playout` / `com.loopcastr.publish` / `com.loopcastr.health` |
-| 健康監控 | `healthcheck.py` | 每 60 秒檢查「真的有在動」：路徑 ready、有讀者、`bytesReceived` 有成長。狀態變化即告警，持續異常每 30 分鐘重提醒；YouTube 端最多每 15 分鐘查一次（公開查詢太密集會再被 bot 盯上） |
-| 字卡／轉場（選配） | Liquidsoap 或 HTML→PNG→overlay | 見 v1.0 的 FR-11 |
+| Master list | `playlist.json` | Describes what to play, the order, and each segment's source and length (the source is a YouTube URL) |
+| Landing | `build_local_content.py` | Fetch the master list as local `media/<id>.mp4`, measure with ffprobe, produce `playlist-local.json` |
+| List conversion | `make_concat_list.py` | `playlist-local.json` -> ffmpeg `concat.txt` |
+| **Playout** | `playout.sh` | One concat process looping the list -> MediaMTX |
+| **Publisher** | `yt_publish.sh` | One long-lived ffmpeg, MediaMTX -> YouTube ingest |
+| Relay engine (relaying) | `relay.py` | Resolve sources, schedule, takeover handover, watchdog, URL lifetime, event log |
+| Resolver | `yt-dlp` | watch URL -> direct media URL (**currently blocked by R-09**) |
+| Local media hub | `MediaMTX` | Accept RTMP, provide the takeover that makes handover gapless, provide HLS for acceptance and an HTTP API for observation |
+| Encoding / muxing | `ffmpeg` | Mostly remux (`-c copy`), transcoding only when necessary |
+| Acceptance observation | `gapwatch.py` | Independently poll the API and report receiver-offline windows and `bytesReceived` zero-growth windows |
+| Process supervision | `launchd` | `com.loopcastr.mediamtx` / `com.loopcastr.playout` / `com.loopcastr.publish` / `com.loopcastr.health` |
+| Health monitoring | `healthcheck.py` | Every 60 seconds check that things are really moving: path ready, has readers, `bytesReceived` growing. Alerts on state changes, re-reminds every 30 minutes while a fault persists; the YouTube side is checked at most every 15 minutes (too many public lookups get the bot flag back) |
+| Captions / transitions (optional) | Liquidsoap or HTML->PNG->overlay | see FR-11 in v1.0 |
 
-### 3.2 資料流
+### 3.2 Data flow
 
-**主線（本機檔案，24/7 常態）**
+**Main line (local files, the normal 24/7 path)**
 
-    playlist.json（YouTube URL）
+    playlist.json (YouTube URLs)
          |
-         |  build_local_content.py  ← 需要 cookies.txt（R-09），離線做一次
+         |  build_local_content.py  <- needs cookies.txt (R-09), done once offline
          v
     media/<id>.mp4  +  playlist-local.json
          |
@@ -102,191 +102,189 @@ v1.2 相對 v1.1 的四個實質更正：
          v
     concat.txt
          |
-         |  playout.sh：單一 ffmpeg
+         |  playout.sh: one ffmpeg
          |    -re -f concat -safe 0 -stream_loop -1 -i concat.txt -c copy
          v
     MediaMTX  rtmp://127.0.0.1:1935/live/main
-         |          ├── HTTP API :9997（觀測）
-         |          ├── HLS :8888（驗收）
-         |          └── yt_publish.sh：單一長命 ffmpeg -c copy
+         |          +-- HTTP API :9997 (observation)
+         |          +-- HLS :8888 (acceptance)
+         |          +-- yt_publish.sh: one long-lived ffmpeg -c copy
          v
     YouTube ingest  rtmp://a.rtmp.youtube.com/live2/<stream key>
 
-**支線（聯播／需要換來源時）**
+**Branch line (relaying, or when the source has to change)**
 
-    relay.py ──resolve──> yt-dlp ──> 直連 URL
+    relay.py --resolve--> yt-dlp --> direct URL
          |
-         | ffmpeg（copy），每段一個發佈程序，靠 takeover 交班
+         | ffmpeg (copy), one publisher per segment, handed over by takeover
          v
-    MediaMTX ──> yt_publish.sh ──> YouTube
+    MediaMTX --> yt_publish.sh --> YouTube
 
-【實測】兩條線可以並存：`relay.py` 與 `playout.sh` 都推同一條 `live/main`，MediaMTX 的 takeover 會讓換手同秒完成。
+[measured] The two lines can coexist: `relay.py` and `playout.sh` both publish to the same `live/main`, and the MediaMTX takeover completes the handover within the same second.
 
-【實測】「推送 YouTube」**必須**由 MediaMTX 的下游發起，不能讓播出引擎直接把 target 指向 YouTube。原因：`relay.py` 的 `api_path_of()` 只認 `127.0.0.1`／`localhost` 才走 takeover；target 一改成 YouTube，換手就退化成 `cut`，而且 YouTube ingest 不接受兩條 publisher 並存。
+[measured] "Pushing to YouTube" **must** be started downstream of MediaMTX; the playout engine must not point its target straight at YouTube. Reason: `relay.py`'s `api_path_of()` only takes the takeover path for `127.0.0.1` / `localhost`, so pointing the target at YouTube degrades the handover to `cut`, and the YouTube ingest does not accept two publishers at once.
 
-### 3.3 部署拓撲
+### 3.3 Deployment topology
 
-| 角色 | 機器 | 說明 |
+| Role | Machine | Notes |
 |---|---|---|
-| 開發／測試 | 工作機 `<WORK_HOST>` | 開發、離段測試 |
-| **正式執行** | **目標機** | 24/7 長駐；播出、推流、媒體樞紐都在這一台 |
-| 對外 | 兩台共用同一 NAT | 對外公網 IP 動態，本輪量得 `<PUBLIC_IP>` |
+| Development / test | work machine `<WORK_HOST>` | development, off-air tests |
+| **Production** | **target machine** | always on; playout, publisher and media hub all live here |
+| External | both share one NAT | the public IP is dynamic; measured this round as `<PUBLIC_IP>` |
 
-【實測】兩台同閘道（`<GATEWAY>`）、同 NAT、同公網 IP。**因此 R-09 的 bot 封鎖與「換機器試試看」無關**——換到目標機一樣被擋。
+[measured] Both machines share the gateway (`<GATEWAY>`), the NAT and the public IP. **So the R-09 bot block has nothing to do with trying another machine**: moving to the target machine is blocked just the same.
 
-【實測】公網 IP 是動態的：同日稍早為 `<PUBLIC_IP>`，本輪為 `<PUBLIC_IP>`。落地成檔案之後，這個風險對主線**不再成立**（播出已經不依賴來源 URL）；它只影響聯播支線。
+[measured] The public IP is dynamic: earlier the same day it was `<PUBLIC_IP>` and this round `<PUBLIC_IP>`. Once the content is landed this risk **no longer applies to the main line** (playout no longer depends on a source URL); it only affects the relaying branch.
 
-### 3.4 架構決策紀錄
+### 3.4 Architecture decision record
 
-| 決策 | 結論 | 理由 |
+| Decision | Outcome | Reason |
 |---|---|---|
-| 是否自行實作 | 是 | 使用者指示 |
-| 播出引擎取代控制層 | 否 | `relay.py` 已實作並實測事件式換手 |
-| 輸出樞紐是否用 MediaMTX | **必須** | takeover 只在 MediaMTX 提供；同秒瞬間完成（`closing existing publisher` 與 `stream is available and online` 同秒） |
-| 是否直接推 YouTube RTMP | 否 | 見 3.2 註記 |
-| **本機檔案用 concat 還是接力** | **concat** | 【實測】接力每段 2.0–3.1 秒縫；concat 在換片與繞回皆 0 縫。見 3.5 |
-| **內容是否離線化** | **是** | 解析會**間歇性**被擋（R-09），且離線化同時移除 URL 6 小時過期與 googlevideo 中途 reset 兩個風險。落地時必須正規化，見 3.6 |
-| **推流是否用單一長命 publisher** | **是** | 上游怎麼換手都只發生在 MediaMTX 內部，YouTube 端只看到一條連線 |
-| 字卡是否需要 freetype | 否 | 兩台 ffmpeg 都沒有 freetype；走路徑 A（HTML→PNG→overlay） |
+| Build it ourselves | yes | user instruction |
+| Replace the control layer with a playout engine | no | `relay.py` already implements and has measured event-driven handover |
+| Use MediaMTX as the output hub | **required** | takeover is only available in MediaMTX and completes within the same second (`closing existing publisher` and `stream is available and online` in the same second) |
+| Push straight to YouTube RTMP | no | see the note in 3.2 |
+| **concat or relay for local files** | **concat** | [measured] the relay leaves a 2.0-3.1 second gap per segment; concat leaves 0 at both a segment change and the wrap. See 3.5 |
+| **Land the content offline** | **yes** | resolution is blocked **intermittently** (R-09), and landing also removes the 6-hour URL expiry and mid-stream googlevideo resets. Landing must normalise, see 3.6 |
+| **A single long-lived publisher** | **yes** | any handover upstream happens inside MediaMTX, so YouTube only ever sees one connection |
+| Does the caption layer need freetype | no | neither ffmpeg has freetype, so it takes path A (HTML -> PNG -> overlay) |
 
-### 3.5 播出引擎選擇：concat vs 接力（本輪核心實測）
+### 3.5 Choosing the playout engine: concat vs relay (the core measurement of this round)
 
-同一組「3 段本機檔案、總長 36 秒、繞圈」的實測對照：
+The same "3 local files, 36 seconds total, looping" measured side by side:
 
-| 播法 | 實測縫隙 | 量測視窗 |
+| Playout style | Measured gaps | Measurement window |
 |---|---|---|
-| `relay.py` 接力 | 4 段，共 **7.793 秒**（冷啟動 3.066／換片 2.053／換片 2.040／墊片接手 0.635） | 約 40 秒 |
-| `playout.sh` concat | **1 段，2.546 秒（僅冷啟動）**；換片與繞回 0 縫 | 70 秒（涵蓋兩輪） |
-| `playout.sh` concat（目標機） | **0 段** | 55 秒（涵蓋兩輪） |
+| `relay.py` handover | 4 gaps totalling **7.793 seconds** (cold start 3.066 / segment change 2.053 / segment change 2.040 / filler takeover 0.635) | about 40 seconds |
+| `playout.sh` concat | **1 gap, 2.546 seconds (cold start only)**; 0 at a segment change and at the wrap | 70 seconds (two rounds) |
+| `playout.sh` concat (target machine) | **0 gaps** | 55 seconds (two rounds) |
 
-根因：【實測】`PUBLISH_TAIL`（原設計用來延長輸出目的地的 `-t`）**無法延長本機檔案來源**。檔案 EOF 即結束 → MediaMTX 立刻踢掉 publisher → 下一個 publisher 暖機期間接收端離線 2 秒。這是**來源端**先結束，不是輸出端，所以調任何輸出參數都救不了。
+Root cause: [measured] `PUBLISH_TAIL` (originally meant to extend the output destination's `-t`) **cannot extend a local file source**. The file ends at EOF -> MediaMTX drops the publisher immediately -> the receiver is offline for 2 seconds while the next publisher warms up. It is the **source** side that ends first, not the output side, so no output parameter can save it.
 
-【實測】concat 的繞回確實發生：日誌出現 `Non-monotonic DTS ... 48000`、`57000`（＝36+12、36+21 秒，第二輪的 t1→t2 邊界），而該處沒有離線區間。
+[measured] The concat wrap really happens: the log shows `Non-monotonic DTS ... 48000` and `57000` (36+12 and 36+21 seconds, the t1->t2 boundary of the second round), and there is no offline window there.
 
-**已知副作用**：concat demuxer 在每個接縫會產生 `Non-monotonic DTS` 警告，實測音訊時間戳重疊約 **11 ms**，ffmpeg 自動夾正，聽感無影響。要求時間軸完全乾淨時，改用離線預接：
+**Known side effect**: the concat demuxer emits `Non-monotonic DTS` warnings at every seam; the measured audio timestamp overlap is about **11 ms**, ffmpeg clamps it back and there is no audible effect. When a perfectly clean timeline is required, splice offline instead:
 
     ffmpeg -hide_banner -f concat -safe 0 -i concat.txt -c copy media/all-in-one.mp4
 
-之後播出改讀單一大檔（`-stream_loop -1 -i media/all-in-one.mp4 -c copy`），live path 完全不經過 concat demuxer。
+Playout then reads the single file (`-stream_loop -1 -i media/all-in-one.mp4 -c copy`) and the live path never touches the concat demuxer at all.
 
-### 3.6 落地正規化（本輪新增的必要步驟）
+### 3.6 Landing normalisation (a necessary step added this round)
 
-【實測】這批內容的原始編碼參數**不一致**：
+[measured] The source encoding parameters of this content are **inconsistent**:
 
-| 影片 | 解析度 |
+| Video | Resolution |
 |---|---|
-| `Ig3vtqtXowY` | 1280×720 |
-| `YlC65MH0xoc` | **1280×718** |
-| 範例清單多數集數 | 640×360（原生 480p 級） |
+| `Ig3vtqtXowY` | 1280x720 |
+| `YlC65MH0xoc` | **1280x718** |
+| most episodes in the example list | 640x360 (native 480p class) |
 
-concat demuxer 搭配 `-c copy` 要求所有片段參數完全相同，混用會在接縫處產生錯誤或整段失敗。因此**落地時就要轉成統一參數**，而不是留到播出端處理（播出端轉碼會讓 8 GB 的目標機全天候滿載）：
+The concat demuxer with `-c copy` requires every segment to have identical parameters; mixing them produces errors at the seam or fails the whole run. So the conversion to uniform parameters has to happen **at landing time** rather than being left to the playout (transcoding in the playout would keep an 8 GB target machine fully loaded around the clock):
 
     python3 build_local_content.py --target 720
-    # 輸出統一為：H.264 High L3.1 / 1280x720 / yuv420p / 30fps / AAC-LC 48kHz 立體 / +faststart
+    # output is uniform: H.264 High L3.1 / 1280x720 / yuv420p / 30fps / AAC-LC 48kHz stereo / +faststart
 
-【實測】修正後抽驗 5 支（含 720p 與 718p 來源），輸出參數完全一致，`-c copy` 拼接無誤。
+[measured] After the fix, 5 files were spot-checked (including 720p and 718p sources): the output parameters are identical and `-c copy` splices correctly.
 
-### 3.7 落地流程的兩個靜默陷阱（本輪修掉）
+### 3.7 Two silent traps in the landing pipeline (fixed this round)
 
-| 陷阱 | 症狀 | 根因 | 修法 |
+| Trap | Symptom | Root cause | Fix |
 |---|---|---|---|
-| ffmpeg 讀 stdin | **同一支影片分別得到 137s 與 163s**，沒有任何錯誤訊息，exit code 0 | 腳本常透過 ssh heredoc 執行，ffmpeg 繼承的 stdin 是腳本本身；ffmpeg 把內容當互動指令，讀到 `q` 就正常結束 | 加 `-nostdin`，並在 `subprocess.run` 指定 `stdin=DEVNULL` |
-| HLS 路徑只給半支 | `Ig3vtqtXowY` 只抓到 137s，DASH 路徑完整 270.374s | 同一影片同時提供 `m3u8`(HLS) 與 `https`(DASH) 兩套串流，HLS 那條不完整 | 格式限定 `[protocol^=https]` |
+| ffmpeg reads stdin | **the same video came out at 137s and at 163s**, with no error message and exit code 0 | the script often runs through an ssh heredoc, so ffmpeg inherits the script itself as stdin; ffmpeg treats it as interactive commands and exits normally on reading `q` | add `-nostdin` and pass `stdin=DEVNULL` to `subprocess.run` |
+| the HLS path gives only half a video | `Ig3vtqtXowY` fetched only 137s while the DASH path gives the full 270.374s | the same video offers both `m3u8` (HLS) and `https` (DASH) streams, and the HLS one is incomplete | restrict the format with `[protocol^=https]` |
 
-另外加了**下載後長度比對**：與清單宣稱長度差超過 5%（或 10 秒）即自動重抓一次，再不行就換 `android` client，避免半支影片混進 concat。
+A **duration comparison after download** was added as well: a difference of more than 5% (or 10 seconds) from the length the list claims triggers one automatic refetch, and failing that a switch to the `android` client, so half a video cannot slip into concat.
 
-### 3.8 內容層的問題：片尾黑畫面（本輪新增）
+### 3.8 A content-layer problem: black tails (added this round)
 
-播放鏈路的三層檢查各自看得到不同的東西，這件事值得寫清楚，因為本輪第一次遇到的問題正好躲過前兩層：
+The three layers of the playout chain each see something different, and this is worth spelling out because the first problem of this round slipped past the first two:
 
-| 檢查 | 量什麼 | 看得到 | 看不到 |
+| Check | What it measures | Sees | Cannot see |
 |---|---|---|---|
-| `gapwatch.py` | MediaMTX 的 `ready` / `bytesReceived` | 傳輸中斷 | 畫面內容 |
-| PTS/封包分析 | concat 輸出的時間軸 | 時間軸破洞 | 畫面內容 |
-| `blackdetect` | 實際像素亮度 | 黑畫面 | — |
+| `gapwatch.py` | MediaMTX `ready` / `bytesReceived` | a break in the transfer | the picture content |
+| PTS / packet analysis | the concat output timeline | a hole in the timeline | the picture content |
+| `blackdetect` | actual pixel brightness | black frames | - |
 
-【實測】`8jtdcMDuV_A` 片尾有 **67.4 秒**純黑（起點 551.57s）。播出端完全正常：傳輸連續、436,600 個封包零破洞、`framesInError=0`。但觀眾端就是一片黑。
+[measured] `8jtdcMDuV_A` has **67.4 seconds** of pure black at the tail (starting at 551.57s). The playout is perfectly fine: the transfer is continuous, 436,600 packets with no hole, `framesInError=0`. The viewer just sees black.
 
-而且它的恢復點幾乎貼齊影片結尾（551.57+67.4 ＝ 618.97，全長 618.9），所以**看起來像是換片造成的**，很容易誤判成拼接點的問題。
+And its recovery point sits almost exactly at the end of the video (551.57+67.4 = 618.97 against a total of 618.9), so it **looks like it was caused by a segment change** and is easily misread as a splice problem.
 
-對策：`build_local_content.py` 內建黑尾偵測（`--black-tail-min`，預設 5 秒），落地與 `--rescan` 時都會跑。抓到就在 manifest 記下，並在產生 `playlist-local.json` 時寫入 `outpoint`，由 `make_concat_list.py` 轉成 concat demuxer 的截斷指令，**不需要重新編碼**。要只標記不截斷用 `--no-auto-trim`。
+Countermeasure: `build_local_content.py` has built-in black-tail detection (`--black-tail-min`, default 5 seconds) which runs at landing and during `--rescan`. When it finds one it records it in the manifest and writes an `outpoint` into `playlist-local.json`, which `make_concat_list.py` turns into a concat demuxer trim command, **with no re-encoding**. Use `--no-auto-trim` to mark without trimming.
 
-【實測】套用後該段播放長度由 618.9s 降為 551.57s，整份清單由 14,530s 降為 **14,487s**；重跑時間軸分析，封包數 436,600 → 434,583（少 2,017 幀 ≈ 67.2 秒），**forward gap 仍為 0**。
+[measured] After applying it the segment's playing length dropped from 618.9s to 551.57s and the whole list from 14,530s to **14,487s**; rerunning the timeline analysis gave 436,600 -> 434,583 packets (2,017 frames fewer, about 67.2 seconds) with the **forward gap still 0**.
 
-註：`make_concat_list.py` 早期把各段秒數逐一取整後相加，會累積約 24 秒誤差、報成 14,463s；已改為浮點相加，現在與實際播放長度一致。
+Note: an early version of `make_concat_list.py` rounded each segment's seconds and then summed them, accumulating about 24 seconds of error and reporting 14,463s; it now sums in floating point and matches the real playing time.
 
 ---
 
+## 4. Functional requirements
 
+Priority: **P0** = required for production; **P1** = after launch; **P2** = optional. Status updated to 2026-09-17.
 
-## 4. 功能需求
-
-優先級：**P0**＝正式上線必要；**P1**＝上線後補；**P2**＝選配。狀態欄更新至 2026-09-17。
-
-| 編號 | 需求 | 優先 | 狀態 | 驗收依據 |
+| Id | Requirement | Priority | Status | Acceptance basis |
 |---|---|---|---|---|
-| FR-01 | 解析 watch URL／videoId 成直連媒體 URL，含 client 備援 | P0 | **通過** | 解析 2.26–2.65 秒；R-09 期間自動退到 `android` client |
-| FR-02 | 以 `playlist.json` 描述內容，支援 `vod`/`live`/`filler`/`file` | P0 | **通過** | schema 見 6.2 |
-| FR-03 | 依序連續播出，播完自動回第一段 | P0 | **通過** | 【實測】多輪循環無縫 |
-| FR-04 | 換手／換片不得讓接收端中斷 | P0 | **通過（concat）** | 【實測】換片與繞回 0 縫；接力模式下每段 2.0–3.1 秒縫 |
-| FR-05 | 來源停滯時以墊片先接管畫面 | P1 | **主線不需要** | 主線播出的是本機檔案，沒有「來源停滯」這種狀態；此需求只在聯播支線（`relay.py`）成立，待 T-08 一起驗 |
-| FR-06 | 看門狗：輸出停滯超過門檻即重開該段 | P0 | **主線已由其他機制取代** | 主線的三層保護是：`launchd KeepAlive`（行程死掉自動拉起）＋ `healthcheck.py --heal`（流量 3 分鐘不成長就重啟播出端）＋ MediaMTX `readTimeout`。`relay.py` 的看門狗只在聯播支線需要 |
-| FR-07 | 來源 URL 生命週期管理 | P0 | **主線已免除** | 落地後不再依賴來源 URL；聯播支線仍需 |
-| FR-08 | 聯播模式：`type=live` 長時段來源並定時換手 | P1 | **可測（R-09 已解除）** | 匿名解析已恢復，`relay.py` 的 `type=live` 現在能真的驗；需要 D6 指定來源 |
-| FR-09 | 事件記錄 JSONL ＋ API 流量觀測 | P1 | **通過** | `relay-events.jsonl`／`gapwatch.py` |
-| FR-10 | 推送最終訊號至 YouTube ingest | P0 | **通過** | 見 T-14 |
-| FR-11 | 字卡／台標／字幕 | P2 | **可做，但會推翻「純 copy」** | 兩台都沒有 freetype，只能走路徑 A（HTML→PNG→overlay）；而 overlay 必須**解碼再編碼**，8 GB 的目標機會全天候滿載。要做就必須先決定這個取捨 |
-| FR-12 | 連續失敗告警 | P2 | **程式就緒** | `healthcheck.py` 已寫入 `alerts.jsonl`，外送管道的掛勾也在了（`~/loopcastr/alert_webhook`），等 D8 給 URL |
-| **FR-13** | **把來源落地成本機檔案、正規化、並驗證長度** | **P0** | **完成** | 53 支全部落地（4.7 GB），參數一致、長度驗證、黑尾偵測都通過（T-16／T-17／T-18） |
-| **FR-14** | **YouTube 端只有單一長命 publisher** | **P0** | **通過** | 實測 45 秒以上無中斷 |
-| **FR-15** | **播出端與推流端由 launchd 各自看管、開機自啟** | **P0** | **通過** | 已改為 LaunchDaemon；重開機後全程無人登入仍自動恢復（T-11） |
-| **FR-16** | **片尾黑畫面偵測與截斷** | **P0** | **通過** | `--rescan` ＋ `outpoint`；見 3.8、T-18 |
-| **FR-17** | **過場影片（每集之後）** | **P1** | **通過** | `media/_transition.mp4` 存在即自動插入；見 6.2、T-22 |
+| FR-01 | Resolve a watch URL / videoId into a direct media URL, with client fallback | P0 | **pass** | resolution takes 2.26-2.65 seconds; during R-09 it falls back to the `android` client automatically |
+| FR-02 | Describe the content in `playlist.json`, supporting `vod` / `live` / `filler` / `file` | P0 | **pass** | schema in 6.2 |
+| FR-03 | Play continuously in order and return to the first segment automatically | P0 | **pass** | [measured] multiple rounds loop without a seam |
+| FR-04 | A handover or segment change must not break the receiver | P0 | **pass (concat)** | [measured] 0 gaps at a segment change and at the wrap; in relay mode 2.0-3.1 seconds per segment |
+| FR-05 | Let a filler take over the picture when a source stalls | P1 | **not needed on the main line** | the main line plays local files, so "a stalled source" does not exist; this only applies to the relaying branch (`relay.py`) and is pending T-08 |
+| FR-06 | Watchdog: reopen a segment when the output stalls past the threshold | P0 | **replaced by other mechanisms on the main line** | the main line's three layers of protection are `launchd KeepAlive` (bring a dead process back), `healthcheck.py --heal` (restart the playout after 3 minutes without traffic growth) and the MediaMTX `readTimeout`. `relay.py`'s watchdog is only needed on the relaying branch |
+| FR-07 | Source URL lifetime management | P0 | **not needed on the main line** | after landing, no source URL is involved; the relaying branch still needs it |
+| FR-08 | Relay mode: long `type=live` sources with periodic handover | P1 | **testable (R-09 lifted)** | anonymous resolution works again, so `relay.py`'s `type=live` can really be verified; needs D6 to name the source |
+| FR-09 | JSONL event log plus API traffic observation | P1 | **pass** | `relay-events.jsonl` / `gapwatch.py` |
+| FR-10 | Push the final signal to the YouTube ingest | P0 | **pass** | see T-14 |
+| FR-11 | Captions / bug / subtitles | P2 | **possible, but it overturns copy-only** | neither machine has freetype, so only path A (HTML -> PNG -> overlay) works, and overlay has to **decode and re-encode**, which would keep an 8 GB target machine fully loaded. This trade-off has to be decided first |
+| FR-12 | Alerts on repeated failure | P2 | **code ready** | `healthcheck.py` already writes `alerts.jsonl` and the outbound hook exists (`~/loopcastr/alert_webhook`); waiting on D8 for a URL |
+| **FR-13** | **Land the sources as local files, normalise them and verify their duration** | **P0** | **done** | all 53 landed (4.7 GB), parameters uniform, durations verified, black-tail detection in place (T-16 / T-17 / T-18) |
+| **FR-14** | **A single long-lived publisher on the YouTube side** | **P0** | **pass** | measured over 45 seconds without a break |
+| **FR-15** | **Playout and publisher each supervised by launchd and starting at boot** | **P0** | **pass** | moved to LaunchDaemons; after a reboot the whole chain recovers with nobody logged in (T-11) |
+| **FR-16** | **Black-tail detection and trimming** | **P0** | **pass** | `--rescan` plus `outpoint`; see 3.8 and T-18 |
+| **FR-17** | **Transition clips (after every episode)** | **P1** | **pass** | inserted automatically when `media/_transition.mp4` exists; see 6.2 and T-22 |
 
 ---
 
-## 5. 非功能需求
+## 5. Non-functional requirements
 
-| 編號 | 項目 | 需求 | 依據 |
+| Id | Item | Requirement | Basis |
 |---|---|---|---|
-| NFR-01 | 記憶體 | 目標機 8 GB，同時只允許一條主要編碼／複製路徑 | 【實測】目標機 8 GB |
-| NFR-02 | 磁碟 | 【實測】落地一輪 **4.7 GB**（106 段、15,549 秒 @720p）；目標機目前可用 26 GiB | 【實測】2026-09-17 |
-| NFR-03 | 頻寬 | 上傳需容納輸出位元率的 1.5 倍以上 | v4.3 |
-| NFR-04 | 可用率 | 24/7。主線的異常恢復改由三大機制定義：行程死掉立即由 `KeepAlive` 拉起；流量停滯由 `healthcheck --heal` 在連續 3 次失敗（約 3 分鐘）後重啟；重開機自動恢復（實測中斷 25 秒） | 更新 2026-09-17 |
-| NFR-05 | 解析延遲 | 單次解析 2.26–2.65 秒 | 【實測】 |
-| NFR-06 | 開機自啟 | `launchd` **LaunchDaemon**：開機自動拉起（**不需要圖形登入**），結束後自動重啟 | 【實測】T-11 |
-| NFR-07 | 安全 | stream key 不得進版控 | 第 9 節 |
-| NFR-08 | 可觀測性 | 結構化事件日誌與流量查詢端點 | FR-09 |
+| NFR-01 | Memory | 8 GB on the target machine; only one main encoding or copy path at a time | [measured] 8 GB target machine |
+| NFR-02 | Disk | [measured] one landed round is **4.7 GB** (106 segments, 15,549 seconds at 720p); 26 GiB free on the target machine | [measured] 2026-09-17 |
+| NFR-03 | Bandwidth | upload must accommodate more than 1.5x the output bitrate | v4.3 |
+| NFR-04 | Availability | 24/7. Recovery on the main line is defined by three mechanisms: `KeepAlive` brings a dead process straight back; `healthcheck --heal` restarts after three consecutive failures (about 3 minutes) without traffic growth; a reboot recovers automatically (measured interruption 25 seconds) | updated 2026-09-17 |
+| NFR-05 | Resolution latency | a single resolution takes 2.26-2.65 seconds | [measured] |
+| NFR-06 | Boot start | `launchd` **LaunchDaemon**: starts at boot (**no graphical login needed**) and restarts on exit | [measured] T-11 |
+| NFR-07 | Security | the stream key must never be committed | section 9 |
+| NFR-08 | Observability | structured event log and a traffic query endpoint | FR-09 |
 
 ---
 
-## 6. 介面規格
+## 6. Interface specification
 
-### 6.1 `relay.py` 命令列介面（聯播／多來源接力）
+### 6.1 `relay.py` command line (relaying / multi-source handover)
 
-v1.1 新增／沿用：
+New or retained in v1.1:
 
-| 參數 | 預設 | 用途 |
+| Option | Default | Purpose |
 |---|---|---|
-| `--cookies` | 自動找 `<專案>/cookies.txt` | 來源被 bot 檢查擋住時帶上 cookies.txt |
-| `--check` | 關 | 不播出，只把所有來源解析過一輪並回報可用性（全滅回傳碼 2） |
-| `--loop` | `1` | 整份清單重複幾輪（`0`＝無限），輪與輪之間走同一套 takeover |
-| `--playlist` / `--target` / `--clients` / `--only` | — | 清單與目標覆寫 |
-| `--observe` / `--overlap` / `--resolve-lead` | `0.0`／`4.0` | 觀測與換手前置 |
-| `--watchdog` / `--startup-grace` / `--flow-threshold` | `3.0`／`12.0`／`5.0` | 看門狗三參數 |
-| `--max-restarts` / `--retry-interval` | `6`／`8.0` | 重試政策 |
-| `--filler-on-stall` | `assets/transition.mp4` | 停滯墊片 |
-| `--url-max-age` / `--url-expiry-margin` | `1800.0`／`300.0` | URL 生命週期 |
-| `--restart-mode` | `auto` | `takeover`／`cut`／`auto` |
-| `--dry-run` | 關 | 只印不執行 |
+| `--cookies` | auto-finds `<project>/cookies.txt` | pass cookies.txt when a source is blocked by the bot check |
+| `--check` | off | do not broadcast; resolve every source once and report availability (exit code 2 when everything fails) |
+| `--loop` | `1` | how many rounds through the whole list (`0` = forever); rounds use the same takeover |
+| `--playlist` / `--target` / `--clients` / `--only` | - | list and target overrides |
+| `--observe` / `--overlap` / `--resolve-lead` | `0.0` / `4.0` | observation and handover lead |
+| `--watchdog` / `--startup-grace` / `--flow-threshold` | `3.0` / `12.0` / `5.0` | the three watchdog parameters |
+| `--max-restarts` / `--retry-interval` | `6` / `8.0` | retry policy |
+| `--filler-on-stall` | `assets/transition.mp4` | the filler used on a stall |
+| `--url-max-age` / `--url-expiry-margin` | `1800.0` / `300.0` | URL lifetime |
+| `--restart-mode` | `auto` | `takeover` / `cut` / `auto` |
+| `--dry-run` | off | print without executing |
 
-**建議上線值**（v4.3 實測）：
+**Recommended production values** (measured in v4.3):
 
     --watchdog 10 --startup-grace 15 --flow-threshold 12 \
     --url-max-age 1800 --url-expiry-margin 600 \
     --max-restarts 20 --retry-interval 8
 
-cookies 優先序：命令列 > playlist 的 `cookies` 欄位 > `<專案>/cookies.txt`。
+cookies precedence: command line > the playlist's `cookies` field > `<project>/cookies.txt`.
 
 ### 6.2 `playlist.json` schema
 
@@ -305,282 +303,282 @@ cookies 優先序：命令列 > playlist 的 `cookies` 欄位 > `<專案>/cookie
       ]
     }
 
-| 欄位 | 說明 |
+| Field | Notes |
 |---|---|
-| `segments[].type` | `vod`（有限素材）／`live`（即時來源）／`filler`（本機檔，不交班）／**`file`（本機檔，走 takeover 交班）** |
-| `segments[].format` | yt-dlp 格式選擇。**必須含 `[ext=mp4]+ba[ext=m4a]`**，否則會挑到 opus 音訊，塞不進 FLV |
-| `segments[].seconds` | **必填**。排程器以 `float(spec["seconds"])` 推算 `stop_at`／`start_at`，缺欄位直接拋 `KeyError`。VOD 填實際長度；填超過會讓 ffmpeg 提前結束 → `early_exit` → 切墊片 → 重播同段 |
-| `segments[].path` | `file`/`filler` 用，相對於專案根目錄 |
-| `segments[].outpoint` | 選配。搭配 `file`，在這一秒停止讀取該檔（concat demuxer 指令）。用來截掉片尾黑畫面，見 3.8；**不需要重新編碼** |
-| **過場影片** | 不在 `playlist.json` 裡，而是看 `media/_transition.mp4` 存不存在。存在時 `build_local_content.py` 會在**每一集之後**（含最後一集之後，讓繞回也有過場）插入一段。更換用 `--transition <url|id|path>`，停用用 `--no-transition` |
+| `segments[].type` | `vod` (finite material) / `live` (live source) / `filler` (local file, no handover) / **`file` (local file, handed over by takeover)** |
+| `segments[].format` | the yt-dlp format selector. **It must contain `[ext=mp4]+ba[ext=m4a]`**, or it picks opus audio which cannot go into FLV |
+| `segments[].seconds` | **required**. The scheduler derives `stop_at` / `start_at` with `float(spec["seconds"])` and raises `KeyError` without it. Put the real length for a VOD; a longer value makes ffmpeg end early -> `early_exit` -> switch to filler -> replay the same segment |
+| `segments[].path` | for `file` / `filler`, relative to the project root |
+| `segments[].outpoint` | optional, paired with `file`: stop reading that file at this second (a concat demuxer command). Used to trim a black tail, see 3.8; **no re-encoding needed** |
+| **Transition clips** | not in `playlist.json`; their presence is decided by whether `media/_transition.mp4` exists. When it does, `build_local_content.py` inserts one **after every episode** (including after the last, so the wrap has one too). Replace it with `--transition <url\|id\|path>`, disable it with `--no-transition` |
 
-### 6.3 播出端 `playout.sh`（環境變數）
+### 6.3 Playout `playout.sh` (environment variables)
 
-| 變數 | 預設 | 說明 |
+| Variable | Default | Notes |
 |---|---|---|
-| `PLAYLIST` | `<dir>/playlist-local.json` | 輸入清單 |
-| `LIST` | `<dir>/concat.txt` | 產生的 concat 清單 |
-| `DEST` | `rtmp://127.0.0.1:1935/live/main` | 輸出 |
-| `LOG` | `<dir>/logs/playout.log` | 日誌 |
-| `NORMALIZE` | `0` | `1`＝重編碼成統一參數（來源參數不一致時才用） |
-| `VENC` / `AENC` | `libx264 …2.5M` / `aac 128k` | 僅 `NORMALIZE=1` 時生效 |
+| `PLAYLIST` | `<dir>/playlist-local.json` | input list |
+| `LIST` | `<dir>/concat.txt` | the generated concat list |
+| `DEST` | `rtmp://127.0.0.1:1935/live/main` | output |
+| `LOG` | `<dir>/logs/playout.log` | log |
+| `NORMALIZE` | `0` | `1` = re-encode to uniform parameters (only when sources differ) |
+| `VENC` / `AENC` | `libx264 ...2.5M` / `aac 128k` | only used when `NORMALIZE=1` |
 
-行為：啟動時先建 concat 清單，**任一片段檔案不存在就中止（回傳碼 78）**，避免播出半份清單。
+Behaviour: it builds the concat list at startup and **stops if any segment file is missing (exit code 78)**, so half a list is never broadcast.
 
-### 6.4 推流端 `yt_publish.sh`（環境變數）
+### 6.4 Publisher `yt_publish.sh` (environment variables)
 
-| 變數 | 預設 | 說明 |
+| Variable | Default | Notes |
 |---|---|---|
-| `SRC` | `rtmp://127.0.0.1:1935/live/main` | 上游 |
-| `KEYFILE` | `<dir>/stream.key` | 串流金鑰檔（`chmod 600`） |
-| `PUSH_URL` | `rtmp://a.rtmp.youtube.com/live2` | ingest 端點 |
-| `API` / `PATH_NAME` | `http://127.0.0.1:9997` / `live/main` | 等待上游 ready |
+| `SRC` | `rtmp://127.0.0.1:1935/live/main` | upstream |
+| `KEYFILE` | `<dir>/stream.key` | stream key file (`chmod 600`) |
+| `PUSH_URL` | `rtmp://a.rtmp.youtube.com/live2` | the ingest endpoint |
+| `API` / `PATH_NAME` | `http://127.0.0.1:9997` / `live/main` | used to wait for the upstream to be ready |
 
-行為：先等上游 `ready:true` 才連 YouTube（**避免在沒有內容時每 3 秒敲一次 ingest**）；`-c copy`、`-flvflags no_duration_filesize`；斷線 3 秒後重連。
+Behaviour: it waits for the upstream to be `ready:true` before connecting to YouTube (**so the ingest is not hit every 3 seconds while there is no content**); `-c copy`, `-flvflags no_duration_filesize`; reconnects 3 seconds after a drop.
 
-### 6.5 事件記錄
+### 6.5 Event log
 
-【實測】`emit()` 以 JSONL 逐行附加，每筆含 `ts`（epoch 秒）、`wall`（時分秒.毫秒）與該事件欄位。
+[measured] `emit()` appends JSONL line by line, each entry carrying `ts` (epoch seconds), `wall` (hh:mm:ss.mmm) and the fields of that event.
 
-### 6.6 MediaMTX 設定（目標機實測）
+### 6.6 MediaMTX configuration (measured on the target machine)
 
-| 項目 | 值 |
+| Item | Value |
 |---|---|
 | API | `127.0.0.1:9997` |
 | RTMP | `:1935` |
-| HLS | `:8888`（`hlsVariant: lowLatency`、`hlsAlwaysRemux: yes`） |
-| `readTimeout` | `30s`（刻意調高，讓換手由播出端主導而不是被 MediaMTX 先開槍） |
-| 版本 | `v1.21.0` |
+| HLS | `:8888` (`hlsVariant: lowLatency`, `hlsAlwaysRemux: yes`) |
+| `readTimeout` | `30s` (deliberately raised so the playout owns the handover instead of MediaMTX firing first) |
+| Version | `v1.21.0` |
 
-### 6.7 YouTube 輸出入介面
+### 6.7 YouTube input and output interface
 
-| 項目 | 值 |
+| Item | Value |
 |---|---|
-| 頻道帳號 | `<GOOGLE_ACCOUNT>` |
-| 頻道名稱 | 使用者指定一個中文名稱；【實測】該頻道在 YouTube 上的**實際顯示名稱與指定名稱不一致**（`<CHANNEL_ID>`），且對應的 `@handle` 與 `/c/` 路徑皆回 404 → 見 D15 |
-| 直播控制室 | `https://studio.youtube.com/video/<LIVE_VIDEO_ID>/livestreaming` |
-| RTMP 端點 | `rtmp://a.rtmp.youtube.com/live2` |
-| stream key | 存於 `目標機:~/loopcastr/stream.key`（`chmod 600`）。**不寫入本文件、不進版控**；本文件也刻意不記錄任何指紋或長度特徵。注意 `yt_publish.sh` **只在啟動時讀一次**，換金鑰必須 `launchctl kickstart -k` |
-| 公開播出 | 【實測 2026-09-16 21:02】**已成立**：`<LIVE_VIDEO_ID>` 回 `live_status=is_live`、`is_live=True`；YouTube 端已長出 144p–720p 完整轉檔階梯（720p @ 2448 kbps），證明收到的是真實畫面 |
-| 換金鑰流程 | 【實測】21:01:39 覆寫金鑰後 `kickstart`，**20 秒內**重新連上 ingest；之後 120 秒量測離線 0 段 |
+| Channel account | `<GOOGLE_ACCOUNT>` |
+| Channel name | the user specified a name; [measured] the channel's **actual display name on YouTube differs from the specified one** (`<CHANNEL_ID>`) and its `@handle` and `/c/` path both return 404 -> see D15 |
+| Live control room | `https://studio.youtube.com/video/<LIVE_VIDEO_ID>/livestreaming` |
+| RTMP endpoint | `rtmp://a.rtmp.youtube.com/live2` |
+| stream key | stored at `target machine:~/loopcastr/stream.key` (`chmod 600`). **Never written into this document and never committed**; this document also deliberately records no fingerprint or length characteristics. Note that `yt_publish.sh` **reads it once at startup**, so a new key needs `launchctl kickstart -k` |
+| Public broadcast | [measured 2026-09-16 21:02] **achieved**: `<LIVE_VIDEO_ID>` returns `live_status=is_live` and `is_live=True`; YouTube has built the full 144p-720p transcoding ladder (720p at 2448 kbps), proving it is receiving real picture |
+| Key rotation | [measured] after overwriting the key at 21:01:39 and running `kickstart`, it reconnected to the ingest **within 20 seconds**; a following 120-second measurement showed 0 offline windows |
 
 ---
 
-## 7. 參數基準表（全部為實測值）
+## 7. Parameter baseline table (all measured)
 
-| 參數 | 實測值 | 意義 |
+| Parameter | Measured value | Meaning |
 |---|---|---|
-| 來源 URL TTL | 21600 秒（6 小時） | 超過即失效（主線已不使用） |
-| 來源 URL 綁定 | 解析當下的公網 IP | 換出口即失效（主線已不使用） |
-| 單次解析耗時 | 2.26–2.65 秒 | 換手前置時間下限 |
-| MediaMTX takeover 完成 | 同秒瞬間 | 換手零斷點的前提 |
-| **concat 換片／繞回縫** | **0 秒** | 55 秒涵蓋兩輪，離線 0 段 |
-| **接力換片縫** | **2.0–3.1 秒／段** | 檔案 EOF 即踢掉 publisher |
-| concat 冷啟動縫 | 2.55 秒 | 僅開場一次 |
-| 接力冷啟動縫 | 3.07 秒 | — |
-| concat 接縫 DTS 重疊 | 約 11 ms | ffmpeg 自動夾正，聽感無影響 |
-| 看門狗下限／建議 | 6 秒／10 秒 | 低於 6 秒會誤判 |
-| 啟動寬限 | 15 秒 | `--startup-grace` |
-| 流量停滯門檻 | 12 秒 | `--flow-threshold` |
-| 測試素材輸出位元率 | 3.21 Mbps | testsrc2 極難壓縮；實片會低很多 |
-| 落地一輪所需磁碟 | 約 4.5–5.5 GB | 14,582 秒 @720p【推論】 |
-| 對外公網 IP | `<PUBLIC_IP>`（同日前為 `<PUBLIC_IP>`） | 動態 |
+| Source URL TTL | 21600 seconds (6 hours) | expires after that (no longer used by the main line) |
+| Source URL binding | the public IP at resolve time | a new egress invalidates it (no longer used by the main line) |
+| Single resolution | 2.26-2.65 seconds | lower bound for the handover lead |
+| MediaMTX takeover completion | within the same second | the precondition for a gapless handover |
+| **concat segment change / wrap gap** | **0 seconds** | 55 seconds covering two rounds, 0 offline windows |
+| **relay segment change gap** | **2.0-3.1 seconds per segment** | the file ends at EOF and the publisher is dropped |
+| concat cold-start gap | 2.55 seconds | once at the opening |
+| relay cold-start gap | 3.07 seconds | - |
+| concat seam DTS overlap | about 11 ms | ffmpeg clamps it back; no audible effect |
+| Watchdog lower bound / recommended | 6 seconds / 10 seconds | below 6 seconds it misfires |
+| Startup grace | 15 seconds | `--startup-grace` |
+| Flow stall threshold | 12 seconds | `--flow-threshold` |
+| Test material output bitrate | 3.21 Mbps | testsrc2 compresses very badly; real video is much lower |
+| Disk needed for one landed round | about 4.5-5.5 GB | 14,582 seconds at 720p [inferred] |
+| Public IP | `<PUBLIC_IP>` (earlier the same day `<PUBLIC_IP>`) | dynamic |
 
-**已知未修缺陷**：啟動期同一條 URL 會被解析兩次，每次約白花 2 秒。
+**Known unfixed defect**: during startup the same URL is resolved twice, wasting about 2 seconds each time.
 
 ---
 
-## 8. 環境與硬體規格
+## 8. Environment and hardware
 
-### 8.1 目標機（2026-09-16 05:11 實測）
+### 8.1 Target machine (measured 2026-09-16 05:11)
 
-| 項目 | 值 |
+| Item | Value |
 |---|---|
-| 機型 | `<MODEL>`（hostname `<HOSTNAME>.local`） |
-| 晶片／架構 | Apple M1 / `arm64`（8 CPU） |
-| 記憶體 | 8 GB |
-| 作業系統 | macOS 27.0 |
-| 磁碟 | 228 GiB 總，可用 **37 GiB**，使用率 26% |
+| Model | `<MODEL>` (hostname `<HOSTNAME>.local`) |
+| Chip / architecture | Apple M1 / `arm64` (8 CPU) |
+| Memory | 8 GB |
+| OS | macOS 27.0 |
+| Disk | 228 GiB total, **37 GiB** free, 26% used |
 | Homebrew | `7.0.2` |
-| `ffmpeg` | `9.0.1`；**有 libx264／libx265／h264_videotoolbox／aac**（更正 v1.0：先前「沒有 libx264」是錯的） |
+| `ffmpeg` | `9.0.1`; **has libx264 / libx265 / h264_videotoolbox / aac** (correcting v1.0: the earlier "no libx264" was wrong) |
 | `yt-dlp` | `2026.08.19` |
-| `python3` | `3.14.7`（Homebrew） |
+| `python3` | `3.14.7` (Homebrew) |
 | `node` | `v26.8.2` |
-| `mediamtx` | 已安裝，`launchd com.loopcastr.mediamtx` 常駐（v1.21.0） |
-| `streamlink` | **未安裝，且不需要** |
-| ffmpeg freetype | 無（`drawtext` 0 筆）→ 字卡走路徑 A |
-| 已部署到 `~/loopcastr` | `relay.py`、`playout.sh`、`yt_publish.sh`、`make_concat_list.py`、`build_local_content.py`、`gapwatch.py`、`mediamtx.yml`、`stream.key`、`playlist.json` |
-| 服務管理 | 【實測 2026-09-17】四個服務已從 LaunchAgent 改為 **LaunchDaemon**（`/Library/LaunchDaemons/`）。`mediamtx`／`playout`／`publish` 設 `UserName=<USER>`；`health` **以 root 執行**，因為只有 root 能對 system domain 做 `kickstart`。開機即啟動，不需要圖形登入 |
-| FileVault | 【實測】**已關閉**（2026-09-17 00:07），開機不再需要人工解鎖 |
-| 睡眠 | 【實測】`pmset -a sleep 0 disksleep 0 disablesleep 1`，`SleepDisabled 1`。原本是 `sleep 1`，只是被一個 `caffeinate` 擋著 |
-| 待補 | `assets/transition.mp4`（D5，僅聯播支線需要）、實際重開機驗證（D17） |
-| POT provider | `~/pot`（bgutil 2.0.0）與 plugin 已裝，**但實測證明對本封鎖無效**（R-09） |
+| `mediamtx` | installed, `launchd com.loopcastr.mediamtx` resident (v1.21.0) |
+| `streamlink` | **not installed, and not needed** |
+| ffmpeg freetype | none (`drawtext` returns 0) -> the caption layer takes path A |
+| Deployed to `~/loopcastr` | `relay.py`, `playout.sh`, `yt_publish.sh`, `make_concat_list.py`, `build_local_content.py`, `gapwatch.py`, `mediamtx.yml`, `stream.key`, `playlist.json` |
+| Service management | [measured 2026-09-17] the four services were moved from LaunchAgents to **LaunchDaemons** (`/Library/LaunchDaemons/`). `mediamtx` / `playout` / `publish` set `UserName=<USER>`; `health` **runs as root**, because only root can `kickstart` the system domain. They start at boot with no graphical login |
+| FileVault | [measured] **off** (2026-09-17 00:07), so a boot no longer needs a human to unlock the disk |
+| Sleep | [measured] `pmset -a sleep 0 disksleep 0 disablesleep 1`, `SleepDisabled 1`. It used to be `sleep 1`, held off only by a `caffeinate` |
+| Outstanding | `assets/transition.mp4` (D5, only needed by the relaying branch), and an actual reboot verification (D17) |
+| POT provider | `~/pot` (bgutil 2.0.0) and the plugin are installed, **but measurement proves it does nothing against this block** (R-09) |
 
-### 8.2 工作機（開發與驗收）
+### 8.2 Work machine (development and acceptance)
 
-| 項目 | 值 |
+| Item | Value |
 |---|---|
-| 位址 | `<WORK_HOST>` |
-| `ffmpeg` | `9.0.1`（**無 freetype**，有 libx264） |
+| Address | `<WORK_HOST>` |
+| `ffmpeg` | `9.0.1` (**no freetype**, has libx264) |
 | `yt-dlp` | `2026.08.19` |
-| `mediamtx` | 已安裝（驗收時本機拉起） |
+| `mediamtx` | installed (started locally during acceptance) |
 | `python3` | `3.14.7` |
 | `node` | `v22.23.0` |
-| Homebrew | `7.0.2`；使用者已執行 `brew upgrade`，**本輪複查沒有任何 brew 程序在跑** |
-| Chrome profile | 【實測】存在，但 **macOS TCC 擋住**（`Operation not permitted`），`--cookies-from-browser chrome` 失敗 |
+| Homebrew | `7.0.2`; the user ran `brew upgrade` and **this round's recheck found no brew process running** |
+| Chrome profile | [measured] it exists but **macOS TCC blocks it** (`Operation not permitted`), so `--cookies-from-browser chrome` fails |
 
 ---
 
-## 9. 安全與合規
+## 9. Security and compliance
 
-1. **授權**：使用者聲明所有使用的 YouTube 影片皆為合法授權。落地成本機檔案是**為播出穩定性**，不是要規避授權。
-2. **stream key 管理**：
-   - 不寫入 `playlist.json` 或任何進版控的檔案。
-   - 以 `chmod 600` 的獨立檔案提供（`目標機:~/loopcastr/stream.key`）。
-   - 日誌遮罩，禁止印出完整 RTMP URL。`yt_publish.sh` 只把「連線目標名稱」寫進日誌，不含金鑰。
-3. **cookies.txt 管理**：同等敏感（等同帳號登入態）。`chmod 600`、不進版控、用完可輪替。
-4. **帳號**：頻道帳號 `<GOOGLE_ACCOUNT>`。本文件不儲存任何密碼、金鑰或 cookie。
-5. **法遵**：內容著作權與申報責任由頻道所有者承擔。
+1. **Licensing**: the user states that every YouTube video used is properly licensed. Landing them as local files is **for playout stability**, not to circumvent licensing.
+2. **Stream key handling**:
+   - never written into `playlist.json` or any committed file;
+   - provided as a separate file with `chmod 600` (`target machine:~/loopcastr/stream.key`);
+   - masked in logs; the full RTMP URL must never be printed. `yt_publish.sh` only writes the name of the connection target, never the key.
+3. **cookies.txt handling**: equally sensitive (it is equivalent to a logged-in session). `chmod 600`, never committed, and rotated when it has been used.
+4. **Accounts**: the channel account is `<GOOGLE_ACCOUNT>`. This document stores no password, key or cookie.
+5. **Compliance**: responsibility for content copyright and any reporting rests with the channel owner.
 
 ---
 
-## 10. 測試計畫
+## 10. Test plan
 
-### 10.1 測試資源
+### 10.1 Test resources
 
-| 資源 | 內容 |
+| Resource | Contents |
 |---|---|
-| 播放清單 | `https://www.youtube.com/playlist?list=<PLAYLIST_ID>`（`範例清單`，頻道 <CHANNEL_NAME> `<CHANNEL_HANDLE>`） |
-| 段數／總長 | 53 段／14,582 秒（4 小時 3 分 2 秒） |
-| 段長分布 | 最短 91 秒／最長 619 秒／平均 275 秒 |
-| 測試素材 | `目標機:~/loopcastr/media/t1.mp4`（12 秒）、`t2.mp4`（9 秒）、`t3.mp4`（15 秒），`testsrc2` 1280×720@30 + 正弦音，參數一致可 `-c copy` |
+| Playlist | `https://www.youtube.com/playlist?list=<PLAYLIST_ID>` ("example list", channel <CHANNEL_NAME> `<CHANNEL_HANDLE>`) |
+| Segments / total | 53 segments / 14,582 seconds (4 hours 3 minutes 2 seconds) |
+| Segment length spread | shortest 91 seconds / longest 619 seconds / average 275 seconds |
+| Test material | `target machine:~/loopcastr/media/t1.mp4` (12 seconds), `t2.mp4` (9 seconds), `t3.mp4` (15 seconds), `testsrc2` 1280x720@30 plus a sine tone, uniform parameters so `-c copy` works |
 
-### 10.2 測試項目與結果
+### 10.2 Test items and results
 
-| 編號 | 項目 | 方法 | 結果 |
+| Id | Item | Method | Result |
 |---|---|---|---|
-| T-01 | 單段播放 | 一段本機素材推到 MediaMTX | **通過** |
-| T-02 | 連續換手 | 接力 3 段並加 `--observe` | **通過但揭露缺陷**：換片每段 2.0–3.1 秒縫 |
-| T-03 | 換手量測 | MediaMTX API | `inboundFramesInError: 0` |
-| T-04 | 看門狗 | 人為切斷來源 | 【待驗證】 |
-| T-05 | 墊片接管 | 來源停滯 | 【待驗證】（素材未定 D5） |
-| T-06 | URL 生命週期 | 跑超過 `--url-max-age` | 主線已免除 |
-| T-07 | 真實清單跑滿一輪 | 測試版 106 段、2 小時 56 分 | **通過（並被實測）**：【實測】2026-09-17 05:45:56 的循環點，`loopwatch.py` 取樣 650 筆／135 秒，**接收端離線 0 段、bytesReceived 零成長 0 段**。測試版共跑約 10 小時（3.4 輪），確認多次繞回都正常。測完已用 `switch_edition.sh live` 切回正式版 |
-| T-08 | 聯播 | `type=live` 拉一條正在直播的來源 | **通過**：以台視新聞台 24 小時直播（`9iRAqBMakXY`）實測，3 輪 × 120 秒。**兩次換手本身 0 縫**；量到的 6.206 秒離線是「停掉播出端 → relay 解析完成」的冷啟動期，不是換手造成的 |
-| T-09 | YouTube 輸出 | 推送到 ingest | **通過**（ingest 收流，持續 45 秒以上） |
-| T-10 | 長時穩定度 | 連續 72 小時 | 【待驗證】 |
-| T-11 | 開機自啟 | 實際重開機，全程不登入 | **通過**。原本三個阻礙（FileVault On、無自動登入、`sleep 1`）已排除。重開機後實測：`up 3 mins, **0 users**`（完全沒有圖形登入），四個服務自動起來、行程以 `<USER>` 身分執行、鏈路 `ready=True err=0 readers=1`、YouTube 恢復 `is_live`。**播出中斷約 25 秒**（00:17:37 下指令 → 00:18:04 推流重新連上） |
-| T-12 | YouTube 端最終縫隙 | 對 YouTube 端做長時間畫面監控 | **進行中**：`yt_side_monitor.py` 於 2026-09-17 12:38 起對 YouTube 輸出連續監控 3 小時（blackdetect ＋ freezedetect），涵蓋數十個換片點。初步已抓到 1 次 4.2 秒的 frame freeze，待釐清是內容的靜止畫面還是真凍結 |
-| **T-13** | **concat 零縫循環** | 目標機連續 55 秒涵蓋兩輪 | **通過**：離線 0 段、零成長 0 段 |
-| **T-14** | **端到端推流** | 目標機全鏈路 + 真實 stream key | **通過**：`ready/online=true`、`readers=1`、publisher 連續 |
-| **T-15** | **匿名解析可用性** | 同一批影片在 05:11 與 20:02 各測一次 `yt-dlp --simulate` | **05:11 全滅、20:02 全部成功** → R-09 是暫時性標記。失敗期間 `player_client=android` 仍可用（360p） |
-| **T-16** | **落地參數一致性** | 落地後比對所有片段 codec 參數 | **通過**：H.264 High L3.1／1280×720／yuv420p／30fps／AAC-LC 48k，`-c copy` 可拼 |
-| **T-17** | **落地長度正確性** | 下載後與清單宣稱長度比對 | **通過（修正後）**：修掉 3.7 的兩個 bug，`Ig3vtqtXowY` 由 137s → **270.374s**，與來源一致 |
-| **T-18** | **片尾黑畫面偵測與截斷** | 對 53 支掃 `blackdetect`，套用 `outpoint` 後重跑時間軸分析 | **通過**：抓到 `8jtdcMDuV_A` 片尾 67.4s 純黑並截掉；封包 436,600 → 434,583（≈67.2s），forward gap 仍為 **0** |
-| **T-19** | **播出與 YouTube 端實測** | 換片點前後各 330 秒對本地與 YouTube 兩端同時跑 `blackdetect` | **通過**：兩端皆無黑畫面 → 換片點本身乾淨，先前的黑屏確認為內容問題 |
-| **T-20** | **循環邊界（4 小時繞回第一段）** | 把 `concat.txt` 接成兩份，掃描接縫處的時間軸 | **通過**：869,166 個封包、**時間軸重置 0、forward gap 0**；時間戳連續累加（第二輪結束 28,973.9s ≈ 2×14,487s＋固定偏移）。因為時間戳不會歸零，`loopwatch.py` 改用「啟動時間 ＋ 單輪長度」推算循環點，在前後 45／90 秒高頻取樣 |
-| **T-22** | **過場影片插入** | 全清單掃描時間軸、比對音訊參數 | **通過**：53 集 ＋ 53 段過場（`lj9nUq97uzQ`，20s，4K 降轉 720p）＝ 106 段、466,436 個封包、**forward gap 0、時間軸重置 0**；過場音訊 `aac fltp 48000 2` 與其他集數完全一致。單輪由 14,487s 變為 **15,549s（4h19m）** |
-| **T-21** | **健康監控的異常偵測** | 正常跑一次；再以不存在的路徑跑一次 | **通過**：正常回 OK（+1.95 MB / 6s）；異常回 FAIL、exit 1，並寫入 `logs/alerts.jsonl` |
+| T-01 | Single segment playout | push one local clip to MediaMTX | **pass** |
+| T-02 | Consecutive handover | relay 3 segments with `--observe` | **pass, but exposes the defect**: 2.0-3.1 seconds per segment change |
+| T-03 | Handover measurement | MediaMTX API | `inboundFramesInError: 0` |
+| T-04 | Watchdog | cut the source by hand | [to verify] |
+| T-05 | Filler takeover | stall the source | [to verify] (material undecided, D5) |
+| T-06 | URL lifetime | run past `--url-max-age` | not needed on the main line |
+| T-07 | A real list through a full round | test edition, 106 segments, 2 hours 56 minutes | **pass (and measured)**: [measured] at the loop point of 2026-09-17 05:45:56, `loopwatch.py` took 650 samples over 135 seconds and found **0 receiver-offline windows and 0 `bytesReceived` zero-growth windows**. The test edition ran about 10 hours (3.4 rounds), confirming that repeated wraps are fine. It was switched back to production afterwards with `switch_edition.sh live` |
+| T-08 | Relaying | pull a live source with `type=live` | **pass**: measured against the TTV News 24-hour live stream (`9iRAqBMakXY`), 3 rounds x 120 seconds. **The two handovers themselves left 0 gaps**; the 6.206 seconds of offline measured was the cold-start period of "stop the playout -> relay finishes resolving", not the handover |
+| T-09 | YouTube output | push to the ingest | **pass** (the ingest accepted the stream, held for over 45 seconds) |
+| T-10 | Long-run stability | 72 consecutive hours | [to verify] |
+| T-11 | Boot start | an actual reboot with nobody logging in | **pass**. The three original obstacles (FileVault on, no automatic login, `sleep 1`) were removed. After the reboot: `up 3 mins, **0 users**` (no graphical login at all), all four services came up by themselves, the processes run as `<USER>`, the chain reports `ready=True err=0 readers=1` and YouTube recovered to `is_live`. **Playout was interrupted for about 25 seconds** (command at 00:17:37 -> publisher reconnected at 00:18:04) |
+| T-12 | Final gap on the YouTube side | long-running picture monitoring of the YouTube side | **in progress**: `yt_side_monitor.py` has been monitoring the YouTube output continuously for 3 hours since 2026-09-17 12:38 (blackdetect plus freezedetect), covering dozens of segment changes. It has already caught one 4.2-second frame freeze; whether that is a still picture in the content or a real freeze is still to be determined |
+| **T-13** | **Gapless concat loop** | 55 consecutive seconds covering two rounds on the target machine | **pass**: 0 offline windows, 0 zero-growth windows |
+| **T-14** | **End-to-end publishing** | the whole chain on the target machine with the real stream key | **pass**: `ready/online=true`, `readers=1`, publisher continuous |
+| **T-15** | **Anonymous resolution availability** | the same batch of videos tested with `yt-dlp --simulate` at 05:11 and at 20:02 | **everything failed at 05:11 and everything succeeded at 20:02** -> R-09 is a temporary flag. During a failure `player_client=android` still works (360p) |
+| **T-16** | **Landing parameter consistency** | compare the codec parameters of every landed segment | **pass**: H.264 High L3.1 / 1280x720 / yuv420p / 30fps / AAC-LC 48k, spliceable with `-c copy` |
+| **T-17** | **Landing duration correctness** | compare against the length the list claims after download | **pass (after the fix)**: with the two bugs from 3.7 fixed, `Ig3vtqtXowY` went from 137s to **270.374s**, matching the source |
+| **T-18** | **Black-tail detection and trimming** | run `blackdetect` over all 53, apply `outpoint`, then rerun the timeline analysis | **pass**: caught the 67.4s black tail of `8jtdcMDuV_A` and trimmed it; packets 436,600 -> 434,583 (about 67.2s) with the forward gap still **0** |
+| **T-19** | **Playout and YouTube-side measurement** | run `blackdetect` on both the local and the YouTube side for 330 seconds either side of a segment change | **pass**: no black frames on either side, so the segment change itself is clean and the earlier black screen was confirmed to be a content problem |
+| **T-20** | **Loop boundary (the 4-hour wrap back to the first segment)** | splice `concat.txt` into two copies and scan the timeline at the seam | **pass**: 869,166 packets, **0 timeline resets, 0 forward gaps**; the timestamps accumulate continuously (the end of round two is 28,973.9s, about 2x14,487s plus a fixed offset). Because the timestamps never return to zero, `loopwatch.py` derives the loop point from "start time plus one-round length" and samples at high frequency for 45 / 90 seconds around it |
+| **T-22** | **Transition insertion** | scan the timeline of the whole list and compare the audio parameters | **pass**: 53 episodes plus 53 transitions (`lj9nUq97uzQ`, 20s, 4K downscaled to 720p) = 106 segments, 466,436 packets, **forward gap 0 and 0 timeline resets**; the transition audio `aac fltp 48000 2` matches the episodes exactly. One round went from 14,487s to **15,549s (4h19m)** |
+| **T-21** | **Anomaly detection in health monitoring** | run once normally, then once against a non-existent path | **pass**: normally `OK` (+1.95 MB / 6s); on the anomaly it reports `FAIL`, exits 1 and writes `logs/alerts.jsonl` |
 
-### 10.3 驗收順序
+### 10.3 Acceptance order
 
-T-01 → T-13 → T-14 → **T-11** → T-16～T-18 → T-20 → T-22 → **T-07（進行中）** → **T-12（長時間）** → T-08（等 D6） → T-10（72 小時）。
+T-01 -> T-13 -> T-14 -> **T-11** -> T-16 to T-18 -> T-20 -> T-22 -> **T-07 (in progress)** -> **T-12 (long run)** -> T-08 (waiting on D6) -> T-10 (72 hours).
 
 ---
 
-## 11. 里程碑與工作分解
+## 11. Milestones and work breakdown
 
-| 里程碑 | 內容 | 狀態 |
+| Milestone | Contents | Status |
 |---|---|---|
-| M1 | 目標機環境建置 | **完成**（工具鏈齊全、MediaMTX 常駐、程式已部署） |
-| M2 | 單段打通 | **完成**（T-01） |
-| M3 | 連續與零斷點 | **完成**（T-13：concat 換片與繞回 0 縫） |
-| M4 | 真實清單上線 | **完成**：53 支落地、黑尾截斷、過場插入，均已上線播出 |
-| M5 | 推送 YouTube | **完成**：2026-09-16 21:02 起公開播出（`is_live`） |
-| M6 | 聯播模式 | **可開始**：R-09 已解除，等 D6 指定來源 |
-| M7 | 長時穩定度 | **進行中**：72 小時計時自 2026-09-17 00:18 重開機後起算 |
+| M1 | Build the target machine environment | **done** (toolchain complete, MediaMTX resident, programs deployed) |
+| M2 | One segment end to end | **done** (T-01) |
+| M3 | Continuous and gapless | **done** (T-13: 0 gaps at a concat segment change and at the wrap) |
+| M4 | A real list on air | **done**: 53 landed, black tails trimmed, transitions inserted, all on air |
+| M5 | Push to YouTube | **done**: publicly live since 2026-09-16 21:02 (`is_live`) |
+| M6 | Relay mode | **can start**: R-09 is lifted, waiting on D6 to name the source |
+| M7 | Long-run stability | **in progress**: the 72-hour clock started at the reboot of 2026-09-17 00:18 |
 
 ---
 
-## 12. 風險登錄表
+## 12. Risk register
 
-| 編號 | 風險 | 影響 | 對策 |
+| Id | Risk | Impact | Mitigation |
 |---|---|---|---|
-| R-01 | 來源 URL 6 小時過期、綁動態公網 IP | 播出中斷 | **主線已由內容落地移除**；聯播支線以 `--url-max-age 1800`＋margin 600 壓在 30 分鐘內 |
-| R-02 | 目標機僅 8 GB | 掉格 | 限制同時編碼；優先 `-c copy` |
-| R-03 | yt-dlp 解析因 YouTube 改版失效 | 無法取得來源 | client 備援清單；內容已落地時不影響播出 |
-| R-04 | stream key 外洩 | 頻道被盜用 | 第 9 節 |
-| R-05 | 上游對 24/7 重播的政策風險 | 頻道受影響 | 使用者已聲明授權；留存播出紀錄 |
-| R-06 | 導入 Liquidsoap 造成相依升級 | 工作機升 10 套件 | 若真要，裝在目標機（只裝 1 formula） |
-| R-07 | 長時運行記憶體累積 | 程序崩潰 | T-07／T-10 納入驗收 |
-| R-08 | 工作機與目標機版本不同 | 驗收結果不能外推 | 主要驗收直接在目標機做 |
-| **R-09** | **YouTube 的匿名解析會「間歇性」回 `LOGIN_REQUIRED`** | 進行中的落地或聯播中斷 | 【更正 v1.1】這**不是**永久封鎖：同一批影片 05:11 全滅、20:02 全部成功，是 IP 層級的暫時標記。**不需要 cookie**。封鎖期間的備援是 `player_client=android`（上限 360p），已寫進 `build_local_content.py` 自動重試。根本對策仍是內容落地（FR-13）——落地後主線完全不碰來源 URL |
-| **R-12** | **下載靜默截斷** | 半支影片混進 concat，播出中段突然跳掉 | 已修掉兩個根因（3.7）：ffmpeg 未加 `-nostdin`、HLS(m3u8) 路徑不完整。並加下載後長度比對，容差 5%／10 秒，不符即自動重抓 |
-| **R-13** | **來源影片本身含長黑尾**（實測 66–67 秒） | 觀眾端長時間黑畫面，但**所有傳輸與時間軸監控都顯示正常** | 落地時就偵測並以 `outpoint` 截掉（3.8）。注意：這類問題前兩層監控看不到，必須靠像素層的 `blackdetect` |
-| **R-14** | **FLV 時間戳 32 位元回繞** | 連續播出約 **49.7 天**後時間戳回繞，YouTube 端可能中斷 | 【實測】`-stream_loop -1` 的時間戳是**連續累加**、不會每輪歸零，所以時間軸會一路長上去。對策：每月重啟一次 `com.loopcastr.playout`，時間軸即歸零 |
-| **R-15** | **無法無人值守重開機**（FileVault 開啟 ＋ 無自動登入） | 停電、當機、或任何重開機都需要**人到機器前解鎖**；遠端完全無法恢復 | 已做：`pmset -a sleep 0 disksleep 0 disablesleep 1`（避免睡眠造成的假性停播）。待決：關閉 FileVault（安全取捨，見 D16），並把服務從 LaunchAgent 改成 **LaunchDaemon** —— LaunchAgent 只在圖形介面登入後才會啟動，對無人值守的機器不適合 |
-| **R-10** | **落地內容需要磁碟（一輪 4.5–5.5 GB）** | 磁碟不足 | 目標機可用 37 GiB，足夠；若要多輪備份需先清磁碟 |
-| **R-11** | **concat 接縫的 DTS 重疊（約 11 ms）** | 時間軸不完美 | ffmpeg 自動夾正；必要時改離線預接單一大檔 |
+| R-01 | source URLs expire after 6 hours and are bound to a dynamic public IP | playout interruption | **removed from the main line by landing the content**; the relaying branch keeps it within 30 minutes with `--url-max-age 1800` plus a 600 margin |
+| R-02 | only 8 GB on the target machine | dropped frames | limit concurrent encoding; prefer `-c copy` |
+| R-03 | yt-dlp resolution breaks after a YouTube change | cannot obtain sources | client fallback list; no effect on playout once the content is landed |
+| R-04 | stream key leak | channel hijacked | section 9 |
+| R-05 | upstream policy risk against 24/7 replay | the channel is affected | the user has declared the licence; keep the playout records |
+| R-06 | adopting Liquidsoap forces dependency upgrades | 10 packages upgraded on the work machine | if it is really wanted, install it on the target machine (one formula) |
+| R-07 | memory accumulating over a long run | process crash | T-07 / T-10 are part of acceptance |
+| R-08 | work machine and target machine differ in version | acceptance results cannot be extrapolated | do the main acceptance on the target machine |
+| **R-09** | **anonymous resolution intermittently returns `LOGIN_REQUIRED`** | an in-progress landing or relay is interrupted | [corrected in v1.1] this is **not** a permanent block: the same batch failed at 05:11 and succeeded at 20:02, so it is a temporary IP-level flag and **no cookie is needed**. The fallback during a block is `player_client=android` (capped at 360p), wired into `build_local_content.py` as an automatic retry. The real fix is still landing the content (FR-13): afterwards the main line never touches a source URL |
+| **R-12** | **silent download truncation** | half a video slips into concat and the broadcast jumps mid-way | both root causes are fixed (3.7): ffmpeg without `-nostdin`, and the incomplete HLS (m3u8) path. A post-download duration comparison with a 5% / 10-second tolerance refetches automatically |
+| **R-13** | **a source video contains a long black tail** (measured 66-67 seconds) | viewers see a long black picture while **every transfer and timeline monitor reports normal** | detect it at landing and trim it with `outpoint` (3.8). Note that the first two monitoring layers cannot see this class of problem; only pixel-level `blackdetect` can |
+| **R-14** | **FLV 32-bit timestamp wrap** | after about **49.7 days** of continuous playout the timestamp wraps and YouTube may drop the stream | [measured] `-stream_loop -1` timestamps **accumulate continuously** rather than resetting each round, so the timeline grows without bound. Mitigation: restart `com.loopcastr.playout` monthly, which resets the timeline |
+| **R-15** | **A reboot cannot be unattended** (FileVault on plus no automatic login) | a power cut, a crash or any reboot needs **a human at the machine** to unlock it; remote recovery is impossible | done: `pmset -a sleep 0 disksleep 0 disablesleep 1` (so sleep cannot cause a false outage). Outstanding: turn FileVault off (a security trade-off, see D16) and move the services from LaunchAgents to **LaunchDaemons** - a LaunchAgent only starts after a graphical login, which does not suit an unattended machine |
+| **R-10** | **landed content needs disk (4.5-5.5 GB per round)** | out of disk | 37 GiB free on the target machine is enough; several backup rounds would need a cleanup first |
+| **R-11** | **DTS overlap at a concat seam (about 11 ms)** | an imperfect timeline | ffmpeg clamps it back; splice offline into one file if necessary |
 
 ---
 
-## 13. 待決事項
+## 13. Open decisions
 
-| 編號 | 待決事項 | 需要誰 | 阻塞 |
+| Id | Decision | Who | Blocking |
 |---|---|---|---|
-| **D1** | ~~YouTube stream key~~ | — | **已解決**：已取得並置於 `目標機:~/loopcastr/stream.key` |
-| D2 | ~~輸出解析度與位元率~~ | — | **實務上已定案**：落地統一 1280×720，播出 2500 kbps，YouTube 端實際長出 720p @ 2448 kbps。要改再議 |
-| D3 | ~~是否導入 Liquidsoap~~ | — | **已無必要**：當初是為了字卡，而字卡走路徑 A（ffmpeg overlay）就夠，不需要多一層 DSL。若日後需要進階排程再議 |
-| D4 | ~~播放順序政策~~ **固定序循環**（使用者 2026-09-17 定案） | — | **已解決** |
-| D5 | 墊片素材 | 使用者 | FR-05 |
-| D6 | 聯播來源清單 | 使用者 | M6 |
-| D7 | ~~目標機是否安裝 Homebrew／MediaMTX~~ | — | **已解決** |
-| D8 | ~~告警管道~~ | — | **已解決（2026-09-17 03:14）**：改用 Telegram Bot `<BOT_NAME>`。token 存 `~/loopcastr/telegram.json`（`chmod 600`，不進版控），chat_id 由 `getUpdates` 自動取得並回寫。實測 `--test-alert` 與模擬故障演練都送出成功 |
-| D9 | 頻道名稱與說明需在 Studio 手動設定（API 不支援） | 使用者 | 上線前 |
-| **D14** | ~~YouTube Studio 端的直播活動狀態~~ | — | **已解決**：改用 `<LIVE_VIDEO_ID>` 與新金鑰後，2026-09-16 21:02 已成功公開播出 |
-| **D15** | 直播標題需在 Studio 設定或用 YouTube Data API（RTMP 帶不進標題） | 使用者 | 對外觀感 |
-| **D16** | ~~是否關閉目標機的 FileVault~~ | — | **已解決（2026-09-17 00:07）**：FileVault 已關閉、睡眠永久停用、四個服務已改為 LaunchDaemon。只剩實際重開機驗證 |
-| **D17** | ~~實際重開機驗證~~ | — | **已解決（2026-09-17 00:20）**：重開機後全鏈路自動恢復，全程無人登入，中斷約 25 秒 |
-| D10 | 是否需要固定出口 IP | 使用者 | 已降級（主線不再依賴） |
-| **D11** | ~~提供 YouTube 登入 cookie~~ | — | **已不需要**：R-09 更正為暫時性標記，且已有 `android` client 備援。若日後遇到長期封鎖再議 |
-| **D13** | 是否要保留落地後的正規化副本堆疊（重編碼一次 = 一次畫質損失） | 使用者 | 畫質政策 |
-| **D12** | 是否採「離線預接成單一大檔」以消除 DTS 警告 | 使用者 | R-11 |
+| **D1** | ~~YouTube stream key~~ | - | **resolved**: obtained and stored at `target machine:~/loopcastr/stream.key` |
+| D2 | ~~Output resolution and bitrate~~ | - | **settled in practice**: landing is uniformly 1280x720, playout at 2500 kbps and YouTube actually builds 720p at 2448 kbps. Revisit if it needs to change |
+| D3 | ~~Whether to adopt Liquidsoap~~ | - | **no longer needed**: it was for captions, and path A (ffmpeg overlay) is enough without another DSL layer. Revisit if advanced scheduling is ever needed |
+| D4 | ~~Playback order policy~~ **fixed-order loop** (decided by the user 2026-09-17) | - | **resolved** |
+| D5 | Filler material | user | FR-05 |
+| D6 | Relay source list | user | M6 |
+| D7 | ~~Whether to install Homebrew / MediaMTX on the target machine~~ | - | **resolved** |
+| D8 | ~~Alert channel~~ | - | **resolved (2026-09-17 03:14)**: switched to the Telegram bot `<BOT_NAME>`. The token lives in `~/loopcastr/telegram.json` (`chmod 600`, never committed) and the chat_id is discovered from `getUpdates` and written back. Both `--test-alert` and a simulated failure drill delivered successfully |
+| D9 | Channel name and description have to be set by hand in Studio (the API does not support it) | user | before launch |
+| **D14** | ~~The live event state in YouTube Studio~~ | - | **resolved**: with `<LIVE_VIDEO_ID>` and the new key it went publicly live successfully at 2026-09-16 21:02 |
+| **D15** | The live title has to be set in Studio or through the YouTube Data API (RTMP cannot carry a title) | user | outward appearance |
+| **D16** | ~~Whether to turn FileVault off on the target machine~~ | - | **resolved (2026-09-17 00:07)**: FileVault is off, sleep is permanently disabled and the four services are LaunchDaemons. Only the actual reboot verification was left |
+| **D17** | ~~Actual reboot verification~~ | - | **resolved (2026-09-17 00:20)**: after the reboot the whole chain recovered by itself with nobody logged in, interrupted for about 25 seconds |
+| D10 | Whether a fixed egress IP is needed | user | downgraded (the main line no longer depends on it) |
+| **D11** | ~~Provide a YouTube login cookie~~ | - | **no longer needed**: R-09 was corrected to a temporary flag and the `android` client is the fallback. Revisit if a long block ever appears |
+| **D13** | Whether to keep the stack of normalised copies after landing (one re-encode means one quality loss) | user | quality policy |
+| **D12** | Whether to adopt "splice offline into one file" to remove the DTS warnings | user | R-11 |
 
 ---
 
-## 附錄 A：本規格書的數字出處
+## Appendix A: where the numbers come from
 
-| 數字 | 出處 |
+| Number | Source |
 |---|---|
-| URL TTL／解析耗時／看門狗門檻 | v4.3 實測 |
-| 6 次換手 0.000 秒、MediaMTX takeover 同秒 | v4.3 實測 |
-| Liquidsoap 三關、ffmpeg 無 freetype | v4.5 實測 |
-| 接力縫隙 3.066／2.053／2.040／0.635 秒 | 本輪 `logs/local-relay2.out` |
-| concat 換片與繞回 0 縫 | 本輪目標機 gapwatch 55 秒（506 樣本、api_fail 0） |
-| concat 冷啟動 2.546 秒 | 本輪工作機 gapwatch 70 秒（641 樣本） |
-| DTS 重疊 11 ms | 本輪 `logs/playout.log` |
-| 目標機工具版本、libx264 存在、磁碟 37 GiB | 本輪 ssh 實測 |
-| Chrome cookie 被 TCC 擋 | 本輪 `yt-dlp --cookies-from-browser chrome` 實測 |
-| 4 支影片全 `LOGIN_REQUIRED` | 本輪 yt-dlp 實測（`Ig3vtqtXowY`／`cJx8-vsH14E`／`7xJR7o1gB8c`／`aqz-KE-bpKQ`） |
-| 端到端推流成功 | 本輪目標機 05:13 實測（T-14） |
+| URL TTL / resolution time / watchdog thresholds | measured in v4.3 |
+| 6 handovers at 0.000 seconds, MediaMTX takeover within the same second | measured in v4.3 |
+| Liquidsoap's three gates, ffmpeg without freetype | measured in v4.5 |
+| Relay gaps of 3.066 / 2.053 / 2.040 / 0.635 seconds | this round, `logs/local-relay2.out` |
+| 0 gaps at a concat segment change and at the wrap | this round, 55 seconds of gapwatch on the target machine (506 samples, api_fail 0) |
+| concat cold start 2.546 seconds | this round, 70 seconds of gapwatch on the work machine (641 samples) |
+| DTS overlap 11 ms | this round, `logs/playout.log` |
+| Target machine tool versions, libx264 present, 37 GiB free | this round, measured over ssh |
+| Chrome cookies blocked by TCC | this round, `yt-dlp --cookies-from-browser chrome` |
+| All four videos returned `LOGIN_REQUIRED` | this round, measured with yt-dlp (`Ig3vtqtXowY` / `cJx8-vsH14E` / `7xJR7o1gB8c` / `aqz-KE-bpKQ`) |
+| End-to-end publishing succeeded | this round, target machine at 05:13 (T-14) |
 
-## 附錄 B：驗證指令
+## Appendix B: verification commands
 
-    # 播出中，量接收端縫隙（另開終端）
+    # While broadcasting, measure gaps at the receiver (in another terminal)
     python3 ~/loopcastr/gapwatch.py http://127.0.0.1:9997 live/main 120
 
-    # 本地樞紐狀態
+    # Local hub status
     curl -s http://127.0.0.1:9997/v3/paths/get/live/main
 
-    # 匿名解析是否仍被擋（回 2 表示全滅）
+    # Is anonymous resolution still blocked? (exit 2 means everything failed)
     python3 ~/loopcastr/relay.py --playlist ~/loopcastr/playlist.json --check
 
-    # 落地進度
+    # Landing progress
     python3 ~/loopcastr/build_local_content.py --status
 
-    # 服務狀態
+    # Service status
     launchctl list | grep loopcastr
     tail -f ~/loopcastr/logs/playout.log ~/loopcastr/logs/publish.log
 
-    # ffmpeg 有沒有 freetype（回 0 表示沒有 drawtext）
+    # Does this ffmpeg have freetype? (0 means no drawtext)
     ffmpeg -hide_banner -filters | grep -c drawtext
