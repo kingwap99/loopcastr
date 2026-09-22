@@ -911,3 +911,34 @@ repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU�
 順帶一個觀察：過場指紋含**底稿檔名**，而 shorts 池是「最新 50 支」，所以頻道每發一支
 新 short，池子整體位移、部分過場會被重做（實測同一個連結下 4 支裡有 2 支被重做）。
 這是既有行為，不是這次改動造成的。
+
+## 贊助 QR 改用「圖片」＋ 修掉後台顯示不出來（2026-09-23）
+
+使用者回報「後台的 qrcode 無法正常顯示」。根因：頁面的 API 呼叫把 token 放在
+`X-Ytpl-Token` 標頭，但 `<img src>` 帶不了標頭，所以 `/api/sponsor-qr` 回 401、圖是破的。
+（API 本身沒問題，這正是「只驗 API 沒驗頁面」會漏掉的那種錯。）
+
+同一個回報裡使用者提出更好的方向：**贊助 QR 應該可以用「自己的 QR 圖」**，所以一併改成：
+
+- `overlay.sponsor_qr_image`（路徑或網址）是 QR 圖，有填就用它；網址會在建置時抓一次、
+  快取在 `media/.raw/`（快取鍵是**網址的雜湊**，不是副檔名 —— 第一版寫成副檔名，換網址會
+  沿用到舊圖，已修）。抓不到就退回用 `overlay.sponsor_url` 產生 QR，所以斷網只損失品牌外觀。
+- `overlay.sponsor_url` 是沒有圖片時用來產生 QR 的付款連結。
+- `wmtext` 拆出共用的面板繪製，新增 `render_image_button`：把圖片等比縮到面板內、置中、
+  不裁切，外框與集數按鈕完全一致（實測兩種都是 152×205）。
+- 後台：圖片是網址時直接用該網址（不經端點、不受 token 影響）；是本機路徑時走
+  `/api/sponsor-qr`（**img 帶上 token**，這就是顯示問題的修法）。
+- `assets/sponsor-qr.png` 隨 repo 出貨（作者的付款連結 QR），所以預設不必連外就畫得出來。
+  這張圖第一次沒進版控 —— `.gitignore` 的 `*.png`（用來擋產生的浮水印圖）把它吃掉了，
+  raw 網址因此回 404；已加上 `!assets/*.png` 例外。
+
+【實測】.22 上以 scratch 目錄跑 `build_transitions.py --limit 1`（不改線上檔案）：
+
+| 設定 | 結果 |
+|---|---|
+| 圖片＝GitHub raw 網址 | 抓到圖、無後備訊息、產生贊助面板；快取 `media/.raw/sponsor-qr-301be6ae74.png`（3554 bytes，與 repo 內檔案一致） |
+| 圖片＝不存在的網址 | 記錄 `sponsor QR image could not be fetched (HTTP Error 404)`，改由連結產生 QR，面板照樣產出 |
+
+【實測】.22 的真實後台（headless Chrome 載入 `192.168.31.22:8787`）：
+`<img class="sponqr" src="https://raw.githubusercontent.com/kingwap99/loopcastr/main/assets/sponsor-qr.png">`
+＋「來源：贊助 QR 圖片」＋「已隱藏：連結還留著，但影片不會畫這顆 QR」。

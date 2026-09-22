@@ -157,10 +157,14 @@ def sponsor_image():
         path = src if os.path.isabs(src) else os.path.join(HERE, src)
         return path if os.path.exists(path) else ""
     try:
+        import hashlib
         import urllib.request
         os.makedirs(RAW_DIR, exist_ok=True)
         ext = os.path.splitext(src.split("?")[0])[1] or ".png"
-        dst = os.path.join(RAW_DIR, "sponsor-qr" + ext)
+        # Cache per URL, not per extension: changing the link has to fetch the new picture
+        # instead of quietly reusing the previous one.
+        key = hashlib.sha1(src.encode("utf-8")).hexdigest()[:10]
+        dst = os.path.join(RAW_DIR, "sponsor-qr-%s%s" % (key, ext))
         if os.path.exists(dst) and os.path.getsize(dst) > 0:
             return dst
         req = urllib.request.Request(src, headers={"User-Agent": "loopcastr"})
