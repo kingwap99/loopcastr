@@ -288,7 +288,7 @@ as if the mechanism did not exist.
 | Section | Contents |
 |---|---|
 | `media` | `target` (720 / 1080 / 480), `fps`, `venc`, `abr`, `audio_fade` (fade in/out seconds at a segment change), `max_seconds` |
-| `overlay` | `date_label`, position (`overlay_y` / `overlay_margin` / `band_left`), marquee (`marquee_speed` / `marquee_gap`), button (`link_button` / `link_caption`), `countdown`, `transition_caption`. **Every caption has an `_en` counterpart** (for example `date_label_en`) used when `ui.lang=en` |
+| `overlay` | `date_label`, position (`overlay_y` / `overlay_margin` / `band_left`), marquee (`marquee_speed` / `marquee_gap`), button (`link_button` / `link_caption`), `countdown`, `transition_caption`, and the sponsor block (`sponsor_url` / `sponsor_show` / `sponsor_caption`). **Every caption has an `_en` counterpart** (for example `date_label_en`) used when `ui.lang=en` |
 | `ui` | `lang`: `zh` (Chinese) / `en` (English). Both the console interface and the on-screen captions follow it, and **only one language is shown at a time**; the Chinese / English switch at the top right of the console changes it |
 | `content` | `black_tail_min` (how many seconds of black at the tail count as a black tail) |
 
@@ -390,7 +390,12 @@ continues.
 | Position | Contents | When |
 |---|---|---|
 | Top right | The episode's original `https://youtu.be/<id>` with the caption "▶ 看原片" (watch original) on episodes and "去追劇" (watch more) on transitions | On episodes and transitions, with **identical** position and format |
-| Bottom right | The sponsor link (`overlay.sponsor_url` in `settings.json`) | Only when set; filling `overlay.sponsor_code` with the magic value turns it off |
+| Bottom right | The sponsor link (`overlay.sponsor_url` in `settings.json`) | Only on transitions, and only when the URL is set and `overlay.sponsor_show` is ticked. The shipped default is the author's donation link, so a fresh install shows it; clear the URL to remove the QR entirely. The console previews it and says whether it is currently drawn |
+
+The sponsor QR is an ordinary setting rather than something baked in, and it is drawn by
+`build_transitions.py` alone: changing the link or the switch only rebuilds the transitions (a few
+minutes), never the episodes. The console shows the QR exactly as it appears on screen, together with
+whether it is currently shown.
 
 The QR PNGs are produced by `make_qr_png.py` (the machine has no qrencode, so only the pure-Python `qrcode`
 package is used for the matrix and the PNG is written by hand with zlib + struct):

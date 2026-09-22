@@ -127,13 +127,14 @@ TEXT_STROKE = int(cfg("overlay", "text_stroke", 4))
 QR_SIZE = int(cfg("overlay", "qr_size", 30))
 QR_PX = int(cfg("overlay", "qr_px", 120))
 
-# Sponsor/donation QR: drawn on transition clips only (not on episodes), always bottom right.
+# Sponsor/donation QR: drawn on transition clips only (never on episodes), always bottom right.
+# The URL ships as a default so a fresh install shows the author's donation QR, and it is an
+# ordinary setting: clear it to remove the QR, or untick overlay.sponsor_show to keep the URL
+# but hide the QR. Only build_transitions.py draws it, so this never affects an episode file.
 SPONSOR_URL = cfg("overlay", "sponsor_url", "")
 SPONSOR_CAPTION = L(cfg("overlay", "sponsor_caption", "贊助"),
                     cfg("overlay", "sponsor_caption_en", "Support"))
-# Sponsor code: filling this value turns the sponsor QR off entirely (an emergency switch in the console settings)
-SPONSOR_CODE = cfg("overlay", "sponsor_code", "")
-if SPONSOR_CODE.strip() == "kingwap99":
+if not cfg("overlay", "sponsor_show", True):
     SPONSOR_URL = ""
 
 TRANSITION_FILE = os.path.join(MEDIA_DIR, "_transition.mp4")
@@ -372,7 +373,9 @@ def encode_fp(seg, args, w, h):
         "qr": [QR_SIZE, QR_PX], "txt": [TEXT_SIZE, TEXT_STROKE],
         "marquee": [MARQUEE_SPEED, MARQUEE_GAP], "y": OVERLAY_Y,
         "margin": OVERLAY_MARGIN, "cd": [CD_PRE, CD_SUF],
-        "sponsor": [SPONSOR_URL, SPONSOR_CAPTION],
+        # The sponsor QR is not drawn on episodes, so the sponsor settings are deliberately
+        # NOT part of this fingerprint: toggling them must not re-encode every video. They are
+        # in build_transitions.py's fingerprint instead, where they belong.
         "black": [args.black_tail_min, BLACK_TAIL_SLACK, bool(args.no_auto_trim)],
         "title": seg.get("title") or "", "air": seg.get("air_date") or "",
         "secs": seg.get("seconds"),

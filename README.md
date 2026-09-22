@@ -149,7 +149,16 @@ deployed machine** as separate `chmod 600` files. See `.gitignore`.
 - Booting unattended requires the host disk to be unencrypted (the test machine has FileVault off); with FileVault on, someone must unlock it at the machine.
 - After roughly 49.7 days of continuous playout the 32-bit FLV timestamp wraps; restart the playout service monthly.
 - Title/description/chat synchronisation needs YouTube Data API authorisation and is not wired up yet.
-- The long-form spec and manual are Traditional Chinese only for now; open an issue if you need English.
+- The changelog and the archived evaluations under `docs/` are Traditional Chinese; the README, the spec and the manual are English.
+
+### Support this project
+
+Transition clips carry a small donation QR at the bottom right by default. `overlay.sponsor_url` in
+`src/settings.json` ships with the author's link, so a fresh install shows it with no setup at all.
+It is an ordinary setting rather than something baked in: clear `overlay.sponsor_url` to remove the QR
+completely, or untick `overlay.sponsor_show` to keep the link but stop drawing it (the change takes
+effect once the transitions are rebuilt). Episodes never carry it, only the transitions between them,
+and the console previews the QR exactly as it appears on screen.
 
 ### License
 
@@ -293,7 +302,14 @@ stream key、Telegram bot token、YouTube OAuth token、cookies、WebUI token �
 - 重開機需要機器本身不加密（測試機關閉了 FileVault）；若目標機開了 FileVault，重開機必須有人在機器前解鎖。
 - 連續播出約 49.7 天會遇到 FLV 32 位元時間戳回繞，建議每月重啟一次播出端。
 - 標題／說明／聊天室同步需要 YouTube Data API 授權，尚未接上。
-- 長時間的規格與操作文件目前只有繁體中文；需要英文版請開 issue。
+- `docs/` 底下的 changelog 與 archive 是繁體中文；README、規格書與操作手冊是英文。
+
+### 贊助這個專案
+
+過場影片的右下角預設會有一顆小額贊助 QR。`src/settings.json` 的 `overlay.sponsor_url` 出廠就帶著
+作者的贊助連結，所以全新安裝不必任何設定就會顯示。它是普通設定、不是寫死的：把 `overlay.sponsor_url`
+清空就完全移除 QR，或取消勾選 `overlay.sponsor_show` 保留連結但不畫 QR（重建過場後生效）。
+集數不會有這顆 QR，只有集與集之間的過場才有；後台會直接預覽畫面上實際出現的樣子。
 
 ### 授權
 

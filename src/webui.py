@@ -250,12 +250,13 @@ SETTINGS_SCHEMA = [
          "過場的按鈕說明", "去追劇"),
         ("transition_caption_en", "按鈕文字（過場，英文）", "text", None, None, "", "Watch more"),
         ("sponsor_url", "贊助連結（QR）", "text", None, None,
-         "填了就固定在畫面右下角顯示 QR；留空＝不顯示", ""),
+         "只畫在過場影片的右下角（集數不畫）；留空＝完全不顯示。預設值是作者的贊助連結，清掉即可移除",
+         "https://www.paypal.com/ncp/payment/H6UW76SZSN7WS"),
+        ("sponsor_show", "顯示贊助 QR", "bool", None, None,
+         "取消勾選＝保留上面的連結但影片不畫 QR（過場重做後生效）", True),
         ("sponsor_caption", "贊助按鈕文字", "text", None, None,
          "QR 下方的說明文字", "贊助"),
         ("sponsor_caption_en", "贊助按鈕文字（英文）", "text", None, None, "", "Support"),
-        ("sponsor_code", "贊助碼", "text", None, None,
-         "填入指定值會關閉贊助 QR（留空＝正常顯示）", ""),
     ]),
     ("content", "內容處理", [
         ("black_tail_min", "黑尾門檻（秒）", "float", None, (0, 120),
@@ -1056,9 +1057,39 @@ class Handler(BaseHTTPRequestHandler):
                                     "modes": read_json(MODES, {})})
         if path == "/api/schema":
             return self._send(200, {"settings": localize_schema(SETTINGS_SCHEMA)})
+        if path == "/api/sponsor-qr":
+            return self._send_sponsor_qr()
         if path == "/api/task":
             return self._send(200, task_state())
         return self._send(404, {"error": "not found"})
+
+    def _send_sponsor_qr(self):
+        """Render the configured sponsor link as a PNG so the console shows what the videos show.
+
+        The URL is read from the settings file, never from the query string, so this endpoint
+        cannot be used to render QR codes for arbitrary links.
+        """
+        overlay = (read_json(SETTINGS, {}) or {}).get("overlay") or {}
+        url = str(overlay.get("sponsor_url") or "")
+        if not url:
+            return self._send(404, {"error": "no sponsor link is set"})
+        try:
+            os.makedirs(LOGS, exist_ok=True)
+        except OSError:
+            pass
+        out = os.path.join(LOGS, "sponsor-preview.png")
+        try:
+            rc = subprocess.run([sys.executable, os.path.join(HERE, "make_qr_png.py"), url, out,
+                                 "--scale", "8", "--border", "4"],
+                                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                timeout=30).returncode
+        except (OSError, subprocess.SubprocessError):
+            rc = 1
+        if rc != 0 or not os.path.exists(out):
+            return self._send(500, {"error": "could not render the QR code"})
+        with open(out, "rb") as fh:
+            data = fh.read()
+        return self._send(200, data, "image/png")
 
     def do_POST(self):
         try:
@@ -1416,13 +1447,14 @@ UI_TEXT = {
     "按鈕文字（過場）": "Caption (transitions)",
     "過場的按鈕說明": "the caption on transition buttons",
     "贊助連結（QR）": "Sponsor link (QR)",
-    "填了就固定在畫面右下角顯示 QR；留空＝不顯示":
-        "when set, a QR is pinned to the bottom-right; empty = hidden",
+    "只畫在過場影片的右下角（集數不畫）；留空＝完全不顯示。預設值是作者的贊助連結，清掉即可移除":
+        "drawn only at the bottom right of transition clips, never on episodes; empty = no QR at all. "
+        "The default is the author's donation link; clear it to remove the QR",
+    "顯示贊助 QR": "Show the sponsor QR",
+    "取消勾選＝保留上面的連結但影片不畫 QR（過場重做後生效）":
+        "unticking keeps the link above but stops drawing the QR (takes effect once the transitions are rebuilt)",
     "贊助按鈕文字": "Sponsor caption",
     "QR 下方的說明文字": "the caption under the QR",
-    "贊助碼": "Sponsor code",
-    "填入指定值會關閉贊助 QR（留空＝正常顯示）":
-        "filling in the magic value hides the sponsor QR (empty = normal)",
     "黑尾門檻（秒）": "Black tail threshold (s)",
     "片尾連續黑畫面超過這個秒數就截掉。播出端看不出來，觀眾端是一片黑":
         "a black stretch this long at the tail gets trimmed; the playout cannot see it, "
@@ -1540,6 +1572,8 @@ table{border-collapse:collapse;width:100%}
 td,th{text-align:left;padding:3px 8px 3px 0;vertical-align:top}
 th{font-weight:600;white-space:nowrap}
 .up{color:#0a0}.down{color:#c00}.dim{opacity:.65}
+.sponbox{display:flex;gap:16px;align-items:flex-start;border:1px solid #8884;border-radius:8px;padding:10px 14px;margin:10px 0}
+.sponqr{width:120px;height:120px;background:#fff;border-radius:6px;flex:0 0 auto}
 pre{background:#8881;padding:8px;border-radius:6px;overflow:auto;max-height:240px;font-size:12px;margin:0}
 textarea{width:100%;height:200px;font:12px/1.5 ui-monospace,Menlo,monospace;background:#8881;border-radius:6px;border:1px solid #8884;padding:8px}
 button{font:inherit;padding:5px 12px;border-radius:6px;border:1px solid #8886;background:#8882;cursor:pointer;margin:2px 4px 2px 0}
@@ -1603,6 +1637,10 @@ button.primary{font-weight:700;border-color:#0a0}
 <h2>畫質與版面</h2>
 <p class="dim">存檔後要重新建置才會套用到已下載的內容（改畫質等於重新轉檔）。</p>
 <div id="settings"></div>
+
+<h2>贊助 QR（只出現在過場的右下角）</h2>
+<p class="dim">這是影片上實際會畫出來的樣子。集數不會有這顆 QR。</p>
+<div id="sponbox"></div>
 
 <h2>進階設定（原始 JSON）</h2>
 <details>
@@ -1826,6 +1864,7 @@ function loadCfg(){
     document.getElementById("ta-settings").value = JSON.stringify(c.settings, null, 2);
     document.getElementById("ta-modes").value = JSON.stringify(c.modes, null, 2);
     renderSettings(SETTINGS_SCHEMA, SETTINGS_CACHE);
+    renderSponsor(c.settings);
     renderModes(c.modes);
     var sel = document.getElementById("mode");
     sel.onchange = function(){ refresh(); };
@@ -1847,7 +1886,41 @@ function save(kind){
   catch (e) { return msg("JSON 有錯：" + e.message); }
   post("/api/config", { kind: kind, data: data }).then(function(r){
     msg(r.ok ? fmt("已寫入 %s（%s）", r.wrote, r.note) : ("失敗：" + (r.error || "")));
+    if (r.ok) { loadCfg(); }
   }).catch(function(e){ msg("失敗：" + e); });
+}
+
+function renderSponsor(cfg){
+  var ov = (cfg && cfg.overlay) || {};
+  var url = String(ov.sponsor_url || "");
+  var show = (ov.sponsor_show === undefined) ? true : !!ov.sponsor_show;
+  var cap = String(ov.sponsor_caption || "贊助");
+  var host = document.getElementById("sponbox");
+  if (!host) { return; }
+  host.innerHTML = "";
+  var side = document.createElement("div");
+  if (!url) {
+    side.className = "dim";
+    side.textContent = "沒有設定贊助連結 —— 影片上不會出現贊助 QR。";
+    host.appendChild(side);
+    return;
+  }
+  var img = document.createElement("img");
+  img.className = "sponqr";
+  img.alt = "贊助 QR";
+  img.src = "/api/sponsor-qr?v=" + encodeURIComponent(url);
+  host.appendChild(img);
+  var line = document.createElement("div");
+  line.className = show ? "up" : "down";
+  line.textContent = show
+    ? fmt("顯示中：過場影片的右下角會出現這顆 QR，文字是「%s」。", cap)
+    : "已隱藏：連結還留著，但影片不會畫這顆 QR（重新勾選再重建過場就會回來）。";
+  side.appendChild(line);
+  var hint = document.createElement("p");
+  hint.className = "dim";
+  hint.textContent = "改連結或開關之後，要重建過場才會反映到影片上（集數不會重做）。";
+  side.appendChild(hint);
+  host.appendChild(side);
 }
 function saveSettings(){ save("settings"); }
 function saveModes(){ save("modes"); }
