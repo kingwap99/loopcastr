@@ -128,14 +128,50 @@ QR_SIZE = int(cfg("overlay", "qr_size", 30))
 QR_PX = int(cfg("overlay", "qr_px", 120))
 
 # Sponsor/donation QR: drawn on transition clips only (never on episodes), always bottom right.
-# The URL ships as a default so a fresh install shows the author's donation QR, and it is an
-# ordinary setting: clear it to remove the QR, or untick overlay.sponsor_show to keep the URL
-# but hide the QR. Only build_transitions.py draws it, so this never affects an episode file.
+# Two ordinary settings supply it, and both ship with a default so a fresh install shows the
+# author's donation QR:
+#   sponsor_qr_image  a path or URL to a QR picture (the operator's own, e.g. a branded one)
+#   sponsor_url       a payment link, used to generate a plain QR when no picture is given
+# sponsor_show hides the QR without losing either value. Only build_transitions.py draws it,
+# so none of this ever affects an episode file.
 SPONSOR_URL = cfg("overlay", "sponsor_url", "")
+SPONSOR_QR_IMAGE = str(cfg("overlay", "sponsor_qr_image", "") or "").strip()
 SPONSOR_CAPTION = L(cfg("overlay", "sponsor_caption", "贊助"),
                     cfg("overlay", "sponsor_caption_en", "Support"))
 if not cfg("overlay", "sponsor_show", True):
     SPONSOR_URL = ""
+    SPONSOR_QR_IMAGE = ""
+
+
+def sponsor_image():
+    """Resolve overlay.sponsor_qr_image to a local picture, or "" when there is none.
+
+    A URL is downloaded once into media/.raw/ and cached there (the same idea as the shorts
+    pool); a plain path is resolved against this directory. Callers fall back to generating a
+    QR from SPONSOR_URL when this returns "", so a network failure only costs the branding.
+    """
+    src = SPONSOR_QR_IMAGE
+    if not src:
+        return ""
+    if "://" not in src:
+        path = src if os.path.isabs(src) else os.path.join(HERE, src)
+        return path if os.path.exists(path) else ""
+    try:
+        import urllib.request
+        os.makedirs(RAW_DIR, exist_ok=True)
+        ext = os.path.splitext(src.split("?")[0])[1] or ".png"
+        dst = os.path.join(RAW_DIR, "sponsor-qr" + ext)
+        if os.path.exists(dst) and os.path.getsize(dst) > 0:
+            return dst
+        req = urllib.request.Request(src, headers={"User-Agent": "loopcastr"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = resp.read()
+        with open(dst, "wb") as fh:
+            fh.write(data)
+        return dst if data else ""
+    except Exception as exc:
+        log("sponsor QR image could not be fetched (%s); falling back to the payment link" % exc)
+        return ""
 
 TRANSITION_FILE = os.path.join(MEDIA_DIR, "_transition.mp4")
 TRANSITION_ID = "_tr"

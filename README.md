@@ -153,12 +153,18 @@ deployed machine** as separate `chmod 600` files. See `.gitignore`.
 
 ### Support this project
 
-Transition clips carry a small donation QR at the bottom right by default. `overlay.sponsor_url` in
-`src/settings.json` ships with the author's link, so a fresh install shows it with no setup at all.
-It is an ordinary setting rather than something baked in: clear `overlay.sponsor_url` to remove the QR
-completely, or untick `overlay.sponsor_show` to keep the link but stop drawing it (the change takes
-effect once the transitions are rebuilt). Episodes never carry it, only the transitions between them,
-and the console previews the QR exactly as it appears on screen.
+Transition clips carry a small donation QR at the bottom right by default. It ships with the author's
+QR, so a fresh install shows it with no setup at all, and it is an ordinary setting rather than
+something baked in:
+
+- `overlay.sponsor_qr_image` is the QR picture (a path or a URL), so **you can point it at your own QR
+  image** - the one your payment provider gives you, or any square picture.
+- `overlay.sponsor_url` is a payment link, used to generate a plain QR when no picture is given.
+- Clear both to remove the QR, or untick `overlay.sponsor_show` to keep them but stop drawing it
+  (the change takes effect once the transitions are rebuilt).
+
+Episodes never carry it, only the transitions between them, and the console previews exactly what is
+configured and says whether it is currently drawn.
 
 ### License
 

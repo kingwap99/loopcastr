@@ -50,7 +50,8 @@ def transition_fp(base_id, seconds, caption, title, air, sid, p, stride):
         "qr_size": blc.QR_SIZE, "qr_px": blc.QR_PX,
         "text_size": blc.TEXT_SIZE, "text_stroke": blc.TEXT_STROKE,
         "date_label": blc.DATE_LABEL,
-        "sponsor_url": blc.SPONSOR_URL, "sponsor_caption": blc.SPONSOR_CAPTION,
+        "sponsor_url": blc.SPONSOR_URL, "sponsor_qr_image": blc.SPONSOR_QR_IMAGE,
+        "sponsor_caption": blc.SPONSOR_CAPTION,
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:12]
 
@@ -283,12 +284,19 @@ def main():
                                 w=1280 - btn_w, tag=sid, band_left=0)
             if not a.no_button:
                 ov.append((btn, None, "x=W-w:y=0"))
-            if not a.no_button and blc.SPONSOR_URL:
+            if not a.no_button and (blc.SPONSOR_QR_IMAGE or blc.SPONSOR_URL):
                 sb = os.path.join(TMP, "sponsor-%s.png" % sid)
-                wmtext.render_link_button(blc.SPONSOR_URL, sb, size=blc.QR_SIZE,
-                                          qr_px=blc.QR_PX,
-                                          caption=blc.SPONSOR_CAPTION,
-                                          show_url=False)
+                picture = blc.sponsor_image()
+                if picture:
+                    # The operator's own QR picture (or the one that ships with the project).
+                    wmtext.render_image_button(picture, sb, size=blc.QR_SIZE,
+                                               qr_px=blc.QR_PX,
+                                               caption=blc.SPONSOR_CAPTION)
+                else:
+                    wmtext.render_link_button(blc.SPONSOR_URL, sb, size=blc.QR_SIZE,
+                                              qr_px=blc.QR_PX,
+                                              caption=blc.SPONSOR_CAPTION,
+                                              show_url=False)
                 ov.append((sb, None, "x=W-w:y=H-h"))
 
             # Continuous shorts rotation: pass p, video i uses pool entry (p * len(eps) + i - 1).

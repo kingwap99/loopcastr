@@ -169,33 +169,8 @@ def render_link_button(url, path, caption="▶ 看原片", size=30,
     With caption_above=True the caption sits above the QR (that is how the transition caption
     is used); otherwise it sits below.
     """
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image
     import qrcode
-
-    font_path = next((p for p in FONT_CANDIDATES if os.path.exists(p)), None)
-    if not font_path:
-        raise RuntimeError("no usable CJK font was found")
-    f1 = ImageFont.truetype(font_path, size)
-    f2 = ImageFont.truetype(font_path, int(size * 0.75))
-
-    short = url.replace("https://", "").replace("http://", "")
-    probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
-    cap_w = probe.textbbox((0, 0), caption, font=f1)[2]
-    url_w = probe.textbbox((0, 0), short, font=f2)[2] if show_url else 0
-    cap_h = int(size * 1.30)
-    url_h = int(size * 0.75 * 1.30)
-
-    inner = max(qr_px, cap_w, url_w)
-    W = inner + pad * 2
-    top_text_h = cap_h if caption_above else 0
-    bot_text_h = (url_h if show_url else 0) + (0 if caption_above else cap_h)
-    H = pad + top_text_h + (gap if top_text_h else 0) + qr_px +        + (gap if bot_text_h else 0) + bot_text_h + pad
-
-    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.rounded_rectangle([0, 0, W - 1, H - 1], radius=radius,
-                        fill=(0, 0, 0, 175), outline=(255, 255, 255, 235),
-                        width=3)
 
     q = qrcode.QRCode(border=2,
                       error_correction=qrcode.constants.ERROR_CORRECT_M)
@@ -210,21 +185,82 @@ def render_link_button(url, path, caption="▶ 看原片", size=30,
             if m[y][x]:
                 px[x, y] = (0, 0, 0)
     qr = qr.resize((qr_px, qr_px), Image.NEAREST).convert("RGBA")
+    short = url.replace("https://", "").replace("http://", "") if show_url else ""
+    return _button_panel(qr, path, caption, size, qr_px, pad, radius, gap,
+                         caption_above=caption_above, url_text=short)
+
+
+def render_image_button(image_path, path, caption="贊助", size=30, qr_px=120,
+                        pad=16, radius=18, gap=14, caption_above=False):
+    """Draw the operator's own QR picture in the same panel a link button uses.
+
+    This is how the sponsor QR works: an operator can supply a branded QR image (from their
+    payment provider, or a picture of their own) instead of letting this program generate a
+    plain QR from a payment link. The picture is scaled to fit qr_px, centred and never cropped.
+    """
+    from PIL import Image
+
+    src = Image.open(image_path).convert("RGBA")
+    scale = min(float(qr_px) / src.width, float(qr_px) / src.height)
+    w = max(1, int(round(src.width * scale)))
+    h = max(1, int(round(src.height * scale)))
+    box = Image.new("RGBA", (qr_px, qr_px), (0, 0, 0, 0))
+    box.alpha_composite(src.resize((w, h), Image.LANCZOS),
+                        ((qr_px - w) // 2, (qr_px - h) // 2))
+    return _button_panel(box, path, caption, size, qr_px, pad, radius, gap,
+                         caption_above=caption_above)
+
+
+def _button_panel(inner, path, caption, size, inner_px, pad, radius, gap,
+                  caption_above=False, url_text=""):
+    """Draw the rounded panel shared by render_link_button and render_image_button.
+
+    ``inner`` is already the picture that belongs in the panel (a generated QR or the
+    operator's own QR image) at ``inner_px`` square, and ``url_text`` is optional text under
+    the caption.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    font_path = next((p for p in FONT_CANDIDATES if os.path.exists(p)), None)
+    if not font_path:
+        raise RuntimeError("no usable CJK font was found")
+    f1 = ImageFont.truetype(font_path, size)
+    f2 = ImageFont.truetype(font_path, int(size * 0.75))
+
+    probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+    cap_w = probe.textbbox((0, 0), caption, font=f1)[2]
+    url_w = probe.textbbox((0, 0), url_text, font=f2)[2] if url_text else 0
+    cap_h = int(size * 1.30)
+    url_h = int(size * 0.75 * 1.30)
+
+    inner_w = max(inner_px, cap_w, url_w)
+    W = inner_w + pad * 2
+    top_text_h = cap_h if caption_above else 0
+    bot_text_h = (url_h if url_text else 0) + (0 if caption_above else cap_h)
+    H = (pad + top_text_h + (gap if top_text_h else 0) + inner_px
+         + (gap if bot_text_h else 0) + bot_text_h + pad)
+
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([0, 0, W - 1, H - 1], radius=radius,
+                        fill=(0, 0, 0, 175), outline=(255, 255, 255, 235),
+                        width=3)
+
     ty = pad
     if caption_above:
         d.text(((W - cap_w) // 2, ty), caption, font=f1,
                fill=(255, 255, 255, 255), stroke_width=2,
                stroke_fill=(0, 0, 0, 255))
         ty += cap_h + gap
-    img.alpha_composite(qr, ((W - qr_px) // 2, ty))
-    ty += qr_px + (gap if bot_text_h else 0)
+    img.alpha_composite(inner, ((W - inner_px) // 2, ty))
+    ty += inner_px + (gap if bot_text_h else 0)
     if not caption_above:
         d.text(((W - cap_w) // 2, ty), caption, font=f1,
                fill=(255, 255, 255, 255), stroke_width=2,
                stroke_fill=(0, 0, 0, 255))
         ty += cap_h
-    if show_url:
-        d.text(((W - url_w) // 2, ty), short, font=f2,
+    if url_text:
+        d.text(((W - url_w) // 2, ty), url_text, font=f2,
                fill=(255, 255, 255, 255), stroke_width=2,
                stroke_fill=(0, 0, 0, 255))
 

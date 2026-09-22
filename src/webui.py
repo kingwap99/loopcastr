@@ -249,8 +249,11 @@ SETTINGS_SCHEMA = [
         ("transition_caption", "按鈕文字（過場）", "text", None, None,
          "過場的按鈕說明", "去追劇"),
         ("transition_caption_en", "按鈕文字（過場，英文）", "text", None, None, "", "Watch more"),
+        ("sponsor_qr_image", "贊助 QR 圖片（網址或路徑）", "text", None, None,
+         "有填就用這張圖（可以放自己的 QR 圖，例如付款平台給的）；留空＝用下面的連結自動產生 QR",
+         "https://raw.githubusercontent.com/kingwap99/loopcastr/main/assets/sponsor-qr.png"),
         ("sponsor_url", "贊助連結（QR）", "text", None, None,
-         "只畫在過場影片的右下角（集數不畫）；留空＝完全不顯示。預設值是作者的贊助連結，清掉即可移除",
+         "沒有上面的圖片時，用這個連結自動產生 QR。只畫在過場影片的右下角（集數不畫）；圖片與連結都留空＝不顯示",
          "https://www.paypal.com/ncp/payment/H6UW76SZSN7WS"),
         ("sponsor_show", "顯示贊助 QR", "bool", None, None,
          "取消勾選＝保留上面的連結但影片不畫 QR（過場重做後生效）", True),
@@ -1064,30 +1067,40 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
     def _send_sponsor_qr(self):
-        """Render the configured sponsor link as a PNG so the console shows what the videos show.
+        """Serve the sponsor QR picture the videos would use, so the console shows the same thing.
 
-        The URL is read from the settings file, never from the query string, so this endpoint
-        cannot be used to render QR codes for arbitrary links.
+        A picture configured as a local path is served from disk; otherwise a QR is generated
+        from the payment link. Both come from the settings file and never from the query string,
+        so this endpoint cannot render QR codes for arbitrary links. It deliberately ignores
+        sponsor_show: the console previews the QR even while it is hidden from the videos.
         """
         overlay = (read_json(SETTINGS, {}) or {}).get("overlay") or {}
+        picture = str(overlay.get("sponsor_qr_image") or "")
         url = str(overlay.get("sponsor_url") or "")
-        if not url:
-            return self._send(404, {"error": "no sponsor link is set"})
+        path = ""
+        if picture and "://" not in picture:
+            cand = picture if os.path.isabs(picture) else os.path.join(PREFIX, picture)
+            if os.path.exists(cand):
+                path = cand
+        if not path and not url:
+            return self._send(404, {"error": "no sponsor QR is configured"})
         try:
             os.makedirs(LOGS, exist_ok=True)
         except OSError:
             pass
-        out = os.path.join(LOGS, "sponsor-preview.png")
-        try:
-            rc = subprocess.run([sys.executable, os.path.join(HERE, "make_qr_png.py"), url, out,
-                                 "--scale", "8", "--border", "4"],
-                                capture_output=True, text=True, stdin=subprocess.DEVNULL,
-                                timeout=30).returncode
-        except (OSError, subprocess.SubprocessError):
-            rc = 1
-        if rc != 0 or not os.path.exists(out):
-            return self._send(500, {"error": "could not render the QR code"})
-        with open(out, "rb") as fh:
+        if not path:
+            out = os.path.join(LOGS, "sponsor-preview.png")
+            try:
+                rc = subprocess.run([sys.executable, os.path.join(HERE, "make_qr_png.py"),
+                                     url, out, "--scale", "8", "--border", "4"],
+                                    capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                    timeout=30).returncode
+            except (OSError, subprocess.SubprocessError):
+                rc = 1
+            if rc != 0 or not os.path.exists(out):
+                return self._send(500, {"error": "could not render the QR code"})
+            path = out
+        with open(path, "rb") as fh:
             data = fh.read()
         return self._send(200, data, "image/png")
 
@@ -1447,9 +1460,12 @@ UI_TEXT = {
     "按鈕文字（過場）": "Caption (transitions)",
     "過場的按鈕說明": "the caption on transition buttons",
     "贊助連結（QR）": "Sponsor link (QR)",
-    "只畫在過場影片的右下角（集數不畫）；留空＝完全不顯示。預設值是作者的贊助連結，清掉即可移除":
-        "drawn only at the bottom right of transition clips, never on episodes; empty = no QR at all. "
-        "The default is the author's donation link; clear it to remove the QR",
+    "贊助 QR 圖片（網址或路徑）": "Sponsor QR picture (URL or path)",
+    "有填就用這張圖（可以放自己的 QR 圖，例如付款平台給的）；留空＝用下面的連結自動產生 QR":
+        "when set this picture is used, so an operator can supply their own QR image; empty = generate a QR from the link below",
+    "沒有上面的圖片時，用這個連結自動產生 QR。只畫在過場影片的右下角（集數不畫）；圖片與連結都留空＝不顯示":
+        "used to generate a QR when there is no picture above. Drawn only at the bottom right of transition clips, "
+        "never on episodes; empty picture and empty link = no QR",
     "顯示贊助 QR": "Show the sponsor QR",
     "取消勾選＝保留上面的連結但影片不畫 QR（過場重做後生效）":
         "unticking keeps the link above but stops drawing the QR (takes effect once the transitions are rebuilt)",
@@ -1892,6 +1908,7 @@ function save(kind){
 
 function renderSponsor(cfg){
   var ov = (cfg && cfg.overlay) || {};
+  var pic = String(ov.sponsor_qr_image || "");
   var url = String(ov.sponsor_url || "");
   var show = (ov.sponsor_show === undefined) ? true : !!ov.sponsor_show;
   var cap = String(ov.sponsor_caption || "贊助");
@@ -1899,16 +1916,21 @@ function renderSponsor(cfg){
   if (!host) { return; }
   host.innerHTML = "";
   var side = document.createElement("div");
-  if (!url) {
+  if (!pic && !url) {
     side.className = "dim";
-    side.textContent = "沒有設定贊助連結 —— 影片上不會出現贊助 QR。";
+    side.textContent = "沒有設定贊助 QR（圖片與連結都是空的）—— 影片上不會出現。";
     host.appendChild(side);
     return;
   }
   var img = document.createElement("img");
   img.className = "sponqr";
   img.alt = "贊助 QR";
-  img.src = "/api/sponsor-qr?v=" + encodeURIComponent(url);
+  if (pic && /^https?:/i.test(pic)) {
+    img.src = pic;
+  } else {
+    img.src = "/api/sponsor-qr?token=" + encodeURIComponent(TOKEN)
+            + "&v=" + encodeURIComponent(pic || url);
+  }
   host.appendChild(img);
   var line = document.createElement("div");
   line.className = show ? "up" : "down";
@@ -1918,7 +1940,9 @@ function renderSponsor(cfg){
   side.appendChild(line);
   var hint = document.createElement("p");
   hint.className = "dim";
-  hint.textContent = "改連結或開關之後，要重建過場才會反映到影片上（集數不會重做）。";
+  hint.textContent = pic
+    ? "來源：贊助 QR 圖片。改圖片、連結或開關之後，要重建過場才會反映到影片上（集數不會重做）。"
+    : "來源：由贊助連結自動產生。改連結或開關之後，要重建過場才會反映到影片上（集數不會重做）。";
   side.appendChild(hint);
   host.appendChild(side);
 }

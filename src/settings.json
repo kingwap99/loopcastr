@@ -20,7 +20,7 @@
     "passes": 1
   },
   "overlay": {
-    "_comment": "On-screen captions and layout. sponsor_url ships with the author's donation link, so a fresh install draws that QR on transition clips (bottom right, episodes are never touched); clear sponsor_url to remove the QR entirely, or untick sponsor_show to keep the link but hide the QR. Every caption has an _en counterpart used when ui.lang=en.",
+    "_comment": "On-screen captions and layout. The sponsor QR ships enabled (bottom right of transition clips, never on episodes): sponsor_qr_image is a QR picture (path or URL) and sponsor_url is the payment link used to generate one when no picture is given. Clear both to remove the QR, or untick sponsor_show to keep them but hide the QR. Every caption has an _en counterpart used when ui.lang=en.",
     "date_label": "首播日期：",
     "date_label_en": "First aired: ",
     "overlay_y": 40,
@@ -42,6 +42,7 @@
     "countdown_suffix_en": " left",
     "transition_caption": "去追劇",
     "transition_caption_en": "Watch more",
+    "sponsor_qr_image": "https://raw.githubusercontent.com/kingwap99/loopcastr/main/assets/sponsor-qr.png",
     "sponsor_url": "https://www.paypal.com/ncp/payment/H6UW76SZSN7WS",
     "sponsor_show": true,
     "sponsor_caption": "贊助",

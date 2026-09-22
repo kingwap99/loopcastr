@@ -288,7 +288,7 @@ as if the mechanism did not exist.
 | Section | Contents |
 |---|---|
 | `media` | `target` (720 / 1080 / 480), `fps`, `venc`, `abr`, `audio_fade` (fade in/out seconds at a segment change), `max_seconds` |
-| `overlay` | `date_label`, position (`overlay_y` / `overlay_margin` / `band_left`), marquee (`marquee_speed` / `marquee_gap`), button (`link_button` / `link_caption`), `countdown`, `transition_caption`, and the sponsor block (`sponsor_url` / `sponsor_show` / `sponsor_caption`). **Every caption has an `_en` counterpart** (for example `date_label_en`) used when `ui.lang=en` |
+| `overlay` | `date_label`, position (`overlay_y` / `overlay_margin` / `band_left`), marquee (`marquee_speed` / `marquee_gap`), button (`link_button` / `link_caption`), `countdown`, `transition_caption`, and the sponsor block (`sponsor_qr_image` / `sponsor_url` / `sponsor_show` / `sponsor_caption`). **Every caption has an `_en` counterpart** (for example `date_label_en`) used when `ui.lang=en` |
 | `ui` | `lang`: `zh` (Chinese) / `en` (English). Both the console interface and the on-screen captions follow it, and **only one language is shown at a time**; the Chinese / English switch at the top right of the console changes it |
 | `content` | `black_tail_min` (how many seconds of black at the tail count as a black tail) |
 
@@ -390,12 +390,24 @@ continues.
 | Position | Contents | When |
 |---|---|---|
 | Top right | The episode's original `https://youtu.be/<id>` with the caption "▶ 看原片" (watch original) on episodes and "去追劇" (watch more) on transitions | On episodes and transitions, with **identical** position and format |
-| Bottom right | The sponsor link (`overlay.sponsor_url` in `settings.json`) | Only on transitions, and only when the URL is set and `overlay.sponsor_show` is ticked. The shipped default is the author's donation link, so a fresh install shows it; clear the URL to remove the QR entirely. The console previews it and says whether it is currently drawn |
+| Bottom right | The sponsor QR: `overlay.sponsor_qr_image` (a QR picture, given as a path or a URL) or, when that is empty, a QR generated from `overlay.sponsor_url` | Only on transitions, and only while `overlay.sponsor_show` is ticked. The shipped defaults are the author's, so a fresh install shows it; clear both to remove it. Any operator can drop in their own QR picture - that is the point of the image setting - and the console previews whatever is configured and says whether it is currently drawn |
 
 The sponsor QR is an ordinary setting rather than something baked in, and it is drawn by
 `build_transitions.py` alone: changing the link or the switch only rebuilds the transitions (a few
 minutes), never the episodes. The console shows the QR exactly as it appears on screen, together with
 whether it is currently shown.
+
+Two ways to supply the picture, and the image wins when both are set:
+
+- `overlay.sponsor_qr_image` - a QR picture, either a path (`assets/sponsor-qr.png`) or a URL
+  (`https://raw.githubusercontent.com/<user>/<repo>/main/assets/sponsor-qr.png`). A URL is fetched
+  once at build time and cached in `media/.raw/`, so a later build reuses it offline.
+- `overlay.sponsor_url` - the payment link. When there is no picture, a plain QR is generated from
+  it; if the picture cannot be fetched either, the build falls back to this link.
+
+The picture is scaled to fit the panel and centred, never cropped, so a square QR image of any size
+works. The panel around it (rounded, translucent, with the caption) is the same one the episode
+buttons use.
 
 The QR PNGs are produced by `make_qr_png.py` (the machine has no qrencode, so only the pure-Python `qrcode`
 package is used for the matrix and the PNG is written by hand with zlib + struct):
