@@ -1,10 +1,10 @@
 #!/bin/bash
-# 單一行程 concat 播出：MediaMTX 只會看到一條連續 publisher。
+# Single-process concat playout: MediaMTX only ever sees one continuous publisher.
 #
-# 為什麼不用 relay 接力：接力＝每一段結束就 EOF，MediaMTX 立刻踢掉 publisher，
-# 下一個 publisher 暖機期間接收端是離線的（實測每段 2.0~3.1s 的縫）。
-# concat 把整份清單餵給同一個 ffmpeg，中間不換手，縫自然不存在。
-# 需要換「來源」的場合（YouTube 直播聯播）才回到 relay.py 的 takeover。
+# Why not relay handover: with handover every segment ends in EOF, MediaMTX immediately drops the
+# publisher, and the receiver is offline while the next one warms up (measured: a 2.0-3.1s gap per segment).
+# concat feeds the whole list to one ffmpeg with no handover, so the gap cannot exist.
+# Only when the source itself must change (relaying a YouTube live stream) does relay.py takeover come back.
 set -u
 export PATH=/opt/homebrew/bin:$PATH
 
@@ -15,9 +15,9 @@ DEST="${DEST:-rtmp://127.0.0.1:1935/live/main}"
 LOG="${LOG:-$HERE/logs/playout.log}"
 API="${API:-http://127.0.0.1:9997}"
 PATH_NAME="${PATH_NAME:-live/main}"
-READ_EVERY="${READ_EVERY:-5}"      # 每幾秒檢查一次有沒有在送資料
-READ_STALL="${READ_STALL:-20}"     # 連續幾秒沒有新資料就砍掉重連
-NORMALIZE="${NORMALIZE:-0}"   # 1 = 重編碼成統一參數（來源參數不一致時才需要）
+READ_EVERY="${READ_EVERY:-5}"      # how often to check that data is flowing
+READ_STALL="${READ_STALL:-20}"     # kill and reconnect after this many seconds with no new data
+NORMALIZE="${NORMALIZE:-0}"   # 1 = re-encode to uniform parameters (only needed when sources differ)
 VENC="${VENC:--c:v libx264 -preset veryfast -profile:v high -g 60 -b:v 2500k -maxrate 2500k -bufsize 5000k}"
 AENC="${AENC:--c:a aac -b:a 128k -ar 48000 -ac 2}"
 
@@ -35,13 +35,13 @@ else
   ENC=(-c copy)
 fi
 
-# 為什麼要自己看門（2026-09-19 加）：
-#   實測遇過 MediaMTX 的 readTimeout（30 秒）把播出端的連線踢掉之後，ffmpeg
-#   不是馬上結束、而是卡在那裡好幾分鐘不動（bytesReceived 停止成長、readers
-#   變 0），整個頻道就黑了 —— 2026-09-19 那次黑了約 3.5 分鐘，最後是 health
-#   服務連續三次失敗才把它 kickstart 掉。yt_publish.sh 有同樣的看門，播出端
-#   這邊漏了，所以補上：改盯這條 path 的 bytesReceived，連續 READ_STALL 秒
-#   沒有成長就砍掉重連（正常情況每 5 秒會有十幾 MB 的成長，不會誤判）。
+# Why it watches itself (added 2026-09-19):
+#   Measured: after the MediaMTX readTimeout (30s) dropped the playout connection, ffmpeg did not
+#   exit but sat there for minutes without moving (bytesReceived stopped growing, readers went
+#   to 0) and the channel went black - about 3.5 minutes on 2026-09-19, until the health service
+#   failed three times in a row and kickstarted it. yt_publish.sh has the same watchdog and the
+#   playout side was missing it, so it is added here: watch bytesReceived on this path and after
+#   READ_STALL seconds without growth, kill and reconnect (normally it grows by tens of MB every 5 seconds).
 bytes_now() {
   curl -sf --max-time 3 "$API/v3/paths/get/$PATH_NAME" 2>/dev/null \
     | python3 -c 'import json,sys

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""播出端控制：重啟、換片點推算。
+"""Playout control: restarting and segment-boundary calculation.
 
-為什麼獨立一支：`refreshwatch.py`（定期重掃）與 `mode_build.py`（分批建置）
-都要「等下一個換片點再重啟播出端」，複製兩份一定會走鐘。
+Why it is its own module: refreshwatch.py (periodic rescan) and mode_build.py (batched
+build) both need to "wait for the next segment boundary before restarting the playout",
+and two copies of that logic would drift apart.
 
-播出端的時間軸是「單一行程 concat ＋ -stream_loop -1」連續累加，所以換片點
-只能用「開播時間 ＋ 各段累加長度」推算，不能靠 DTS（繞回時 DTS 不會歸零）。
+The playout timeline is one concat -stream_loop -1 process accumulating continuously, so
+the boundary can only be derived from "start time + summed segment lengths" and never from
+DTS (DTS does not return to zero at the wrap).
 """
 
 import datetime
@@ -19,7 +21,8 @@ PLAYOUT_LOG = os.path.join(HERE, "logs", "playout.log")
 
 
 def service_prefix():
-    """服務 label 前綴：看這個目錄裡實際的 plist（改名前的安裝是 com.ytpl.）。"""
+    """Service label prefix: read from the plist actually present in this directory
+    (installs from before the rename use com.ytpl.)."""
     try:
         for name in sorted(os.listdir(HERE)):
             if name.startswith("com.") and name.endswith(".playout.plist"):
@@ -49,14 +52,14 @@ def active_playlist_path():
         pass
     return ""
 
-# 日誌格式：[playout] 2026-09-17 00:18:02 start #1
-# （2026-09-21 之前是「第 1 次啟動」，舊日誌仍然讀得到）
+# Log format: [playout] 2026-09-17 00:18:02 start #1
+# (before 2026-09-21 it wrote the Chinese wording; old logs still parse)
 START_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
                       r" (?:start #(\d+)|第 (\d+) 次啟動)")
 
 
 def last_start():
-    """playout.log 裡最後一次啟動的 (時間, 第幾次)。讀不到回 None。"""
+    """The last start in playout.log as (time, start count); None when it cannot be read."""
     last = None
     try:
         with open(PLAYOUT_LOG, encoding="utf-8", errors="ignore") as fh:
@@ -177,10 +180,11 @@ def rotate_playlist_to(old_json, new_json, old_next_index, out_json=None):
 
 
 def restart_playout():
-    """重啟播出端。成功回傳用過的指令字串，失敗回 ""。
+    """Restart the playout. Returns the command that worked, or an empty string on failure.
 
-    gui domain（install.sh --agents）與 system domain（LaunchDaemon）都試 ——
-    舊版只打 system domain，裝成 LaunchAgent 的機器就永遠重啟不動。
+    Both the gui domain (install.sh --agents) and the system domain (LaunchDaemon) are
+    tried: the old version only hit the system domain, so a machine installed as a
+    LaunchAgent could never be restarted.
     """
     if os.geteuid() == 0:
         if subprocess.run(["launchctl", "kickstart", "-k", "system/" + LABEL],

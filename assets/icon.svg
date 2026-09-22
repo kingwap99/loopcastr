@@ -1,4 +1,4 @@
-<!-- loopcastr icon：透明底，給淺色背景或內嵌用（深色版見 icon-dark.svg） -->
+<!-- loopcastr icon: transparent background, for light backgrounds or inline use (see icon-dark.svg for the dark version) -->
 <svg viewBox="0 0 100 100" width="100%" xmlns="http://www.w3.org/2000/svg">
   <path d="M74 34 A29 29 0 0 0 25 36" fill="none" stroke="#40DCCD" stroke-width="8" stroke-linecap="round" />
   <path d="M25 36 L24 19 L41 26Z" fill="#40DCCD" />

@@ -1,7 +1,7 @@
 {
-  "_comment": "播出模式定義。每個模式的來源、長度上限、shorts 池與掃描頻率都在這裡；換頻道或改參數只改這個檔。max_seconds=0 表示播全長。範例用 @YourChannel，請換成你自己的頻道 handle。",
+  "_comment": "Broadcast mode definitions. Each mode's source, length cap, shorts pool and rescan interval live here; changing channel or parameters means editing only this file. max_seconds=0 means full length. The example uses @YourChannel - replace it with your own channel handle.",
   "news": {
-    "label": "新聞模式",
+    "label": "News",
     "video_source": "https://www.youtube.com/@YourChannel/videos",
     "video_limit": 30,
     "max_seconds": 0,
@@ -9,11 +9,11 @@
     "shorts_count": 15,
     "shorts_seconds": 90,
     "refresh_seconds": 300,
-    "note": "切換下一支時重新掃描；有新片就從清單頭開始播。shorts 取最新 15 支。",
+    "note": "Rescans when moving to the next video; new uploads restart the list from the top. The shorts pool takes the newest 15.",
     "shorts_passes": 0
   },
   "promotion": {
-    "label": "推廣模式",
+    "label": "Promotion",
     "video_source": "https://www.youtube.com/@YourChannel/videos",
     "video_limit": 30,
     "max_seconds": 450,
@@ -21,11 +21,11 @@
     "shorts_count": 50,
     "shorts_seconds": 90,
     "refresh_seconds": 1800,
-    "note": "目的在推廣其它影片。每支最多播 450 秒（不必播完），shorts 取最新 50 支。",
+    "note": "Aimed at promoting the other videos. Each video plays at most 450 seconds (it need not finish); the shorts pool takes the newest 50.",
     "shorts_passes": 0
   },
   "test": {
-    "label": "測試模式",
+    "label": "Test",
     "video_source": "https://www.youtube.com/@YourChannel/videos",
     "video_limit": 3,
     "max_seconds": 180,
@@ -33,7 +33,7 @@
     "shorts_count": 6,
     "shorts_seconds": 90,
     "refresh_seconds": 0,
-    "note": "3 支 × 180 秒、shorts 6 支。不自動重新掃描。",
+    "note": "3 videos x 180 seconds, 6 shorts. No automatic rescan.",
     "shorts_passes": 0
   }
 }

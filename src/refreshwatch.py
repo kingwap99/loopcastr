@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""定期重新掃描來源清單；偵測到新影片或新 shorts 就重建，並在「下一個換片點」
-以連續位置更新播出端。
+"""Periodically rescan the source lists; when new videos or shorts appear, rebuild and hand
+the playout over at a continuous position.
 
-對應規格（新聞模式／推廣模式）：
-  切換下一支影片時重新掃描播放清單；如果有新的影片，再下一支影片就從頭開始輸播。
-  shorts 也以較高頻率同步更新清單。
+Spec it implements (news / promotion modes):
+  Rescan the playlist when moving to the next video; if there are new videos, the video
+  after that starts from the top of the list. The shorts list syncs at a higher rate.
 
-為什麼要等換片點：播出端是單一行程 concat 加 --stream_loop -1，清單只在啟動時
-讀取。更新時等目前片段播完，再把新清單旋轉到下一段才重啟，避免回到第一段。
+Why the boundary wait: the playout is one concat process with --stream_loop -1 and it reads
+its list only at startup. On an update, wait for the current segment to finish, rotate the
+new list to the next segment and only then restart, so the channel does not jump back to the
+first segment.
 
-重啟 system domain 的服務需要 root，所以這支建議用 root 跑（跟 com.loopcastr.health
-一樣），才不用把密碼放在環境變數裡；非 root 時會退回用 SUDO_PASS。
+Restarting a system-domain service needs root, so running this as root is recommended (like
+com.loopcastr.health) rather than putting a password in the environment; as a non-root user
+it falls back to SUDO_PASS.
 
-用法
-  sudo python3 refreshwatch.py --mode promotion      # 前景常駐
-  python3 refreshwatch.py --mode promotion --once     # 只檢查一次
+Usage
+  sudo python3 refreshwatch.py --mode promotion      # run in the foreground
+  python3 refreshwatch.py --mode promotion --once     # check once
 """
 
 import argparse
@@ -32,8 +35,9 @@ import playout_ctl as pctl
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 YTDLP = "/opt/homebrew/bin/yt-dlp"
-# 服務 label 前綴不寫死：改名前（loopcastr 之前叫 ytpl）的安裝是 com.ytpl.*，
-# 所以看這個目錄裡實際的 plist 決定。plist 的位置也兩種安裝都找。
+# The service label prefix is not hard-coded: installs from before the rename (loopcastr was
+# ytpl) are com.ytpl.*, so it is read from the plist actually present here. Both plist
+# locations are searched too.
 def service_prefix():
     try:
         for name in sorted(os.listdir(HERE)):
@@ -105,15 +109,16 @@ def notify(text):
 
 
 def next_boundary(local_json):
-    """下一個換片點（推算邏輯在 playout_ctl，跟分批建置共用）。"""
+    """The next segment boundary (the calculation lives in playout_ctl, shared with the
+    batched build)."""
     return pctl.next_boundary(local_json)
 
 
 def active_mode():
-    """目前播出端用的是哪個模式 —— 直接讀播出端 plist 的 PLAYLIST。
+    """Which mode the playout currently runs - read straight from the playout plist's PLAYLIST.
 
-    這樣做成 launchd 服務之後，切換模式（switch_edition.sh）會自動跟著換，
-    不用改服務設定。
+    That way, once this runs as a launchd service, switching mode (switch_edition.sh) is
+    followed automatically with no service reconfiguration.
     """
     if not os.path.exists(PLAYOUT_PLIST):
         return ""
@@ -131,7 +136,7 @@ def active_mode():
 
 
 def restart_playout():
-    """重啟播出端；回傳用過的指令（空字串＝失敗）。"""
+    """Restart the playout; return the command used (an empty string means failure)."""
     how = pctl.restart_playout()
     if not how:
         log("could not restart the playout (gui and system domain both failed)")

@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""等播出端繞回清單開頭，量測那一刻接收端有沒有縫。
+"""Wait for the playout to wrap back to the top of the list and measure whether the
+receiver sees a gap at that moment.
 
-播出端是單一行程 concat -stream_loop -1，時間軸「連續累加」（實測：第二輪
-結束的 pts ≈ 2×單輪長度），所以繞回時 DTS 不會掉回 0，用 DTS 當訊號會抓
-不到。這支改用「開播時間 + 單輪總長」推算循環點，在事件前後高頻取樣
-MediaMTX API。
+Playout is one concat -stream_loop -1 process whose timeline accumulates continuously
+(measured: the pts at the end of round two is about 2x the single-round length), so DTS
+does not fall back to 0 at the wrap and a DTS-based signal would miss it. This script
+instead derives the loop point from "start time + one-round length" and samples the
+MediaMTX API at high frequency around that moment.
 
-用法
-  python3 loopwatch.py                 # 自動推算循環點並等待
+Usage
+  python3 loopwatch.py                 # derive the loop point and wait for it
   python3 loopwatch.py --lead 45 --tail 75
-  python3 loopwatch.py --at 04:19:07   # 直接requested moment
+  python3 loopwatch.py --at 04:19:07   # measure at the given moment
 """
 
 import argparse
@@ -27,8 +29,8 @@ API = os.environ.get("API", "http://127.0.0.1:9997")
 PATH_NAME = os.environ.get("PATH_NAME", "live/main")
 PLAYOUT_LOG = os.path.join(HERE, "logs", "playout.log")
 PLAYLIST = os.path.join(HERE, "playlist-local.json")
-# 實際日誌格式：[playout] 2026-09-17 00:18:02 start #1
-# （2026-09-21 之前寫的是「第 1 次啟動」，舊日誌仍然讀得到）
+# Actual log format: [playout] 2026-09-17 00:18:02 start #1
+# (before 2026-09-21 it wrote the Chinese wording; old logs still parse)
 START_RE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"
                       r" (?:start #(\d+)|第 (\d+) 次啟動)")
 
@@ -40,7 +42,7 @@ def total_seconds(path):
 
 
 def last_start():
-    """回傳 (datetime, 第幾次啟動)。"""
+    """Return (datetime, start count)."""
     last = None
     with open(PLAYOUT_LOG, encoding="utf-8", errors="ignore") as fh:
         for line in fh:

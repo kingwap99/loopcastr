@@ -5,7 +5,7 @@
     <key>Label</key>
     <string>com.loopcastr.health</string>
 
-    <!-- 每 60 秒檢查一次鏈路。YouTube 端受限於 --youtube-every，最多 15 分鐘查一次。 -->
+    <!-- Checks the chain every 60 seconds. The YouTube side is limited by --youtube-every to once per 15 minutes. -->
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/python3</string>

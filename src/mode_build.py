@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""依「播出模式」建置整條內容鏈：掃描來源 → 落地 → 過場 → 部署 → 重建清單。
+"""Build the whole content chain for a broadcast mode: scan source -> land -> transitions -> deploy -> rebuild list.
 
-模式定義在 modes.json（news / promotion / test）。news 與 promotion 由
-refreshwatch.py 依 refresh_seconds 定期重新掃描。
+Modes are defined in modes.json (news / promotion / test). news and promotion are rescanned
+periodically by refreshwatch.py according to refresh_seconds.
 
-為什麼要分階段：播出端是單一行程 concat 加 --stream_loop -1，每個循環都會
-重開檔案；直接覆寫正在播的檔案，會讓它讀到沒有 moov 的半成品。所以一律先寫到
-暫存目錄，驗完再 mv 進去。暫存目錄放 /tmp，不放 media/ —— media/ 在 Spotlight
-索引範圍內，實測會讓 ffmpeg 在收尾階段停滯。
+Why it is staged: the playout is one concat process with --stream_loop -1 and it reopens files
+every loop, so overwriting a file that is on air would let it read a half-written file with no
+moov. Everything is therefore written to a staging directory first and moved in once it is
+verified. Staging lives in /tmp rather than media/, because media/ is inside the Spotlight index and (measured) makes ffmpeg stall while finishing.
 
-用法
-  python3 mode_build.py --mode promotion              # 全流程（不切換播出端）
-  python3 mode_build.py --mode promotion --switch     # 全流程 + 切換播出端
-  python3 mode_build.py --mode promotion --scan-only  # 只重新掃描母清單
+Usage
+  python3 mode_build.py --mode promotion              # full run, without switching the playout
+  python3 mode_build.py --mode promotion --switch     # full run plus switching the playout
+  python3 mode_build.py --mode promotion --scan-only  # rescan the master list only
 
-續傳：落地是否要處理是以「暫存目錄裡有沒有這個檔案」判斷，中斷後重跑只補缺的。
+Resume: whether landing has to run is decided by whether the file is already in staging, so a rerun after an interruption only fills the gaps.
 """
 
 import argparse
@@ -29,14 +29,14 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 MEDIA = os.path.join(HERE, "media")
 
-# 畫質與版面參數集中在 settings.json；這裡讀它，才不會有第二份寫死的值。
+# Quality and layout parameters live in settings.json; they are read from there so there is no second hard-coded copy.
 sys.path.insert(0, HERE)
 try:
     import build_local_content as BLC
 except ImportError:
     BLC = None
 
-import playout_ctl as pctl      # 換片點推算與重啟（跟 refreshwatch 共用）
+import playout_ctl as pctl      # boundary calculation and restarting (shared with refreshwatch)
 
 
 def setting(section, key, default):
@@ -62,8 +62,8 @@ def files_for(mode):
         "mother": os.path.join(HERE, "playlist-%s.json" % mode),
         "local": os.path.join(HERE, "playlist-%s-local.json" % mode),
         "concat": os.path.join(HERE, "concat-%s.txt" % mode),
-        # 內容每個模式一份：media/<模式>/。同一支影片在不同模式有不同長度上限時
-        # 才不會互相蓋掉，manifest 也各自一份（原始檔 media/.raw 仍共用）。
+        # One copy of the content per mode: media/<mode>/. When the same video has a different
+        # length cap per mode they cannot overwrite each other, and each keeps its own manifest (the raw files in media/.raw are still shared).
         "media": os.path.join(MEDIA, mode),
         "stage_ep": "/tmp/stage-ep-%s" % mode,
         "stage_tr": "/tmp/stage-tr-%s" % mode,
@@ -77,11 +77,11 @@ def is_active_mode(f):
 
 
 def passes_for(cfg, f):
-    """一輪裡影片要重複幾趟。
+    """How many passes over the videos one round contains.
 
-    過場是「第 i 支影片配第 i 支 short」，所以一輪只用到 shorts 池的前 N 支。
-    讓一輪包含多趟影片，shorts 就會接著往下輪 —— 例：30 支影片配 50 支 shorts
-    時 passes=2，第二趟從第 31 支 short 接著播。
+    A transition pairs video i with short i, so one round only uses the first N shorts of the pool.
+    Letting a round contain several passes carries the shorts onward: with 30 videos and 50 shorts,
+    passes=2 makes the second pass continue from short 31.
     """
     if cfg.get("shorts_passes"):
         return max(1, int(cfg["shorts_passes"]))
@@ -90,9 +90,9 @@ def passes_for(cfg, f):
     if os.path.exists(f["mother"]):
         n = len(json.load(open(f["mother"], encoding="utf-8"))["segments"])
     if n <= 1:
-        # 只有一支影片時不要跑多趟：那會變成同一支播 5 次（實測 .22 的 news：
-        # 母清單 1 支 → passes=5 → 一輪是同一支影片 ×5 ＋ 5 段不同過場，
-        # 看起來就像「只有一支影片、過場幾乎看不到」）。
+        # Do not run several passes when there is only one video: that plays the same video five
+        # times over (measured on .22 news: a master list of 1 gives passes=5, so a round is that video
+        # five times plus five different transitions, which looks like only one video with almost no transitions).
         return 1
     if pool and n:
         return max(1, min(5, -(-pool // n)))
@@ -131,7 +131,7 @@ def land(cfg, f, force=False, limit=0):
     if force:
         cmd.append("--force")
     if limit:
-        cmd += ["--limit", str(limit)]      # 這一輪只做幾支（分批建置用）
+        cmd += ["--limit", str(limit)]      # how many to do this round (used by the batched build)
     return run(cmd)
 
 
@@ -150,15 +150,15 @@ def transitions(cfg, f, passes, force=False, limit=0):
            "--passes", str(passes),
            "--out-dir", f["stage_tr"]]
     if cfg.get("video_limit"):
-        # 固定步幅：分批建置時集數會變，不固定的話已做好的過場會全部重做
+        # Fixed stride: the episode count changes during a batched build, and without a fixed
         cmd += ["--stride", str(cfg["video_limit"])]
     if force:
         cmd.append("--force")
     else:
-        # 指紋沒變的過場不重做（分批建置時只做新的）
+        # stride every finished transition would be redone. Unchanged fingerprints are skipped, so a batched build only makes the new ones.
         cmd += ["--skip-dir", f["media"]]
     if limit:
-        cmd += ["--limit", str(limit)]      # 只做前 N 集的過場
+        cmd += ["--limit", str(limit)]      # only build transitions for the first N episodes
     return run(cmd)
 
 
@@ -206,8 +206,8 @@ def fix_manifest(f):
 
 
 def rebuild_playlist(cfg, f, passes, mother=None):
-    """重跑一次（不帶 --out-dir、不帶 --force）：影片都已在 media/，所以只會
-    重新產生清單，並把 media/_tr_<id>.mp4 的過場插進去。"""
+    """Run once more (without --out-dir and without --force): the videos are already in media/, so this only
+    regenerates the list and inserts the media/_tr_<id>.mp4 transitions."""
     cmd = [sys.executable, os.path.join(HERE, "build_local_content.py"),
            "--playlist", mother or f["mother"],
            "--target", str(setting("media", "target", "720")), "--keep-raw",
@@ -219,10 +219,10 @@ def rebuild_playlist(cfg, f, passes, mother=None):
 
 
 def ready_mother(f):
-    """把「media/ 裡已經有檔案」的段落寫成一份暫存母清單。
+    """Write the segments whose files already exist in media/ as a temporary master list.
 
-    分批建置的中間輪要用它重建播出清單：直接拿完整母清單去重建，
-    build_local_content 會把還沒做的段落也一起做掉，分批就白做了。
+    The intermediate rounds of a batched build use it to rebuild the playout list: rebuilding from
+    the full master list would make build_local_content build the not-yet-done segments too, wasting the batching.
     """
     d = json.load(open(f["mother"], encoding="utf-8"))
     segs = [s for s in d["segments"]
@@ -236,11 +236,11 @@ def ready_mother(f):
 
 
 def batched_build(cfg, f, a, batch, bsize):
-    """先做第一批就開播，之後每批擴充一次。
+    """Go on air after the first batch, then extend once per batch.
 
-    為什麼要這樣：全部做完才開播的話，news（55 支全長）要等好幾小時。
-    分批之後第一批（例如 2 支）做完就能上線，剩下的在背景補。
-    每次擴充都在**下一個換片點**重啟播出端，所以觀眾不會看到內容跳回開頭。
+    Why: waiting for everything before going on air means hours of delay for news (55 full-length videos).
+    With batching, the first batch (say 2 videos) goes live and the rest is filled in behind it.
+    Every extension restarts the playout at the next segment boundary and rotates the list, so the audience never sees the content jump back to the top.
     """
     total = len(json.load(open(f["mother"], encoding="utf-8"))["segments"])
     passes = passes_for(cfg, f)
@@ -421,11 +421,11 @@ def main():
     ap.add_argument("--switch", action="store_true")
     ap.add_argument("--skip-transitions", action="store_true")
     ap.add_argument("--force", action="store_true",
-                    help="忽略指紋，影片與過場全部重做")
+                    help="ignore fingerprints and redo every video and transition")
     ap.add_argument("--first-batch", type=int, default=0,
-                    help="先做 N 支就開播，之後每批擴充一次（0＝全部做完才切換）")
+                    help="go on air after N videos and extend per batch (0 = wait for everything before switching)")
     ap.add_argument("--batch-size", type=int, default=0,
-                    help="第一批之後每批幾支（0＝用 --first-batch 的值）")
+                    help="how many videos per batch after the first (0 = use --first-batch)")
     a = ap.parse_args()
 
     modes = load_modes()
@@ -448,7 +448,7 @@ def main():
             return 1
         batch = int(a.first_batch or cfg.get("first_batch") or 0)
         if batch > 0:
-            # 第一批小、之後大一點：每批都要重啟一次播出端，批次太小會一直斷
+            # Small first batch, larger ones after: every batch restarts the playout once, and tiny batches keep cutting the stream
             bsize = int(a.batch_size or cfg.get("batch_size") or max(batch, 10))
             return batched_build(cfg, f, a, batch, max(1, bsize))
         if land(cfg, f, a.force) != 0:

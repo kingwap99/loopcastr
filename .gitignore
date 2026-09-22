@@ -1,5 +1,5 @@
-# ── 機密：絕對不進版控 ────────────────────────────────────────────
-# stream key、Telegram token、YouTube OAuth token、cookies 一律只留在機器上。
+# ── Secrets: never committed ───────────────────────────────────────
+# The stream key, Telegram token, YouTube OAuth token and cookies stay on the machine only.
 stream.key
 telegram.json
 youtube-oauth.json
@@ -10,7 +10,7 @@ webui-token
 work/playout/auto.key
 work/playout/auto.crt
 
-# ── 媒體檔：體積大且可重新產生 ─────────────────────────────────────
+# ── Media files: large and reproducible ────────────────────────────
 *.mp4
 *.mkv
 *.mov
@@ -20,7 +20,7 @@ work/playout/auto.crt
 *.png
 *.jpg
 
-# ── 執行期產物 ────────────────────────────────────────────────────
+# ── Runtime artifacts ──────────────────────────────────────────────
 logs/
 *.log
 *.jsonl
@@ -32,7 +32,7 @@ __pycache__/
 tmp/
 .DS_Store
 
-# 可重新產生的內容與清單（避免誤 commit 數 GB 的媒體檔）
+# Reproducible content and lists (keeps multi-GB media out of commits)
 media/
 media-test/
 playlist-local.json
@@ -42,5 +42,5 @@ stream.json
 concat.txt
 concat-test.txt
 
-# ── 中間產物與舊實驗（正式內容在 repo 根目錄）──────────────────────
+# ── Intermediate artifacts and old experiments (production content is in the repo root) ──
 work/

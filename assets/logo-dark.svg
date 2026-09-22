@@ -1,5 +1,5 @@
-<!-- loopcastr 主視覺（深色底）：Infinite Broadcast -->
-<!-- viewBox 比提案的 340 寬一點：標語 "ALWAYS ON. ALWAYS PLAYING." 在 340 會被切掉 -->
+<!-- loopcastr wordmark (dark background): Infinite Broadcast -->
+<!-- viewBox is a little wider than the proposed 340: the tagline "ALWAYS ON. ALWAYS PLAYING." gets clipped at 340 -->
 <svg viewBox="0 0 400 160" width="100%" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="lcgrad" x1="0" y1="0" x2="1" y2="1">
@@ -13,8 +13,8 @@
   <path d="M49 105 A43 43 0 0 0 120 107" fill="none" stroke="url(#lcgrad)" stroke-width="11" stroke-linecap="round" />
   <path d="M120 107 L120 130 L98 121 Z" fill="#6C63FF" />
   <path d="M69 58 Q69 54 74 57 L101 77 Q106 80 101 83 L74 103 Q69 106 69 100 Z" fill="#FFFFFF" />
-  <!-- 一個 text ＋ tspan："loop" 與 "castr" 交給排版引擎接著排。
-       用兩個獨立 text ＋ 固定 x 對位的話，字型一換（Inter → Arial）中間就會開一個縫。 -->
+  <!-- One text plus a tspan: the layout engine places "loop" and "castr" in sequence.
+       With two separate text elements and a fixed x offset, a font swap (Inter -> Arial) opens a gap. -->
   <text x="170" y="87" font-family="Inter,Arial,sans-serif" font-size="32" font-weight="700" letter-spacing="-1.4" fill="#F8FAFC">loop<tspan fill="#40E0D0">castr</tspan></text>
   <text x="172" y="111" font-family="Inter,Arial,sans-serif" font-size="9" font-weight="600" letter-spacing="2.2" fill="#8D9AB8">ALWAYS ON. ALWAYS PLAYING.</text>
 </svg>

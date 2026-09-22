@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""loopcastr 本機控制台：狀態、設定、建置動作。
+"""The loopcastr local console: status, settings and build actions.
 
-設計原則
-  - 只用標準庫。跟主程式一樣「clone 下來就能跑」，不必先建 venv。
-  - 預設只綁 127.0.0.1。要對外開放必須自己帶 token。
-  - 不以 root 執行，也不保管任何密碼：需要特權的動作只試 sudo -n（非互動），
-    失敗就明確告訴你要加哪一條 sudoers，不會把密碼餵進程式。
-  - 寫入類動作只做兩件事：改設定檔、呼叫既有 script。不重寫底層邏輯。
+Design principles
+  - Standard library only. Like the main programs, cloning the repo is enough to run it, with no venv.
+  - Binds to 127.0.0.1 by default. Exposing it requires a token of your own.
+  - Never runs as root and stores no password: privileged actions only try sudo -n (non-interactive) and
+    on failure tell you exactly which sudoers line to add, rather than feeding a password into the program.
+  - Write actions do only two things: edit the settings file and call existing scripts. The underlying logic is not reimplemented.
 
-用法
+Usage
   python3 webui.py                      # http://127.0.0.1:8787
   python3 webui.py --port 9000
-  python3 webui.py --host 0.0.0.0 --token-file webui-token   # 對外必帶 token
+  python3 webui.py --host 0.0.0.0 --token-file webui-token   # a token is required when exposing it
 """
 
 import argparse
@@ -31,14 +31,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# 控制台標題連到專案本身。只有這一份是專案自己的位址，不需要參數化。
+# The console title links to the project itself. This is the only project address, so it needs no parameter.
 REPO_URL = "https://github.com/kingwap99/loopcastr"
 PROJECT = "loopcastr"
 
-# 程式碼放哪裡（HERE）與資料放哪裡（PREFIX）分開。
-#   安裝後：src/ 會攤平到安裝目錄，兩者相同，一切都在 PREFIX 底下。
-#   從 repo 跑：程式在 src/，設定也在 src/，資料（media、logs）在安裝目錄。
-# 所以每個檔案都用 pick() 兩邊找，找不到才落在 PREFIX。
+# Where the code lives (HERE) is separate from where the data lives (PREFIX).
+#   Installed: src/ is flattened into the install directory, so both are the same and everything sits under PREFIX.
+#   Run from the repo: the code and settings are in src/ while the data (media, logs) is in the install directory.
+# So every file is looked up in both places with pick() and only lands in PREFIX when neither has it.
 PREFIX = HERE
 MEDIA = os.path.join(PREFIX, "media")
 LOGS = os.path.join(PREFIX, "logs")
@@ -82,9 +82,9 @@ PLAYOUT_START = re.compile(
     r" (?:start #([0-9]+)|第 ([0-9]+) 次啟動)")
 
 
-# ── 小工具 ──────────────────────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────────────────────
 def sh(cmd, timeout=6):
-    """跑一個指令並回傳 (rc, 輸出)。逾時或找不到指令都當成失敗，不丟例外。"""
+    """Run a command and return (rc, output). A timeout or a missing command counts as failure, without raising."""
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                            stdin=subprocess.DEVNULL)
@@ -102,7 +102,7 @@ def read_json(path, default=None):
 
 
 def write_json(path, data):
-    """原子寫入，並留一份 .bak。設定檔壞掉會讓整條鏈路起不來，所以不做半套。"""
+    """Write atomically and keep a .bak. A broken settings file takes the whole chain down, so nothing half-done is allowed."""
     if os.path.exists(path):
         try:
             with open(path, encoding="utf-8") as src:
@@ -129,7 +129,7 @@ def tail(path, n=40):
 
 
 def unquote(s):
-    """去掉 concat 清單每行外層的引號（不寫死引號字元，省得在原始碼裡打架）。"""
+    """Strip the outer quotes from each concat list line (the quote character is not hard-coded, to avoid quoting fights in the source)."""
     s = s.strip()
     for q in (chr(39), chr(34)):
         if len(s) >= 2 and s.startswith(q) and s.endswith(q):
@@ -155,9 +155,9 @@ def dirsize(path):
     return total
 
 
-# ── 來源網址驗證 ────────────────────────────────────────────────────
+# ── Source URL validation ───────────────────────────────────────────
 def _is_youtube(url):
-    """只接受 YouTube 家族的網址 —— 這個 API 會拿使用者給的網址去呼叫 yt-dlp。"""
+    """Only YouTube-family URLs are accepted: this API passes the URL it is given to yt-dlp."""
     if not url.lower().startswith(("http://", "https://")):
         return False
     host = url.split("//", 1)[1].split("/", 1)[0].lower()
@@ -166,7 +166,7 @@ def _is_youtube(url):
 
 
 def probe_sources(video_source, shorts_url):
-    """實際解析一次，確認填的網址是對的（不用等整條建置跑完才發現打錯）。"""
+    """Resolve once for real to confirm the URL is right (rather than finding the typo after a whole build)."""
     parts = []
     for label, url in (("頻道／清單", video_source), ("shorts", shorts_url)):
         if not url:
@@ -187,14 +187,14 @@ def probe_sources(video_source, shorts_url):
     return {"ok": True, "summary": "　｜　".join(parts)}
 
 
-# ── 設定表單的 schema ───────────────────────────────────────────────
-# (段落, 標題, [(key, 欄位標籤, 型別, 選項, 範圍, 說明)])
-# 表單由這份 schema 產生，所以新增旋鈕只要加一行；型別支援 text／int／float／bool／choice。
+# ── Settings form schema ────────────────────────────────────────────
+# (section, title, [(key, field label, type, options, range, help)])
+# The form is generated from this schema, so a new knob is one line; types are text / int / float / bool / choice.
 SETTINGS_SCHEMA = [
-    # (段落, 標題, [(key, 欄位標籤, 型別, 選項, 範圍, 說明, 預設值)])
-    # 表單由這份 schema 產生：新增旋鈕只要加一行。型別支援 text／int／float／bool／choice。
-    # 「預設值」是 settings.json 沒有這個 key 時表單要顯示什麼，也是程式的內建預設
-    # （兩邊必須一致，否則表單會顯示一個跟實際行為不同的數字）。
+    # (section, title, [(key, field label, type, options, range, help, default)])
+    # The form is generated from this schema: a new knob is one line. Types are text / int / float / bool / choice.
+    # The default is what the form shows when settings.json has no such key, and it is also the built-in
+    # default of the program (the two must agree, or the form shows a number that differs from the real behaviour).
     ("ui", "語言", [
         ("lang", "介面與畫面語言", "choice", ["zh", "en"], None,
          "後台右上角的切換鈕就是改這個；畫面字樣（首播日期、QR 說明）也跟著換", "zh"),
@@ -268,13 +268,13 @@ SETTINGS_SCHEMA = [
 ]
 
 
-# ── 狀態 ────────────────────────────────────────────────────────────
-# 用 pgrep 而不是 launchctl：查 system domain 的服務需要 root，而這支程式刻意
-# 不以 root 執行。行程在不在、日誌有沒有在動，一樣看得出來。
+# ── Status ──────────────────────────────────────────────────────────
+# pgrep is used rather than launchctl: querying system-domain services needs root, and this program
+# deliberately does not run as root. Whether a process exists and whether its log is moving can still be seen.
 PROCS = [
     ("mediamtx", "mediamtx"),
     ("playout", "playout.sh"),
-    # 播出端的 ffmpeg 一定帶 -stream_loop（concat 循環），用它才不會只在播預設清單時才對得上
+    # The playout ffmpeg always carries -stream_loop (the concat loop), so matching on it works for every list
     ("playout ffmpeg", "stream_loop"),
     ("publish", "yt_publish.sh"),
     ("publish ffmpeg", "live2/"),
@@ -305,9 +305,9 @@ def mtx(api, path_name):
         return {"ok": False, "error": str(exc)}
 
 
-# 服務（launchd job）清單。前端不再自己列一份，一律用 /api/status 回傳的。
-# label 前綴不寫死：改名前（loopcastr 之前叫 ytpl）的安裝是 com.ytpl.*，
-# 所以看這個目錄裡實際存在的 plist 決定用哪個前綴。
+# The service (launchd job) list. The front end no longer keeps its own copy and always uses what /api/status returns.
+# The label prefix is not hard-coded: installs from before the rename (loopcastr was ytpl) are com.ytpl.*,
+# so the prefix comes from the plist actually present in this directory.
 SERVICE_NAMES = ["mediamtx", "playout", "publish", "health", "refresh"]
 DEFAULT_PREFIX = "com.loopcastr."
 
@@ -353,7 +353,7 @@ def service_state(label, jobs):
         st["loaded"] = True
         st["pid"] = jobs[label]
     else:
-        # 系統 domain 的 job 不會出現在 `launchctl list`。
+        # System-domain jobs do not show up in `launchctl list`.
         rc, _out = sh(["launchctl", "print", "system/" + label], timeout=6)
         if rc == 0:
             st["loaded"] = True
@@ -423,7 +423,7 @@ def round_info():
 
 
 def content_info():
-    # 讀「播出端實際載入的那份 concat」：寫死 concat.txt 的話，播 test／news 時會顯示 0 段。
+    # Read the concat file the playout actually loaded: hard-coding concat.txt would show 0 segments while test or news is playing.
     list_path = loaded_edition().get("list") or CONCAT
     entries = []
     if os.path.exists(list_path):
@@ -462,9 +462,9 @@ def status(api, path_name):
     }
 
 
-# ── 開播檢查 ────────────────────────────────────────────────────────
-# 「檔案轉好了沒、播出端切換了沒、串流通了沒」是操作者最常問的三件事，
-# 直接算成一句結論顯示在頁面上，不要讓他自己讀 log。
+# ── Go-live check ───────────────────────────────────────────────────
+# Are the files built, is the playout switched and is the stream up: the three things an operator asks most,
+# computed into one verdict on the page instead of making them read the log.
 EDITION = {
     "live": ("playlist-local.json", "concat.txt"),
     "news": ("playlist-news-local.json", "concat-news.txt"),
@@ -569,15 +569,15 @@ def ready_map(api, path_name):
     return {m: check_ready(m, modes, api, path_name) for m in modes if m != "_comment"}
 
 
-# ── 動作（背景執行，一次一件）────────────────────────────────────────
+# ── Actions (background, one at a time) ─────────────────────────────
 TASK = {"running": False, "action": "", "started": "", "pid": None, "rc": None,
         "mode": "", "stopping": False, "adopted": False}
 TASK_LOCK = threading.Lock()
 
 
-# ── 行程樹（停止建置用）──────────────────────────────────────────────
-# 為什麼要看整棵樹：webui 拉起的 mode_build 會再開 build_local_content，後者再
-# 開 ffmpeg。只殺最上層的話，ffmpeg 會變成孤兒繼續吃 CPU、繼續寫檔。
+# ── Process tree (used by stop build) ───────────────────────────────
+# Why the whole tree matters: a mode_build started by the console starts build_local_content, which
+# starts ffmpeg. Killing only the top level leaves ffmpeg orphaned, still burning CPU and still writing files.
 def ps_snapshot():
     """一次 ps 取得整張表：ppid -> [pid] 與 pid -> stat。macOS 的 ps 沒有 --ppid。"""
     rc, out = sh(["ps", "-Ao", "pid=,ppid=,stat="], timeout=8)
@@ -785,8 +785,8 @@ def stop_task():
 
     kids, _info = ps_snapshot()
     targets = tree_pids(root, kids) if root else []
-    # launchd 的 refreshwatch 也會拉 mode_build，那是另一棵樹（我們不是它的父行程）。
-    # 同一個模式的一起收掉，否則按了停止，背景還有一個建置在跑。
+    # The launchd refreshwatch also starts mode_build, which is another tree (we are not its parent).
+    # Collect the same mode together, or pressing stop leaves another build running in the background.
     if action == "mode-build" and mode:
         for pid, m in find_build_pids(only_here=True).items():
             if pid in targets or pid == os.getpid():
@@ -795,7 +795,7 @@ def stop_task():
                 targets.append(pid)
     targets = sorted(set(targets))
 
-    # 先把「正在寫哪些檔案」記下來，殺掉之後行程就問不到了。
+    # Record which files are being written first: once the process is killed it cannot be asked.
     inflight = inflight_outputs(targets, mode)
     for pid in targets:
         try:
@@ -852,7 +852,7 @@ def build_cmd(action, body):
         if mode not in modes:
             return None, "沒有這個模式：%s" % mode
         src = str((modes.get(mode) or {}).get("video_source") or "").strip()
-        # 先擋掉註定失敗的建置：跑一場要下載數百 MB、花好幾分鐘。
+        # Block builds that are bound to fail up front: a run downloads hundreds of MB and takes minutes.
         if not src:
             return None, "%s 還沒填「頻道或播放清單網址」" % mode
         if "YourChannel" in src:
@@ -868,8 +868,8 @@ def build_cmd(action, body):
             cmd.append("--switch")
         return cmd, ""
     if action == "concat":
-        # 要用「目前選的那個模式」的清單，不能寫死正式版：
-        # 只建過 test 的機器上，playlist-local.json 根本不存在。
+        # Use the list of the mode that is selected, not a hard-coded production one:
+        # on a machine where only test was ever built, playlist-local.json does not exist at all.
         mode = str(body.get("mode") or "").strip() or "live"
         pl_name, list_name = EDITION.get(mode, EDITION["live"])
         src = os.path.join(PREFIX, pl_name)
@@ -901,7 +901,7 @@ def start_task(action, body):
     cmd, err = build_cmd(action, body)
     if err:
         return {"ok": False, "error": err}
-    # 建置一定要知道自己屬於哪個模式，停止時才知道要清哪個暫存目錄。
+    # A build must know its mode so that stop knows which staging directory to clean.
     mode = str(body.get("mode") or "").strip() if action == "mode-build" else ""
     with TASK_LOCK:
         if TASK.get("stopping"):
@@ -913,8 +913,8 @@ def start_task(action, body):
         with open(TASK_LOG, "w", encoding="utf-8") as fh:
             fh.write("$ %s\n" % " ".join(cmd))
         out = open(TASK_LOG, "a", encoding="utf-8")
-        # start_new_session：讓整棵建置樹自成一個 process group。停止時殺一組
-        # 就夠，不會誤殺 webui 自己（它跟 webui 同組過）。
+        # start_new_session puts the whole build tree in its own process group, so stop can kill one group
+        # without killing the console itself (they used to share a group).
         proc = subprocess.Popen(cmd, cwd=HERE, stdin=subprocess.DEVNULL,
                                 stdout=out, stderr=subprocess.STDOUT,
                                 start_new_session=True)
@@ -940,7 +940,7 @@ def task_state():
     return st
 
 
-# ── 需要特權的動作 ──────────────────────────────────────────────────
+# ── Actions that need privileges ────────────────────────────────────
 def start_service(label):
     """把「還沒載入」的服務裝起來：plist 從資料目錄複製到 ~/Library/LaunchAgents
     再 bootstrap。只搬既有檔案，不自己生設定。"""
@@ -961,7 +961,7 @@ def start_service(label):
     rc, out = sh(["launchctl", "bootstrap", "gui/%d" % os.getuid(), dst], timeout=20)
     if rc == 0:
         return {"ok": True, "how": "launchctl bootstrap gui/%d %s" % (os.getuid(), dst)}
-    # 已經載入過的 job 再 bootstrap 會失敗，那就用 kickstart 讓它跑起來。
+    # Bootstrapping an already loaded job fails, so kickstart is used to get it running.
     rc2, _o2 = sh(["launchctl", "kickstart", "gui/%d/%s" % (os.getuid(), label)],
                   timeout=15)
     if rc2 == 0:
@@ -1077,7 +1077,7 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if not self._authed():
             return self._send(401, {"error": "需要 token"})
-        # 只收帶自訂標頭的 JSON：跨站表單無法帶自訂標頭，這一條同時擋掉 CSRF。
+        # Only JSON with the custom header is accepted: a cross-site form cannot set it, so this blocks CSRF too.
         if self.headers.get("X-Ytpl") != "1":
             return self._send(400, {"error": "缺少 X-Ytpl 標頭"})
         body = self._body()
@@ -1135,8 +1135,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prefix", default=HERE,
-                    help="資料目錄（預設＝本檔所在目錄）。安裝後不需指定；"
-                         "直接從 repo 跑時指向套件根目錄")
+                    help="data directory (default: the directory of this file). Not needed once "
+                         "installed; when running straight from the repo point it at the package root")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--api", default=os.environ.get("API", "http://127.0.0.1:9997"))
@@ -1144,7 +1144,7 @@ def main():
     ap.add_argument("--token-file", default=os.path.join(HERE, "webui-token"))
     a = ap.parse_args()
     set_prefix(a.prefix)
-    # 重啟前由這個控制台拉起的建置還活著，先把狀態認回來（不然會允許再按一次）。
+    # A build started by this console before the restart is still alive, so adopt its state (otherwise another could be started).
     adopt_running_build()
 
     token = ""
@@ -1175,14 +1175,14 @@ def main():
     return 0
 
 
-# PAGE 必須在 if __name__ 之前定義：以腳本執行時那一行會直接進入
-# serve_forever()，寫在它後面的定義都來不及跑到（實測踩過：GET / 回空的）。
-# ── 語言（後台介面）─────────────────────────────────────────────────
-# 做法：原始碼一律寫中文，回給瀏覽器之前把整份字串換掉（HTML、JS 字面值、
-# 以及 API 回的 JSON 都是）。這樣不必在頁面裡散佈佔位符，翻譯表也只有一處。
-# 注意：英文翻譯裡不要出現雙引號或反斜線 —— 字串會直接塞進 HTML／JS／JSON。
+# PAGE must be defined before if __name__: running as a script goes straight into
+# serve_forever(), and definitions after it never run (measured: GET / returned empty).
+# ── Language (console interface) ────────────────────────────────────
+# Approach: the source is written in Chinese and the whole string is replaced before it reaches the
+# browser (HTML, JS literals and the JSON the API returns). That avoids scattering placeholders through the page and keeps one translation table.
+# Note: an English translation must not contain a double quote or a backslash, because the string is inserted straight into HTML / JS / JSON.
 UI_TEXT = {
-    # ── 頁面骨架
+    # ── Page skeleton
     " 控制台": " console",
     "① 來源設定": "1. Sources",
     "② 開始直播": "2. Go live",
@@ -1219,7 +1219,7 @@ UI_TEXT = {
         "Start copies the plist from the data directory into ~/Library/LaunchAgents and "
         "bootstraps it.\nSystem-domain services need non-interactive sudo; on failure the "
         "page tells you which sudoers line to add.",
-    # ── 按鈕與表單
+    # ── Buttons and form
     "建置並切換（開始直播）": "Build and switch (go live)",
     "只建置，不切換": "Build only",
     "只掃描來源": "Scan sources only",
@@ -1254,7 +1254,7 @@ UI_TEXT = {
     "%s 不存在；這個模式要先掃描過": "%s does not exist; scan this mode first",
     "新聞模式": "News mode",
     "（modes.json 裡沒有可編輯的模式）": "(no editable modes in modes.json)",
-    # ── 狀態與訊息
+    # ── Status and messages
     "可以開始直播": "ready to go live",
     "已經轉好、也切換完成（%s），串流正常": "built and switched (%s); the stream is healthy",
     "還沒建置內容": "no content built yet",
@@ -1287,7 +1287,7 @@ UI_TEXT = {
     "少了 %d 個：%s": "%d missing: %s",
     "%d 段、單輪約 %d 分": "%d segments, about %d min per round",
     "剛剛": "just now",
-    # ── 動作與錯誤
+    # ── Actions and errors
     "已開始：": "started: ",
     "無法開始：": "cannot start: ",
     "已送出停止：": "stop sent: ",
@@ -1356,7 +1356,7 @@ UI_TEXT = {
     "已寫入 %s（%s）": "wrote %s (%s)",
     "越快＝同流量下畫質越差；veryfast 是多數情況的平衡點":
         "faster means worse quality at the same bitrate; veryfast is the usual balance",
-    # ── settings.json 表單
+    # ── settings.json form
     "畫質與流量": "Quality and traffic",
     "畫面元素": "On-screen elements",
     "內容處理": "Content handling",
@@ -1440,7 +1440,7 @@ UI_TEXT = {
     "%s：失敗　%s": "%s: failed　%s",
     "%s：未填": "%s: empty",
     "%s：只接受 youtube.com／youtu.be 網址": "%s: only youtube.com / youtu.be URLs",
-    # ── 啟動時的訊息
+    # ── Messages at startup
     "%s 控制台：http://%s:%d/   （API %s，路徑 %s）":
         "%s console: http://%s:%d/   (API %s, path %s)",
     "拒絕啟動：--host %s 等於對外開放，必須提供 token。":
@@ -1486,7 +1486,7 @@ def localize(text, lang=None):
     return _LOC_RE.sub(lambda m: T(m.group(0), lang), text)
 
 
-# 只翻「我們自己產生的訊息欄位」，不動使用者資料（模式名稱、影片標題、路徑）。
+# Only messages we generate are translated; user data (mode names, video titles, paths) is left alone.
 LOC_KEYS = ("short", "why", "error", "hint", "note", "detail", "how")
 
 
@@ -2104,7 +2104,7 @@ pollTask();
 setInterval(refresh, 5000);
 </script></body></html>"""
 
-# 佔位符在字串裡換掉，不用 %-格式化（CSS 裡有 width:100% 這種東西）。
+# Placeholders are substituted in the string rather than with %-formatting (CSS contains things like width:100%).
 PAGE = PAGE.replace("__REPO_URL__", REPO_URL).replace("__PROJECT__", PROJECT)
 
 

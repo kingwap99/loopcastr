@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""產生 T-07 用的縮短測試版：每集剪成固定秒數，右上角燒上流水號。
+"""Produce the shortened test edition for T-07: each episode cut to a fixed length with a burned-in sequence number.
 
-為什麼要自己畫字：目標機兩台 ffmpeg 都沒有 freetype（沒有 drawtext），也沒有
-PIL／ImageMagick，而 Chrome 無頭在「沒有圖形登入」的機器上產不出截圖。
-所以這裡用純標準函式庫寫 PNG（zlib + struct）並自帶 5x7 點陣數字字型。
+Why the text is drawn by hand: both target machines have an ffmpeg without freetype (no drawtext) and no
+PIL or ImageMagick, and headless Chrome cannot produce screenshots on a machine with no graphical login.
+So the PNG is written with the standard library only (zlib + struct), with a built-in 5x7 bitmap digit font.
 
-產出
-  media-test/<NN>.mp4      每集前 N 秒，右上角有流水號
+Output
+  media-test/<NN>.mp4      the first N seconds of each episode with a sequence number at the top right
   media-test/_transition.mp4
-  playlist-test.json       對應的播出清單（集數與過場交錯）
+  playlist-test.json       the matching playout list (episodes interleaved with transitions)
 
-用法
-  python3 build_test_edition.py                 # 預設每集 180 秒
+Usage
+  python3 build_test_edition.py                 # 180 seconds per episode by default
   python3 build_test_edition.py --seconds 120
-  python3 build_test_edition.py --limit 3       # 只做前 3 集（試跑）
+  python3 build_test_edition.py --limit 3       # only the first 3 episodes (trial run)
 """
 
 import argparse
@@ -47,7 +47,7 @@ FONT = {
 
 
 def write_png(path, w, h, rows):
-    """rows: list of bytearray，每列 w*4 bytes（RGBA）。"""
+    """rows: list of bytearray, each row w*4 bytes (RGBA)."""
     raw = b"".join(b"\x00" + bytes(r) for r in rows)
 
     def chunk(tag, data):
@@ -64,7 +64,7 @@ def write_png(path, w, h, rows):
 
 
 def render_number(n, path, scale=16, outline=2):
-    """把數字畫成白字黑邊、背景透明的 PNG。"""
+    """Draw digits as a PNG with white text, a black outline and a transparent background."""
     text = str(n)
     tw = len(text) * 6 - 1
     th = 7
@@ -82,13 +82,13 @@ def render_number(n, path, scale=16, outline=2):
                 if g[y][x] == "1":
                     src[ob + y][x0 + x] = 1
 
-    # 黑邊：把每個亮點往外擴張，落在外圍的畫黑
+    # Outline: dilate every lit pixel and paint the outside ring black
     rows = []
     for y in range(H):
         row = bytearray()
         for x in range(W):
             if src[y][x]:
-                row += b"\xff\xff\xff\xff"      # 白
+                row += b"\xff\xff\xff\xff"      # white
                 continue
             near = False
             for dy in range(-ob, ob + 1):
@@ -105,7 +105,7 @@ def render_number(n, path, scale=16, outline=2):
             row += b"\x00\x00\x00\xff" if near else b"\x00\x00\x00\x00"
         rows.append(row)
 
-    # 放大
+    # Upscale
     big = []
     for row in rows:
         px = bytearray()
@@ -186,7 +186,7 @@ def main():
                 print("OK   %02d %-14s %s" % (i, sid, out), flush=True)
     print("encoding done OK=%d FAIL=%d in %.0f s" % (done, fail, time.time() - t0))
 
-    # 組測試清單：集數與過場交錯
+    # Assemble the test list: episodes interleaved with transitions
     segs = []
     for i, seg in enumerate(eps, 1):
         out = os.path.join(OUTDIR, "%02d.mp4" % i)

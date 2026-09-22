@@ -1,27 +1,27 @@
 #!/bin/bash
-# 切換播出端要播哪一版清單。
+# Switch which list the playout broadcasts.
 #
-#   ./switch_edition.sh live       正式版（playlist-local.json / concat.txt）
-#   ./switch_edition.sh news       新聞模式（playlist-news-local.json / concat-news.txt）
-#   ./switch_edition.sh promotion  推廣模式（playlist-promotion-local.json / concat-promotion.txt）
-#   ./switch_edition.sh test       測試模式（playlist-test-local.json / concat-test.txt）
-#   ./switch_edition.sh            只顯示目前是哪一版
+#   ./switch_edition.sh live       production (playlist-local.json / concat.txt)
+#   ./switch_edition.sh news       news mode (playlist-news-local.json / concat-news.txt)
+#   ./switch_edition.sh promotion  promotion mode (playlist-promotion-local.json / concat-promotion.txt)
+#   ./switch_edition.sh test       test mode (playlist-test-local.json / concat-test.txt)
+#   ./switch_edition.sh            show which list is active
 #
-# 模式定義（來源、長度上限、shorts 池、掃描頻率）在 modes.json，由 mode_build.py 建置。
+# Mode definitions (source, length cap, shorts pool, rescan interval) live in modes.json and are built by mode_build.py.
 #
-# 為什麼要有這支：測試版是暫時的（3 分鐘＋流水號浮水印），測完一定要切回來，
-# 否則頻道會一直播測試片段。切換會改寫播出端 plist、重啟服務，並重新掛上
-# 循環觀測 loopwatch（因為單輪長度變了，循環點也要重算）。
+# Why this exists: the test edition is temporary (3 minutes plus a sequence watermark) and must be
+# switched back after testing, or the channel keeps playing test clips. Switching rewrites the playout
+# plist, restarts the service and reattaches loopwatch (a different round length means the loop point is recomputed).
 #
-# 需要 sudo（改 /Library/LaunchDaemons 與重啟 system domain 服務）。
+# Needs sudo (it writes /Library/LaunchDaemons and restarts system-domain services).
 #
-# 注意：ssh 進來的 locale 不是 UTF-8，所以變數後面緊接中文（例如全形括號）
-# 時必須寫成 ${var}，否則 bash 會把中文字的首位元組當成變數名稱的一部分。
+# Note: the locale of an ssh session is not UTF-8, so when a variable is followed directly by CJK
+# text (a full-width bracket, say) it must be written as ${var}, or bash takes the first byte of that text as part of the name.
 set -u
 export PATH=/opt/homebrew/bin:$PATH
 
-# 非互動 session 裡 sudo 的快取不生效（快取綁 tty），所以特權動作要能自己
-# 帶密碼。給 SUDO_PASS 環境變數即可，例如：
+# In a non-interactive session the sudo cache does not apply (the cache is tied to a tty), so
+# privileged actions must carry the password themselves. Set SUDO_PASS, for example:
 #   SUDO_PASS=xxx ./switch_edition.sh live
 sudo_do() {
   if [ -n "${SUDO_PASS:-}" ]; then
@@ -34,8 +34,8 @@ sudo_do() {
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PB=/usr/libexec/PlistBuddy
 
-# label 前綴不寫死：改名前（loopcastr 之前叫 ytpl）的安裝是 com.ytpl.*，
-# 所以看這個目錄裡實際的 plist 檔名決定。
+# The label prefix is not hard-coded: installs from before the rename (loopcastr was ytpl) are com.ytpl.*,
+# so it is taken from the plist filename actually present in this directory.
 SVC_PREFIX=com.loopcastr.
 for f in "$HERE"/com.*.playout.plist; do
   [ -f "$f" ] || continue
@@ -45,10 +45,10 @@ for f in "$HERE"/com.*.playout.plist; do
 done
 PLIST="$HERE/${SVC_PREFIX}playout.plist"
 
-# 服務可能裝在兩個地方：system domain 的 LaunchDaemon（開機就起，需要 root），
-# 或使用者自己的 gui domain LaunchAgent（install.sh --agents，不需要 root）。
-# 切換要改的是「實際被載入的那一份」—— 改錯地方會變成「回報切換成功但根本沒換」
-# （實測踩過：plist 改了、載入的那份沒改，播出端照樣播舊的）。
+# The service can be installed in two places: a system-domain LaunchDaemon (starts at boot, needs root)
+# or the user gui-domain LaunchAgent (install.sh --agents, no root needed).
+# What must be changed is the copy that is actually loaded; changing the wrong one reports a
+# successful switch that never happened (measured: the plist was edited but the loaded copy was not).
 INSTALLED="/Library/LaunchDaemons/${SVC_PREFIX}playout.plist"
 LABEL="${SVC_PREFIX}playout"
 if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
@@ -84,7 +84,7 @@ if [ ! -f "$HERE/$WANT_PL" ]; then
   exit 3
 fi
 
-# 先把 concat 清單重建一次（內容有變動時才不會用到舊的）
+# Rebuild the concat list first, so a changed list is not left stale
 python3 "$HERE/make_concat_list.py" "$HERE/$WANT_PL" -o "$HERE/$WANT_LIST" --base-dir "$HERE" || exit 4
 
 $PB -c "Set :EnvironmentVariables:PLAYLIST $HERE/$WANT_PL" "$PLIST"
@@ -92,7 +92,7 @@ $PB -c "Set :EnvironmentVariables:LIST $HERE/$WANT_LIST" "$PLIST"
 
 case "$SCOPE" in
   gui)
-    cp "$PLIST" "$INSTALLED"                 # 載入的是這一份，一定要覆蓋它
+    cp "$PLIST" "$INSTALLED"                 # this is the copy that is loaded, so it must be overwritten
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
     launchctl bootstrap "gui/$(id -u)" "$INSTALLED" || exit 5
     ;;
@@ -104,8 +104,8 @@ case "$SCOPE" in
     sudo_do launchctl bootstrap system "$INSTALLED" || exit 5
     ;;
   none)
-    # 服務還沒被載入（例如全新安裝、內容才剛建好）：直接把剛寫好的這份 plist 載起來。
-    # 沒有這一段的話，第一次「建置並切換」只會印警告、播出端永遠不會動。
+    # The service is not loaded yet (a fresh install, or content that was just built): load the plist that was just written.
+    # Without this, the first build-and-switch only prints a warning and the playout never starts.
     echo "service ${LABEL} is not loaded yet; loading it now"
     if [ -f "$HOME/Library/LaunchAgents/${LABEL}.plist" ]; then
       cp "$PLIST" "$HOME/Library/LaunchAgents/${LABEL}.plist"
@@ -120,8 +120,8 @@ case "$SCOPE" in
       SCOPE=system
       INSTALLED="/Library/LaunchDaemons/${LABEL}.plist"
     elif [ -f "$PLIST" ]; then
-      # plist 還在安裝目錄、還沒裝進 launchd（install.sh 因為「還沒有內容」跳過安裝，
-      # 或是只裝了 mediamtx／webui）。照控制台「啟動」的做法：裝成 LaunchAgent。
+      # The plist is still in the install directory and not registered with launchd (install.sh skipped
+      # installing it because there was no content yet, or only mediamtx/webui were installed). Follow the console start: install it as a LaunchAgent.
       echo "installing ${LABEL} as a LaunchAgent"
       mkdir -p "$HOME/Library/LaunchAgents"
       cp "$PLIST" "$HOME/Library/LaunchAgents/${LABEL}.plist"
@@ -144,7 +144,7 @@ else
   sudo_do launchctl list | grep -i "${LABEL}" || true
 fi
 
-# 重新掛循環觀測（單輪長度變了，循環點要重算）
+# Reattach the loop observer (a different round length means the loop point is recomputed)
 pkill -f 'loopwatc[h].py' 2>/dev/null
 sleep 1
 nohup python3 "$HERE/loopwatch.py" --playlist "$HERE/$WANT_PL" --lead 45 --tail 90 \

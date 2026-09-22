@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""把文字畫成「白字黑邊、背景透明」的 PNG，給 ffmpeg overlay 用。
+"""Render text as white-on-black-outline PNGs with a transparent background, for overlay.
 
-優先走 PIL ＋ 系統中文字型（STHeiti），所以可以畫中文（例如「首播日期：」）。
-只有在 PIL 或字型都拿不到時，才退回內建的 5x7 點陣字型 —— 那組只涵蓋數字
-與 - / . 空白，畫不出中文。
+PIL plus a system CJK font (STHeiti) is preferred, so CJK text can be drawn; the shipped
+default captions are CJK. Only when PIL or the fonts are unavailable does it fall back to
+the built-in 5x7 bitmap font, which covers digits and - / . and space only and cannot draw
+CJK text.
 
-用法
+Usage
   from wmtext import render
-  render("首播日期：2026-09-03", "/tmp/date.png", size=44, stroke=4)
+  render("First aired: 2026-09-03", "/tmp/date.png", size=44, stroke=4)
 """
 
 import os
@@ -21,7 +22,7 @@ FONT_CANDIDATES = [
     "/System/Library/Fonts/STHeiti Light.ttc",
 ]
 
-# ── 點陣後備字型（畫不出中文，只在沒有 PIL 時用）────────────────────
+# ── Bitmap fallback font (cannot draw CJK; used only when PIL is missing) ──
 FONT = {
     "0": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
     "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
@@ -59,7 +60,7 @@ def _write_png(path, w, h, rows):
 def _render_bitmap(text, path, scale=6, outline=2):
     glyphs = [FONT[c] for c in text if c in FONT]
     if not glyphs:
-        raise ValueError("點陣字型畫不出這些字元：%r" % text)
+        raise ValueError("the bitmap font cannot draw these characters: %r" % text)
     tw, th = len(glyphs) * 6 - 1, 7
     W, H = tw + 2 * outline, th + 2 * outline
     src = [[0] * W for _ in range(H)]
@@ -96,17 +97,18 @@ def _render_bitmap(text, path, scale=6, outline=2):
 
 def render_countdown_strip(prefix, total, path, size=28, pad=12, radius=12,
                             stroke=3, pre="剩餘 ", suf=""):
-    """把每一秒的倒數畫成「一張直條圖」，回傳 (單張寬, 單張高)。
+    """Draw the per-second countdown as one tall strip; return (tile width, height).
 
-    為什麼不是一秒一個檔案的序列：1 fps 的序列輸入跟 30 fps 的主畫面在
-    overlay 裡對不起來，整層會完全不見，而且 ffmpeg 不會報任何錯（實測）。
-    改成一張長條 ＋ 時間裁切，就跟跑馬燈用的是同一套已驗證可行的機制。
+    Why not one file per second: a 1 fps sequence input does not line up with the 30 fps
+    main picture inside overlay, the whole layer disappears, and ffmpeg reports no error at
+    all (measured). One long strip plus a time-based crop instead reuses the mechanism
+    already proven by the marquee.
     """
     from PIL import Image, ImageDraw, ImageFont
 
     font_path = next((p for p in FONT_CANDIDATES if os.path.exists(p)), None)
     if not font_path:
-        raise RuntimeError("找不到可用的中文字型")
+        raise RuntimeError("no usable CJK font was found")
     f = ImageFont.truetype(font_path, size)
     probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
     n = int(total)
@@ -131,12 +133,13 @@ def render_countdown_strip(prefix, total, path, size=28, pad=12, radius=12,
 
 
 def render_badge(text, path, size=28, pad=12, radius=12, stroke=3):
-    """畫一個圓角小標籤（深色半透明底 ＋ 白字），例如剩餘時間的倒數。回傳 (寬, 高)。"""
+    """Draw a small rounded badge (dark translucent panel, white text), such as the
+    remaining-time countdown. Return (width, height)."""
     from PIL import Image, ImageDraw, ImageFont
 
     font_path = next((p for p in FONT_CANDIDATES if os.path.exists(p)), None)
     if not font_path:
-        raise RuntimeError("找不到可用的中文字型")
+        raise RuntimeError("no usable CJK font was found")
     f = ImageFont.truetype(font_path, size)
     probe = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
     box = probe.textbbox((0, 0), text, font=f, stroke_width=stroke)
@@ -157,20 +160,21 @@ def render_badge(text, path, size=28, pad=12, radius=12, stroke=3):
 def render_link_button(url, path, caption="▶ 看原片", size=30,
                        qr_px=120, pad=16, radius=18, gap=14,
                        caption_above=False, show_url=True):
-    """畫一個「連結按鈕」：QR 與說明、短網址垂直堆疊，外框是圓角半透明面板。
+    """Draw a link button: the QR, its caption and the short URL stacked in a rounded panel.
 
-    直播畫面本身不能被點擊（影片像素不是 UI），所以這是視覺提示：觀眾可以
-    掃 QR 或照著打短網址。真正可點的連結要靠 YouTube 的說明欄或聊天室。
+    The live picture itself cannot be clicked (video pixels are not UI), so this is a visual
+    hint: viewers scan the QR or type the short URL. A genuinely clickable link has to come
+    from the YouTube description or chat.
 
-    caption_above=True 時說明放在 QR 上方（過場的「追劇去」就是這樣用），
-    否則說明在 QR 下方。
+    With caption_above=True the caption sits above the QR (that is how the transition caption
+    is used); otherwise it sits below.
     """
     from PIL import Image, ImageDraw, ImageFont
     import qrcode
 
     font_path = next((p for p in FONT_CANDIDATES if os.path.exists(p)), None)
     if not font_path:
-        raise RuntimeError("找不到可用的中文字型")
+        raise RuntimeError("no usable CJK font was found")
     f1 = ImageFont.truetype(font_path, size)
     f2 = ImageFont.truetype(font_path, int(size * 0.75))
 
@@ -230,14 +234,16 @@ def render_link_button(url, path, caption="▶ 看原片", size=30,
 
 def render_marquee_strip(text, path, tile_gap=220, size=44, stroke=4,
                          copies=2, pad=6):
-    """把文字做成可無縫捲動的長條圖。回傳 (長條寬, 高, 單一週期寬)。
+    """Build a seamlessly scrollable strip of text. Return (strip width, height, one period).
 
-    為什麼不直接移動文字：光限制起始位置不夠 —— 文字往左捲出去時照樣會壓過
-    左邊的東西（例如原片左上角的 logo）。改成「寬長條 ＋ 固定視窗裁切」之後，
-    文字永遠不會畫到視窗外，要避開哪一塊就只要調整視窗位置。
+    Why not simply move the text: clamping the start position is not enough - as the text
+    scrolls out to the left it still paints over whatever is there (such as the original
+    video's top-left logo). With a wide strip plus a fixed crop window the text can never be
+    drawn outside the window, and avoiding a region is just a matter of moving the window.
 
-    文字在長條上重複 copies 次、每次間隔 tile_gap，所以只要把裁切視窗的 x
-    對週期（文字寬 ＋ 間隔）取模，就能無限捲動而不會出現空白。
+    The text repeats `copies` times along the strip with `tile_gap` between repeats, so taking
+    the crop window's x modulo the period (text width + gap) scrolls forever with no blank
+    frames.
     """
     from PIL import Image, ImageDraw, ImageFont
 
@@ -263,7 +269,8 @@ def render_marquee_strip(text, path, tile_gap=220, size=44, stroke=4,
 
 
 def render(text, path, size=44, stroke=4, scale=6, outline=2, pad=6):
-    """畫出 text，回傳 (寬, 高)。有 PIL＋中文字型就用它，否則退回點陣。"""
+    """Draw text and return (width, height). Uses PIL plus a CJK font when available,
+    otherwise the bitmap font."""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError:

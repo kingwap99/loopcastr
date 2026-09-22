@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""獨立觀測器：輪詢 MediaMTX API，報告某條路徑的離線與零成長區間。
+"""Standalone observer: polls the MediaMTX API and reports offline and zero-growth
+windows for one path.
 
-relay.py --observe 把觀測做在行程內；這支是同一套量測的獨立版本，
-用途是驗收「不是 relay 在推」的播出方式（例如單一行程 concat 播整份清單）。
+relay.py --observe measures inside the process; this is a standalone version of the
+same measurement, used to sign off on playout styles where relay is not the publisher
+(for example a single concat process playing the whole list).
 
-用法
-  python3 gapwatch.py [API] [path] [秒數]
+Usage
+  python3 gapwatch.py [API] [path] [seconds]
   python3 gapwatch.py http://127.0.0.1:9997 live/main 80
 """
 

@@ -1,36 +1,36 @@
 #!/usr/bin/env python3
 """
-方案 A：行程接力（Process Relay）v2 — yt_playlist2yt_Livestream
+Option A: process relay v2 - yt_playlist2yt_Livestream
 
-v2 相對 v1 的三個修正
-  1. 看門狗：改用 ffmpeg 的 -progress 輸出（out_time_us）當健康指標。
-     停滯超過 --watchdog 秒就砍掉重開，直播段並會重新解析 URL。
-     這個指標與輸出目的地無關，所以 target 換成 YouTube RTMP 也照樣有效。
-  2. 排程漂移：stop 由「實際 start + seconds」推算，下一段的 start 也從實際 start 推算，
-     不再於啟動時把整條時間軸算死（v1 的已知缺陷）。
-  3. 觀測噪音：改用 MediaMTX /v3/paths/list，不再讓 API 日誌被 404 灌滿。
+Three fixes in v2 over v1
+  1. Watchdog: use the ffmpeg -progress output (out_time_us) as the health signal.
+     A stall longer than --watchdog seconds kills and restarts it, and a live segment re-resolves its URL.
+     The signal is independent of the output destination, so it works with a YouTube RTMP target too.
+  2. Schedule drift: stop is derived from the real start plus seconds, and the next start from the real start too,
+     instead of fixing the whole timeline at startup (a known flaw in v1).
+  3. Observation noise: use MediaMTX /v3/paths/list so the API log is no longer flooded with 404s.
 
-v3（本輪新增）— 來源 URL 生命週期
-   manifest URL 有 expire（YouTube 實測 21600s = 6 小時）而且綁「解析當下的
-   公網 IP」，所以啟動時解析一次、之後一路沿用在 24/7 場景一定失效。
-   - 每條 URL 都跟解析時間一起存（RESOLVED_AT）
-   - --url-max-age：沿用上限（預設 1800s），超過就重解析
-   - --url-expiry-margin：距到期不足此秒數就重解析（預設 300s）
-  - live 段在 url-max-age 到點時主動 takeover 換手，換手 0.34s 而不是等它斷
-  - 排定換手與故障retry分開計數（refreshes / restarts），不吃彼此的額度
+v3 (added this round) - source URL lifetime
+   A manifest URL carries an expire (measured 21600s = 6 hours on YouTube) and is bound to the public IP
+   at resolve time, so resolving once at startup and reusing it forever is bound to fail in a 24/7 setting.
+   - Every URL is stored together with its resolve time (RESOLVED_AT)
+   - --url-max-age: reuse limit (default 1800s), re-resolved beyond it
+   - --url-expiry-margin: re-resolve when the time left to expiry is under this (default 300s)
+  - A live segment takes over actively when url-max-age is reached: a 0.34s handover instead of waiting for a drop
+  - Planned handovers and failure retries are counted separately (refreshes / restarts) so neither eats the other's budget
 
-v4（本輪新增）— 自有內容落地 + 反 bot 封鎖
-  YouTube 對「同一個對外 IP 的匿名 player 請求」會回 LOGIN_REQUIRED
-  "Sign in to confirm you're not a bot"。實測 PO Token（bgutil http provider，
-  已確認真的有產出 token）與 TLS 偽裝都救不了，只有登入 session 有效。
-  所以新增兩件事：
-  - file 片段型態：直接播本機檔案，完全不必碰 YouTube。內容先用
-    fetch_content.sh 落地一次，24/7 播出就再也不會被 bot 檢查影響，
-    順便也除掉了來源 URL 6 小時過期與 googlevideo 中途 reset 兩個風險。
-  - --cookies：需要直接拉 YouTube 時（含聯播）帶上 cookies.txt 通過檢查。
-  - --check：不播出，只把所有來源解析過一輪並回報可用性。
+v4 (added this round) - landing your own content and beating the bot block
+  YouTube answers LOGIN_REQUIRED for anonymous player requests from the same public IP:
+  "Sign in to confirm you are not a bot". Measured: neither a PO Token (bgutil http provider, verified to
+  really produce a token) nor TLS impersonation helps; only a logged-in session works.
+  So two things were added:
+  - A file segment type: play a local file directly, never touching YouTube. Land the content once with
+    fetch_content.sh and 24/7 playout can no longer be affected by the bot check, which also removes
+    the 6-hour source URL expiry and mid-stream googlevideo resets.
+  - --cookies: pass cookies.txt when pulling from YouTube directly (relaying included) to get through the check.
+  - --check: do not broadcast; resolve every source once and report availability.
 
-用法
+Usage
   python3 relay.py --dry-run
   python3 relay.py --check
   python3 relay.py --overlap 3 --observe --watchdog 3
@@ -57,16 +57,16 @@ DEFAULT_CLIENTS = ["web_embedded", "mweb", "default", "android_vr"]
 FMT_VOD = "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/b"
 FMT_LIVE = "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/b"
 
-# 片段型態
-#   vod / live → 走 yt-dlp 解析 YouTube 來源（需要對外網路，可能被 bot 檢查擋）
-#   file       → 本機檔案，播一次就交班（自有內容落地後的主力）
-#   filler     → 墊片，無限循環直到被收掉
-URL_TYPES = ("vod", "live")              # 需要即時解析來源 URL
-CONTENT_TYPES = ("vod", "live", "file")  # 參與 takeover 交班的一般內容片段
+# Segment types
+#   vod / live -> resolve a YouTube source with yt-dlp (needs internet and may hit the bot check)
+#   file       -> a local file, handed over after one play (the main type once content is landed)
+#   filler     -> filler, looping forever until it is taken over
+URL_TYPES = ("vod", "live")              # needs a live source URL resolution
+CONTENT_TYPES = ("vod", "live", "file")  # ordinary content segments that take part in a handover
 
-# 來源端抗斷線：googlevideo 實測會在中途 reset 連線（seg-*.log 的
+# Source-side resilience: measured, googlevideo resets the connection mid-stream (in the seg-*.log
 # "Connection reset by peer" / "Stream ends prematurely at X, should be Y"），
-# 造成整段提前結束。帶上瀏覽器 UA 與 Referer，並允許 ffmpeg 用 Range 續傳。
+# which ends the segment early. Send a browser UA and Referer and let ffmpeg resume with Range.
 HTTP_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
 HTTP_IN = ["-user_agent", HTTP_UA,
@@ -74,20 +74,20 @@ HTTP_IN = ["-user_agent", HTTP_UA,
            "-reconnect", "1", "-reconnect_streamed", "1",
            "-reconnect_delay_max", "5"]
 
-# vod/live 實際 -t 比排定長度多播這麼久。舊 publisher 若恰在交班點自己收工，
-# 新 publisher 從 RTMP 連上到 MediaMTX 真正換手還要 1~2s（實測），那就是縫。
+# vod/live actually play this much longer than the scheduled length. If the old publisher finishes right at
+# the handover point, the new publisher still needs 1-2s from connecting over RTMP to MediaMTX really switching (measured), and that is a gap.
 PUBLISH_TAIL = 20.0
 
-# 交班前多久先對舊 runner 放手（見 main() 註解）。
+# How long before a handover to release the old runner (see the comment in main()).
 HANDOFF_LEAD = 0.75
 
-# 交接時舊 publisher 最多再多撐這麼久，等 MediaMTX takeover 把它踢掉。
+# At a handover the old publisher lingers at most this long, waiting for the MediaMTX takeover to drop it.
 SUPERSEDE_GRACE = 30.0
 
 STOP = threading.Event()
-RUNNERS = []          # 只留「本輪」的 runner，24/7 長跑不會無限累積
+RUNNERS = []          # keeps only this round runners, so a long 24/7 run cannot accumulate them
 RESOLVED = {}
-RESOLVED_AT = {}          # 這條 URL 是什麼時候解析出來的（秒）
+RESOLVED_AT = {}          # when this URL was resolved (seconds)
 RUNTIME = {}
 
 
@@ -132,7 +132,7 @@ def sleep_until(ts):
 
 
 def api_path_of(target):
-    """rtmp://127.0.0.1:1935/live/test -> live/test；非本機 MediaMTX 回 None。"""
+    """rtmp://127.0.0.1:1935/live/test -> live/test; returns None for a non-local MediaMTX."""
     try:
         tail = target.split("://", 1)[1]
         hostport, rest = tail.split("/", 1)
@@ -144,10 +144,10 @@ def api_path_of(target):
 
 
 def yt_resolve(url, fmt, clients, timeout=90, cookies=None):
-    """回傳 (urls, client)。urls 可能是 1 個（漸進式）或 2 個（video+audio）。
+    """Return (urls, client). urls may be 1 (progressive) or 2 (video+audio).
 
-    cookies 是 cookies.txt 路徑。這個對外 IP 被 YouTube 標記成 bot 之後，
-    匿名請求一律 LOGIN_REQUIRED，只有帶登入 session 的 cookie 能過。
+    cookies is the path to cookies.txt. Once YouTube has flagged this public IP as a bot,
+    anonymous requests always get LOGIN_REQUIRED and only a cookie with a logged-in session gets through.
     """
     for c in clients:
         cmd = ["yt-dlp", "--no-warnings", "--no-playlist"]
@@ -170,10 +170,10 @@ def yt_resolve(url, fmt, clients, timeout=90, cookies=None):
 
 
 def url_expiry(url):
-    """抓 manifest URL 的到期時間（unix 秒），抓不到回 None。
+    """Read the expiry of a manifest URL (unix seconds); None when it cannot be read.
 
-    YouTube 兩種寫法都出現過：path 形式 /expire/1789518101/ 與 query 形式
-    ?expire=1789518101。本機實測直播 m3u8 是 path 形式、值 = 解析當下 + 21600s。
+    YouTube has used both forms: a path form /expire/1789518101/ and a query form
+    ?expire=1789518101. Measured locally, a live m3u8 uses the path form with the value at resolve time plus 21600s.
     """
     if not url:
         return None
@@ -191,12 +191,12 @@ def url_expiry(url):
 
 
 def url_freshness(url, resolved_at, max_age, margin):
-    """回傳 (可用, 原因)。不可用＝這條 URL 不該再拿去開 ffmpeg。
+    """Return (usable, reason). Not usable means this URL must not be opened by ffmpeg again.
 
-    兩個獨立風險：
-      1. expire——YouTube 實測 TTL 6 小時，到期後 segment 請求會被拒。
-      2. 綁來源 IP——URL 內含解析當下的公網 IP，換 IP（PPPoE 重撥／換主機）
-         就整條失效。所以「解析時間」必須跟著 URL 一起記，不能只記 URL。
+    Two independent risks:
+      1. expire: a measured TTL of 6 hours on YouTube, after which segment requests are refused.
+      2. bound to the source IP: the URL contains the public IP at resolve time, so a new IP (PPPoE redial, another host)
+         invalidates the whole thing. That is why the resolve time must be stored with the URL, not just the URL.
     """
     exp = url_expiry(url)
     if exp is not None and exp - now() <= margin:
@@ -207,9 +207,9 @@ def url_freshness(url, resolved_at, max_age, margin):
 
 
 def resolve_set(i, seg, clients, label=None):
-    """解析來源，並把「解析時間」跟 URL 一起存起來。回傳 urls（失敗 None）。
+    """Resolve a source and store the resolve time with the URL. Returns urls (None on failure).
 
-    24/7 場景只有一組 RESOLVED 不夠——沒有解析時間就無法判斷新舊。
+    A single RESOLVED set is not enough in a 24/7 setting: without the resolve time there is no way to tell old from new.
     """
     fmt = seg.get("format") or (FMT_LIVE if seg["type"] == "live" else FMT_VOD)
     a = now()
@@ -241,8 +241,8 @@ def build_cmd(seg, target, src_urls):
             path = os.path.join(HERE, path)
         inargs += ["-stream_loop", "-1", "-re", "-i", path]
     elif stype == "file":
-        # 本機檔案：用 -re 壓成即時速度，否則 ffmpeg 會用超快速度灌完
-        # MediaMTX、20s 的 PUBLISH_TAIL 一瞬間就跑完，整個交班節奏就崩了。
+        # Local files: pace them with -re, otherwise ffmpeg floods
+        # MediaMTX at full speed, the 20s PUBLISH_TAIL is over in an instant and the handover rhythm collapses.
         path = seg["path"]
         if not os.path.isabs(path):
             path = os.path.join(HERE, path)
@@ -251,7 +251,7 @@ def build_cmd(seg, target, src_urls):
         if not src_urls:
             raise RuntimeError("no source url for segment " + str(seg.get("id")))
         if stype == "vod":
-            inargs.append("-re")        # -re 必須緊接在它對應的 -i 之前
+            inargs.append("-re")        # -re must come immediately before the -i it belongs to
         for u in src_urls:
             if u.startswith("http"):
                 inargs += HTTP_IN
@@ -270,10 +270,10 @@ def build_cmd(seg, target, src_urls):
                     "-pix_fmt", "yuv420p", "-g", "60",
                     "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "2"]
     if seg.get("seconds"):
-        # vod/live 多播 PUBLISH_TAIL 秒。排定交班點上若讓舊 publisher 自己收工
-        # （-t 到點或來源 EOF），新 publisher 從 RTMP 連上到 MediaMTX 真正換手
-        # 還有 1~2s（實測 04:39:03 conn opened -> 04:39:05 online），那就是縫。
-        # 多播一點讓它活到被 takeover；何時真正停由 run() 的 stop_at/supersede 決定。
+        # vod/live play PUBLISH_TAIL seconds longer. If the old publisher finishes on its own at the scheduled
+        # handover point (-t reached or source EOF), the new publisher still needs time from connecting over RTMP
+        # to MediaMTX really switching (measured 04:39:03 conn opened -> 04:39:05 online), and that is a gap.
+        # Playing a little longer keeps it alive until the takeover; when it really stops is decided by stop_at/supersede in run().
         tail = PUBLISH_TAIL if stype in CONTENT_TYPES else 0.0
         outargs += ["-t", str(seg["seconds"] + tail)]
     outargs += ["-f", "flv", "-flvflags", "no_duration_filesize", target]
@@ -281,9 +281,9 @@ def build_cmd(seg, target, src_urls):
 
 
 class Observer(threading.Thread):
-    """以 MediaMTX API 高頻取樣，量測接收端真正有 stream 的時間軸。
+    """Sample the MediaMTX API at high frequency to measure when the receiver really has a stream.
 
-    v2 改走 /v3/paths/list：路徑不存在時只會少一筆，不會在 MediaMTX 日誌留下 404。
+    v2 uses /v3/paths/list: a missing path simply means one fewer entry and leaves no 404 in the MediaMTX log.
     """
 
     def __init__(self, path, interval=0.05):
@@ -316,7 +316,7 @@ class Observer(threading.Thread):
             STOP.wait(self.interval)
 
     def windows(self):
-        """回傳 ready=False 的離線時段 [(t0, t1, 秒數), ...]。"""
+        """Return the offline windows where ready=False as [(t0, t1, seconds), ...]."""
         out, t0 = [], None
         for (t, ready, _r, _b) in self.samples:
             if not ready and t0 is None:
@@ -329,15 +329,15 @@ class Observer(threading.Thread):
         return out
 
     def flow_windows(self, threshold=0.0):
-        """回傳「位元組停止成長 >= threshold 秒」的時段。
+        """Return the windows where bytes stopped growing for >= threshold seconds.
 
-        ready 只代表 MediaMTX 上掛了 publisher；MediaMTX takeover 會讓畫面
-        凍住時 ready 依然是 True（見 overlap_test.py 實測）。真正代表「畫面
-        在動」的是 bytesReceived 有沒有持續長大。
+        ready only means a publisher is attached to MediaMTX; a MediaMTX takeover leaves ready True
+        while the picture is frozen (measured in overlap_test.py). What really says the picture is moving is
+        whether bytesReceived keeps growing.
 
-        注意 HLS 是「整段拉、整段送」的突發式傳輸，來源正常時每隔一個片段
-        長度（常見 2~6s）就會有一段零成長，這不是故障。因此判讀要看
-        「最長零成長間隔」有沒有明顯超過片段長度，而不是數有幾段。
+        Note that HLS transfers in bursts of whole segments, so a healthy source shows a zero-growth window
+        every segment length (2-6s is common) and that is not a fault. Read it by whether the longest
+        zero-growth interval clearly exceeds the segment length, not by counting the windows.
         """
         out, stop0, last_b = [], None, None
         for (t, _ready, _r, b) in self.samples:
@@ -356,7 +356,7 @@ class Observer(threading.Thread):
         return out
 
 class SegmentRunner(threading.Thread):
-    """一個 segment 的完整生命週期：啟動 -> 看門狗 -> 到點停止。"""
+    """The full life of one segment: start -> watchdog -> stop at the scheduled time."""
 
     def __init__(self, i, spec, target, clients, args, start_at):
         super().__init__(daemon=True, name="seg-" + str(spec.get("id", i)))
@@ -396,8 +396,8 @@ class SegmentRunner(threading.Thread):
                 self._stop("scheduled")
                 return
             if self.superseded:
-                # 已被下一段接手：等 MediaMTX takeover 收掉舊 publisher 就退場，
-                # 在那之前不可以自己收工。
+                # Already taken over by the next segment: leave once the MediaMTX takeover drops the old publisher,
+                # and do not finish on your own before that.
                 if all(p is None or p.poll() is not None
                        for p in (self.proc, self.slate_proc)):
                     return
@@ -412,23 +412,23 @@ class SegmentRunner(threading.Thread):
             self._health()
 
     def supersede(self):
-        """下一段已接手同一條路徑：這一段（含看門狗）就此放手，讓接收端自己踢掉它。
+        """The next segment has taken over the same path: release this one (watchdog included) and let the receiver drop it.
 
-        這裡必須同時把 stop_at 往後推。run() 的主迴圈先判 stop_at、再判 superseded，
-        而 stop_at 正好落在交接點上；不放寬的話舊 publisher 會在到點時自己 SIGINT
-        收工（MediaMTX 日誌看到 closed: EOF），新 publisher 這時才剛開始開來源連線，
-        中間就留下實測 1.1～2.7s 的縫。收工改由 MediaMTX 的 takeover
-        （closing existing publisher）決定，新 publisher 一接上就換手。
+        stop_at must be pushed back here too. The run() main loop checks stop_at first and superseded second,
+        and stop_at lands exactly on the handover point; without relaxing it the old publisher SIGINTs itself when it
+        reaches the time (MediaMTX logs closed: EOF) while the new publisher is only just opening its source connection,
+        leaving a measured 1.1-2.7s gap. Finishing is instead left to the MediaMTX takeover
+        (closing existing publisher), which switches as soon as the new publisher connects.
         """
         self.superseded = True
         self.stop_at = max(self.stop_at, now() + SUPERSEDE_GRACE)
 
     # --------------------------------------------------------- url lifecycle
     def _fresh_urls(self):
-        """取這一段目前該用的來源 URL；過期或太舊就就地重解析。
+        """Get the source URL this segment should use now, re-resolving in place when it expired or is too old.
 
-        啟動前一律驗：manifest URL 有 expire、又綁解析當下的公網 IP，
-        "啟動時解析一次、之後一路沿用" 在 24/7 場景一定會踩到。
+        Always verify before starting: a manifest URL carries an expire and is bound to the public IP at resolve time,
+        so resolve-once-at-startup-then-reuse always breaks in a 24/7 setting.
         """
         if self.spec.get("direct"):
             return [self.spec["url"]] if self.spec.get("url") else None
@@ -446,11 +446,11 @@ class SegmentRunner(threading.Thread):
         return resolve_set(self.i, self.spec, self.clients, label="URL updated")
 
     def _refresh_due(self):
-        """回傳該主動換手的理由，不需要就回 None。
+        """Return the reason to take over actively, or None when there is none.
 
-        只對 live 生效：VOD 中途重開會從頭播，那是 bug 不是修復。
-        24/7 聯播靠這個在 URL 到期前就把 ffmpeg 換成新的，換手走 takeover
-        所以接收端幾乎不斷（見 v4.2 §2.2：overlap=3 時 0.34s）。
+        Only live is affected: reopening a VOD mid-way restarts it from the beginning, which is a bug rather than a fix.
+        A 24/7 relay uses this to swap ffmpeg for a new one before the URL expires, and the handover goes through takeover
+        so the receiver barely breaks (see v4.2 section 2.2: 0.34s with overlap=3).
         """
         if self.spec.get("direct") or self.spec["type"] != "live":
             return None
@@ -497,10 +497,10 @@ class SegmentRunner(threading.Thread):
         return True
 
     def _watch_progress(self, proc):
-        """每個 ffmpeg 行程各自一份計數狀態。
+        """One counter state per ffmpeg process.
 
-        換手時新舊兩個行程會短暫並存；若共用同一組 last_value，舊行程臨死前
-        讀到的舊大數值會把新行程的小數值鎖死，看門狗就會誤判成停滯。
+        During a handover the old and new process coexist briefly; if they shared one last_value, the old process reading
+        a large old value just before dying would pin the small value of the new process and the watchdog would report a stall.
         """
         st = {"proc": proc, "last_value": -1.0, "last": now(), "seen": False}
         self._prog = st
@@ -508,9 +508,9 @@ class SegmentRunner(threading.Thread):
                          daemon=True).start()
 
     def _read_progress(self, proc, st):
-        """ffmpeg 停滯時會不斷重印同一個 out_time_us。
+        """A stalled ffmpeg keeps reprinting the same out_time_us.
 
-        因此只有「數值確實變大」才算是活著的證據；單純看到這一行不算。
+        So only a value that really increases is evidence of life; seeing the line alone is not.
         """
         try:
             for raw in proc.stdout:
@@ -527,7 +527,7 @@ class SegmentRunner(threading.Thread):
                     if v > 0:
                         st["seen"] = True
         except Exception as exc:
-            # 讀不到 progress 等於看門狗瞎了，不能靜默吞掉。
+            # Not being able to read progress blinds the watchdog, so it must not be swallowed silently.
             if proc.poll() is None and not STOP.is_set():
                 log("%-6s progress read interrupted: %r" % (self.sid, exc), "WARN")
 
@@ -558,10 +558,10 @@ class SegmentRunner(threading.Thread):
             self._prog["last"] = now()
 
     def _restart(self, planned=False):
-        """planned=True 是排定的換手（URL updated），不算失敗retry。
+        """planned=True is a scheduled handover (URL updated) and does not count as a failure retry.
 
-        兩者必須分開計數：--url-max-age 30 分鐘的 24/7 聯播一天會換手 48 次，
-        若共用 max_restarts 額度，真正的故障就沒有retry機會了。
+        The two must be counted separately: a 24/7 relay with --url-max-age 30 minutes hands over 48 times a day, and
+        sharing a max_restarts budget would leave real failures with no retry left.
         """
         old = self.proc
         if planned:
@@ -572,7 +572,7 @@ class SegmentRunner(threading.Thread):
             resolve_set(self.i, self.spec, self.clients,
                         label="pre-emptive refresh" if planned else "retry")
         if self.restart_mode == "takeover":
-            # 先讓新 publisher 接手同一條路徑，再收掉舊的 -> 接收端零斷點。
+            # Let the new publisher take over the same path first and only then drop the old one: zero break at the receiver.
             if not self._launch():
                 return
             time.sleep(0.5)
@@ -582,10 +582,10 @@ class SegmentRunner(threading.Thread):
             self._launch()
 
     def _recover(self, stalled=None):
-        """來源失效時：先用墊片接管同一條路徑，再在背景retry來源。
+        """When the source fails: take over the same path with filler first, then retry the source in the background.
 
-        直接重開同一條來源沒有意義——來源還在斷，重開只是再斷一次。
-        所以先切墊片（接收端 0.34s 換手，見 relay-gaps 實測），等來源真的活了再切回來。
+        Reopening the same source immediately is pointless: the source is still broken and a reopen just breaks again.
+        So switch to filler first (a 0.34s handover at the receiver, measured in relay-gaps) and switch back once the source is really alive.
         """
         if not self.args.filler_on_stall or self.spec["type"] == "filler":
             self._restart()
@@ -594,13 +594,13 @@ class SegmentRunner(threading.Thread):
         self.restarts += 1
         if (self.retrying and self.slate_proc is not None
                 and self.slate_proc.poll() is None):
-            return                      # 墊片還在跑、也已在等來源，不必再動
+            return                      # filler is still running and already waiting for the source, so do nothing
         self._launch_slate()
         self.degraded = True
         if self.restart_mode != "takeover":
             self._terminate(old)
-        # takeover：不主動收掉舊 publisher。墊片接上同一條路徑時 MediaMTX 會自己
-        # 把舊的踢掉（closing existing publisher），換手才不會在接收端留下 1.5s 的縫。
+        # takeover: do not drop the old publisher actively. When filler attaches to the same path MediaMTX
+        # drops the old one itself (closing existing publisher), which keeps the handover from leaving a 1.5s gap at the receiver.
         if not self.retrying:
             self.retrying = True
             threading.Thread(target=self._retry_loop, daemon=True).start()
@@ -614,17 +614,17 @@ class SegmentRunner(threading.Thread):
         self.slate_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                            stderr=self.logfh,
                                            stdin=subprocess.DEVNULL)
-        # stdout 必須接管：-progress 是寫到 stdout，設成 DEVNULL 會讓
-        # 看門狗讀不到任何東西（而且例外會被吞掉，變成靜默失效）。
+        # stdout must be captured: -progress writes to stdout, and setting DEVNULL would leave the
+        # watchdog with nothing to read (and the exception would be swallowed, failing silently).
         self.proc = self.slate_proc
         self._watch_progress(self.slate_proc)
         emit({"event": "slate", "seg": self.sid, "pid": self.slate_proc.pid})
 
     def _probe(self):
-        """輕量探測來源是否還活著：抓幾秒就收，能收完就算活。
+        """Lightly probe whether the source is alive again: fetch a few seconds and stop; completing means alive.
 
-        回傳可用的 URL 清單（失敗回 None）。順手把新解析的 URL 帶回去，
-        免得恢復後還拿舊的、可能已經過期的 manifest URL 重開。
+        Returns the usable URL list (None on failure), and carries the newly resolved URLs back
+        so the recovery does not reopen with an old, possibly expired manifest URL.
         """
         if self.spec.get("direct"):
             url = self.spec.get("url")
@@ -637,8 +637,8 @@ class SegmentRunner(threading.Thread):
             return None
         url = urls[0]
         if ".m3u8" in url.split("?")[0]:
-            # 直播 HLS 一旦卡住，伺服器仍會回應舊清單，用下載探測會誤判成「活」。
-            # 所以改要求播放清單必須往前走（見 _hls_advancing）。
+            # Once live HLS stalls the server still answers with the old list, so a download probe would call it alive.
+            # So the playlist is required to move forward instead (see _hls_advancing).
             return urls if self._hls_advancing(url) else None
         cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
                "-i", url, "-t", str(self.args.probe_seconds),
@@ -653,11 +653,11 @@ class SegmentRunner(threading.Thread):
         return urls if r.returncode == 0 else None
 
     def _hls_advancing(self, url):
-        """HLS 直播的存活判斷：播放清單必須「往前走」，光是讀得到不算。
+        """Liveness of a live HLS stream: the playlist must move forward; merely being readable does not count.
 
-        來源卡住時舊的 playlist 照樣能下載、也能解出好幾秒的既有 segment，
-        這就是探測的假陽性來源；要比對兩次取樣之間 media-sequence 與最後
-        一個 segment 是否改變。
+        When the source stalls the old playlist still downloads and still yields several seconds of existing segments,
+        which is the source of false positives; compare media-sequence and the last
+        segment between two samples.
         """
         snap = []
         for i in range(2):
@@ -673,7 +673,7 @@ class SegmentRunner(threading.Thread):
                 if ln.startswith("#EXT-X-MEDIA-SEQUENCE:"):
                     seq = ln.split(":", 1)[1].strip()
                 elif ln.startswith("#EXT-X-ENDLIST"):
-                    return True          # 已收播的 VOD 片段，仍可正常播出
+                    return True          # a finished VOD segment still plays normally
                 elif ln and not ln.startswith("#"):
                     last = ln
             snap.append((seq, last))
@@ -794,7 +794,7 @@ def main():
                else pl.get("clients") or DEFAULT_CLIENTS)
     RUNTIME["clients"] = clients
 
-    # cookies 優先序：命令列 > playlist 的 cookies 欄位 > 專案根目錄的 cookies.txt
+    # cookies precedence: command line > the playlist cookies field > cookies.txt in the project root
     cookies = args.cookies or pl.get("cookies") or ""
     if not cookies:
         auto = os.path.join(HERE, "cookies.txt")
@@ -853,7 +853,7 @@ def main():
             log("--observe needs a local MediaMTX target, disabled", "WARN")
 
     for i, seg in enumerate(segs):
-        # "direct": true 代表 url 已經是可直接餵給 ffmpeg 的位址，跳過 yt-dlp 解析。
+        # "direct": true means url is already an address ffmpeg can take, so yt-dlp resolution is skipped.
         if seg.get("direct") and seg["type"] in ("vod", "live"):
             RESOLVED[i] = [seg["url"]]
 
@@ -874,9 +874,9 @@ def main():
                                      args=(i, seg, start_at - args.resolve_lead),
                                      daemon=True).start()
                 if prev is not None:
-                    # 提早放手：舊 runner 一走到 stop_at 就 SIGINT 舊 publisher，而新
-                    # publisher 從 RTMP 連上到 MediaMTX 真正換手還有 1~2s（實測）。在
-                    # 交班前 HANDOFF_LEAD 秒先 supersede，舊 publisher 才活得到 takeover。
+                    # Release early: the old runner SIGINTs the old publisher as soon as it reaches stop_at, while the new
+                    # publisher still needs 1-2s from connecting over RTMP to MediaMTX really switching (measured).
+                    # Superseding HANDOFF_LEAD seconds before the handover keeps the old publisher alive until the takeover.
                     sleep_until(start_at - HANDOFF_LEAD)
                     prev.supersede()
                 sleep_until(start_at)

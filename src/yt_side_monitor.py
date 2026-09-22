@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""對 YouTube 端做長時間畫面監控（T-12）。
+"""Long-running picture monitoring of the YouTube side (T-12).
 
-為什麼需要：目前所有「零縫」的量測都是 MediaMTX 端。YouTube 端還多了一層
-轉碼與分發，換片瞬間的影響有可能被放大或延後。T-19 只做過 330 秒的抽樣，
-這支用來跨數十個換片點（含循環點）做長時間監控。
+Why it is needed: every "zero gap" measurement so far was taken at MediaMTX. YouTube
+adds transcoding and distribution on top, so the effect of a segment change can be
+amplified or delayed. T-19 only sampled 330 seconds; this runs across dozens of
+segment changes (loop point included).
 
-做法：用 yt-dlp 取得 YouTube 直播的 HLS 位址，交給 ffmpeg 跑 blackdetect
-（黑畫面）與 freezedetect（畫面凍結），每一行都補上實際時間，方便跟本地
-事件對照。直播位址會過期，所以 ffmpeg 結束後會自動重新解析再續。
+How: yt-dlp resolves the HLS address of the YouTube live stream, ffmpeg runs
+blackdetect (black frames) and freezedetect (frozen frames) on it, and every line is
+stamped with the wall-clock time so it can be matched against local events. Live
+addresses expire, so when ffmpeg exits the address is resolved again and the run
+continues.
 
-用法
+Usage
   python3 yt_side_monitor.py --id GeP67qGcoFs --hours 3
   python3 yt_side_monitor.py --id GeP67qGcoFs --minutes 45 --quality 232
 """

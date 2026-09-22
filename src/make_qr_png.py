@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""把一段文字（通常是網址）畫成 QR Code PNG。
+"""Render a piece of text (usually a URL) as a QR Code PNG.
 
-為什麼要自己寫：目標機沒有 qrencode、沒有 PIL、ffmpeg 也沒有 freetype。所以
-只裝純 Python 的 qrcode 套件拿矩陣，PNG 自己用 zlib + struct 寫出來。
+Why it is written by hand: the target machine has no qrencode, no PIL and an ffmpeg
+without freetype, so only the pure-Python qrcode package is installed to get the
+matrix, and the PNG is written directly with zlib + struct.
 
-用法
+Usage
   python3 make_qr_png.py "https://..." out.png --scale 10
 """
 
@@ -61,10 +62,11 @@ def main():
             dark = bool(m[y][x])
             if a.invert:
                 dark = not dark
-            # 逐模組水平放大：是「一個模組重複 s 次」，不是「整列重複 s 次」。
-            # 後者會把圖橫向平鋪，QR 就解不出來了（實測踩過）。
+            # Scale horizontally module by module: each module repeats s times, rather than
+            # repeating the whole row s times. The latter tiles the image sideways and the
+            # QR stops decoding (measured).
             px += (b"\x00\x00\x00\xff" if dark else b"\xff\xff\xff\xff") * s
-        for _ in range(s):           # 垂直放大：同一列重複 s 次
+        for _ in range(s):           # Scale vertically: repeat the same row s times
             rows.append(bytearray(px))
 
     write_png(a.out, n * s, n * s, rows)

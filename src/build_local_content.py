@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""把 playlist.json 的 YouTube 影片抓成本機檔案，並產生可離線播出的 playlist-local.json。
+"""Land the YouTube videos of playlist.json as local files and produce a playlist-local.json that plays offline.
 
-為什麼要落地
-  YouTube 會對這個對外 IP 的匿名 player 請求「間歇性」回 LOGIN_REQUIRED
-  （Sign in to confirm you are not a bot）。實測：05:11 一批影片全滅，
-  20:02 同一批用完全相同的條件重測全部成功。所以那是暫時性的 IP 標記，
-  不是永久封鎖。封鎖期間唯一仍可用的是 player_client=android（上限 360p，
-  由 --no-fallback-client 可關）。因為它會反覆發生，離線副本才是 24/7 播出
-  的穩定做法：除了繞開 bot 檢查，還一併移除來源 URL 6 小時過期與
-  googlevideo 中途 reset 這兩個風險。內容本來就是同一團體授權的作品。
+Why landing is needed
+  YouTube intermittently answers LOGIN_REQUIRED for anonymous player requests from this public IP
+  (Sign in to confirm you are not a bot). Measured: a batch failed completely at 05:11 and the very
+  same batch succeeded at 20:02 under identical conditions. So it is a temporary IP flag, not a
+  permanent block. The only client that still worked during a block was player_client=android (capped
+  at 360p; --no-fallback-client disables it). Because it recurs, a local copy is what makes 24/7 playout
+  stable: besides avoiding the bot check it also removes the 6-hour source URL expiry and
+  mid-stream googlevideo resets. The content is licensed work from the same group.
 
-為什麼要正規化
-  concat 的 -c copy 要求所有片段參數完全相同。實測這批內容混了
-  1280x720 與 1280x718（另有一批 480p），全部丟進 concat 會壞掉。
-  所以預設在落地時就轉成統一參數（--target 720），播出端才能純 copy。
+Why normalisation is needed
+  The concat -c copy path requires every segment to have identical parameters. Measured, this content
+  mixed 1280x720 with 1280x718 (and another batch at 480p), and putting them all through concat breaks.
+  So landing converts to uniform parameters by default (--target 720) and the playout can then copy only.
 
-用法
-  python3 build_local_content.py --status                # 只回報還缺哪些
-  python3 build_local_content.py --limit 3               # 先抓 3 支試水溫
-  python3 build_local_content.py --cookies cookies.txt   # 需要登入時
-  python3 build_local_content.py --target 480            # 改成統一輸出 480p
-  python3 build_local_content.py --no-normalize          # 保留原始參數
+Usage
+  python3 build_local_content.py --status                # report what is still missing
+  python3 build_local_content.py --limit 3               # land 3 as a trial
+  python3 build_local_content.py --cookies cookies.txt   # when a login is needed
+  python3 build_local_content.py --target 480            # output 480p instead
+  python3 build_local_content.py --no-normalize          # keep the source parameters
 """
 
 import argparse
@@ -33,7 +33,7 @@ import sys
 import time
 
 try:
-    import wmtext                      # 日期浮水印（同目錄的點陣字模組）
+    import wmtext                      # date watermark (the bitmap text module in this directory)
 except ImportError:
     wmtext = None
 
@@ -42,9 +42,9 @@ MEDIA_DIR = os.path.join(HERE, "media")
 RAW_DIR = os.path.join(MEDIA_DIR, ".raw")
 MANIFEST = os.path.join(MEDIA_DIR, "manifest.json")
 
-# ── 共用設定 ────────────────────────────────────────────────────────
-# settings.json 是「給人改的」那一份（WebUI 也是編輯它）。下面的值只是預設值，
-# 命令列參數永遠可以逐次覆寫；檔案不存在時，行為與沒有這個機制時完全相同。
+# ── Shared settings ─────────────────────────────────────────────────
+# settings.json is the copy meant to be edited by hand (the WebUI edits it too). The values below are
+# only defaults; command-line flags always override per run, and with no file present the behaviour is as if the mechanism did not exist.
 SETTINGS_FILE = os.path.join(HERE, "settings.json")
 
 
@@ -61,15 +61,15 @@ SETTINGS = load_settings()
 
 
 def cfg(section, key, default):
-    """讀 settings.json 的 section.key；沒有、或寫成 null，就回 default。"""
+    """Read section.key from settings.json; a missing or null value returns default."""
     try:
         v = SETTINGS[section][key]
     except (KeyError, TypeError):
         return default
     return default if v is None else v
 
-# 落地時抓 720p 就夠（正規化目標就是 720p），抓 1080p 只是多花一倍頻寬。
-# 一定要排除 m3u8：實測 Ig3vtqtXowY 走 HLS 那條只會拿到 137s，DASH 才是完整 270s。
+# Landing at 720p is enough (the normalisation target is 720p); fetching 1080p only doubles the bandwidth.
+# m3u8 must be excluded: measured, Ig3vtqtXowY over HLS only gives 137s while DASH gives the full 270s.
 DEFAULT_FMT = ("bv*[height<=720][protocol^=https]+ba[protocol^=https]/"
                "b[height<=720][protocol^=https]/"
                "bv*[height<=720]+ba/b[height<=720]/b")
@@ -78,16 +78,16 @@ FALLBACK_CLIENT = "android"
 
 TARGETS = {"1080": (1920, 1080), "720": (1280, 720), "480": (854, 480)}
 
-BLACK_TAIL_MIN = float(cfg("content", "black_tail_min", 5.0))   # 片尾黑畫面幾秒算黑尾
-BLACK_TAIL_SLACK = float(cfg("content", "black_tail_slack", 2.5))  # 黑尾結束點要落在片尾幾秒內
+BLACK_TAIL_MIN = float(cfg("content", "black_tail_min", 5.0))   # seconds of black at the tail that count as a black tail
+BLACK_TAIL_SLACK = float(cfg("content", "black_tail_slack", 2.5))  # the black tail must end within this many seconds of the file end
 
-# ── 語言（後台介面與畫面上的字樣）──────────────────────────────────
-# zh＝中文、en＝英文。一次只顯示一種語言（後台右上角可以切換）。
+# ── Language (console interface and on-screen captions) ─────────────
+# zh = Chinese, en = English. Only one language is shown at a time (switchable at the top right of the console).
 UI_LANG = str(cfg("ui", "lang", "zh")).strip().lower()
 
 
 def L(zh, en):
-    """依 UI_LANG 挑字串。"""
+    """Pick a string according to UI_LANG."""
     zh, en = (zh or ""), (en or "")
     return (en or zh) if UI_LANG == "en" else (zh or en)
 
@@ -98,7 +98,7 @@ LINK_CAPTION = L(cfg("overlay", "link_caption", "▶ 看原片"),
                  cfg("overlay", "link_caption_en", "▶ Watch original"))
 TRANSITION_CAPTION = L(cfg("overlay", "transition_caption", "去追劇"),
                        cfg("overlay", "transition_caption_en", "Watch more"))
-# 倒數的文字：中文放前面（「剩餘 02:57」）、英文放後面（「02:57 left」）。
+# Countdown wording: Chinese puts the prefix first and English puts the suffix last.
 _CD_PRE, _CD_SUF = cfg("overlay", "countdown_prefix", "剩餘 "), cfg("overlay", "countdown_suffix", "")
 _CD_PRE_EN = cfg("overlay", "countdown_prefix_en", "")
 _CD_SUF_EN = cfg("overlay", "countdown_suffix_en", " left")
@@ -106,14 +106,14 @@ if UI_LANG == "en":
     CD_PRE, CD_SUF = _CD_PRE_EN, _CD_SUF_EN
 else:
     CD_PRE, CD_SUF = _CD_PRE, _CD_SUF
-AUDIO_FADE = float(cfg("media", "audio_fade", 2.5))       # 開頭淡入／結尾淡出幾秒
-OVERLAY_Y = int(cfg("overlay", "overlay_y", 40))          # 浮水印距離畫面頂端
-MARQUEE_Y = OVERLAY_Y - 30                                # 跑馬燈再往上位移半行
-OVERLAY_MARGIN = int(cfg("overlay", "overlay_margin", 40))  # 左右邊界
-MARQUEE_SPEED = int(cfg("overlay", "marquee_speed", 120))   # 跑馬燈速度（像素／秒）
-MARQUEE_GAP = int(cfg("overlay", "marquee_gap", 220))       # 跑馬燈兩輪之間的空白
+AUDIO_FADE = float(cfg("media", "audio_fade", 2.5))       # fade in at the start / fade out at the end, in seconds
+OVERLAY_Y = int(cfg("overlay", "overlay_y", 40))          # watermark distance from the top of the frame
+MARQUEE_Y = OVERLAY_Y - 30                                # the marquee sits half a line higher
+OVERLAY_MARGIN = int(cfg("overlay", "overlay_margin", 40))  # left and right margin
+MARQUEE_SPEED = int(cfg("overlay", "marquee_speed", 120))   # marquee speed in pixels per second
+MARQUEE_GAP = int(cfg("overlay", "marquee_gap", 220))       # blank gap between marquee repeats
 
-# 編碼參數。位元率是最直接影響畫質與頻寬的旋鈕，不要寫死在指令列裡。
+# Encoding parameters. Bitrate is the knob that most directly affects picture quality and bandwidth, so it is not hard-coded in a command line.
 VIDEO_PRESET = cfg("media", "preset", "veryfast")
 VIDEO_LEVEL = cfg("media", "level", "3.1")
 VIDEO_BITRATE = cfg("media", "video_bitrate", "2500k")
@@ -121,17 +121,17 @@ VIDEO_MAXRATE = cfg("media", "video_maxrate", "2500k")
 VIDEO_BUFSIZE = cfg("media", "video_bufsize", "5000k")
 AUDIO_RATE = int(cfg("media", "sample_rate", 48000))
 
-# 畫面元素的尺寸
+# Sizes of the on-screen elements
 TEXT_SIZE = int(cfg("overlay", "text_size", 44))
 TEXT_STROKE = int(cfg("overlay", "text_stroke", 4))
 QR_SIZE = int(cfg("overlay", "qr_size", 30))
 QR_PX = int(cfg("overlay", "qr_px", 120))
 
-# 贊助／抖內 QR：只畫在過場影片上（集數不畫），固定放右下角。
+# Sponsor/donation QR: drawn on transition clips only (not on episodes), always bottom right.
 SPONSOR_URL = cfg("overlay", "sponsor_url", "")
 SPONSOR_CAPTION = L(cfg("overlay", "sponsor_caption", "贊助"),
                     cfg("overlay", "sponsor_caption_en", "Support"))
-# 贊助碼：填這個值就整個關掉贊助 QR（後台設定的緊急開關）
+# Sponsor code: filling this value turns the sponsor QR off entirely (an emergency switch in the console settings)
 SPONSOR_CODE = cfg("overlay", "sponsor_code", "")
 if SPONSOR_CODE.strip() == "kingwap99":
     SPONSOR_URL = ""
@@ -159,7 +159,7 @@ def save_json(path, data):
 
 
 def probe_seconds(path):
-    """用 ffprobe 量實際長度。排程要靠這個，不能用來源宣稱的長度。"""
+    """Measure the real duration with ffprobe. Scheduling depends on this, not on the length the source claims."""
     try:
         p = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -174,8 +174,8 @@ def probe_seconds(path):
 
 
 def check_duration(got, expect, tol=0.05, min_abs=10.0):
-    """下載後比對長度。實測有影片會靜默只抓到一半（137s vs 270s），
-    不檢查的話會直接進 concat，變成播出中段突然跳掉。"""
+    """Compare the duration after downloading. Measured: some videos silently come down at half length (137s vs 270s),
+    and without this check they go straight into concat and the broadcast jumps in the middle."""
     if not got or not expect:
         return None
     expect = float(expect)
@@ -186,7 +186,7 @@ def check_duration(got, expect, tol=0.05, min_abs=10.0):
 
 
 def fetch_raw(seg, cookies, fmt, client=None):
-    """抓一支影片到 media/.raw/<id>.mp4，回傳 (路徑, 錯誤訊息)。"""
+    """Fetch one video to media/.raw/<id>.mp4 and return (path, error message)."""
     sid = seg["id"]
     os.makedirs(RAW_DIR, exist_ok=True)
     url = seg.get("url") or ("https://www.youtube.com/watch?v=" + sid)
@@ -208,7 +208,7 @@ def fetch_raw(seg, cookies, fmt, client=None):
 
 
 def has_audio(path):
-    """這支檔案有沒有音軌。淡入淡出只對有音軌的做。"""
+    """Whether the file has an audio track. Fades are only applied when there is one."""
     try:
         p = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "a",
@@ -222,13 +222,13 @@ def has_audio(path):
 
 def normalize(raw, out, w, h, venc, abr, fps, overlays=None, max_seconds=0,
               fade_sec=AUDIO_FADE):
-    """轉成統一參數，讓播出端可以純 -c copy 拼接。
+    """Convert to uniform parameters so the playout can splice with plain -c copy.
 
-    overlays 是 [(PNG 路徑, 前置濾鏡或 None, overlay 位置表達式), ...]，
-    依序疊上去。前置濾鏡用來先把圖裁成固定視窗（跑馬燈靠它才不會溢出）。
-    位置表達式若有逗號，一定要用單引號包起來，否則會被當成 filter 的參數
-    分隔 —— 跑馬燈就會踩到這個。
-    max_seconds > 0 時只保留前幾秒（做縮短的測試版用）。
+    overlays is [(PNG path, pre-filter or None, overlay position expression), ...], applied in order.
+    The pre-filter crops the image to a fixed window, which is what keeps the marquee from overflowing.
+    A position expression containing a comma must be wrapped in single quotes, otherwise it is taken as a filter
+    argument separator, which is exactly what the marquee trips over.
+    With max_seconds > 0 only the first seconds are kept (used for the shortened test edition).
     """
     vf = ("scale=w=%d:h=%d:force_original_aspect_ratio=decrease,"
           "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black,fps=%d,format=yuv420p"
@@ -240,19 +240,19 @@ def normalize(raw, out, w, h, venc, abr, fps, overlays=None, max_seconds=0,
         vargs = ["-c:v", "libx264", "-preset", VIDEO_PRESET, "-profile:v", "high",
                  "-level", VIDEO_LEVEL, "-g", str(fps * 2), "-b:v", VIDEO_BITRATE,
                  "-maxrate", VIDEO_MAXRATE, "-bufsize", VIDEO_BUFSIZE]
-    # -nostdin 是必要的：這個腳本常被 ssh heredoc 帶著跑，ffmpeg 若去讀
-    # stdin 會把腳本內容當成互動指令，讀到 q 就提早結束，輸出被靜默截斷
-    # （實測同一支影片分別得到 137s 與 163s）。stdin=DEVNULL 是第二層保險。
+    # -nostdin is necessary: this script often runs inside an ssh heredoc, and if ffmpeg read
+    # stdin it would treat the script text as interactive commands, quit on the first q and silently
+    # truncate the output (measured: the same video came out at 137s and at 163s). stdin=DEVNULL is a second guard.
     tail = ["-c:a", "aac", "-b:a", abr, "-ar", str(AUDIO_RATE), "-ac", "2"]
-    # 長度上限一定要跟原始檔長度取較小值，兩個理由：
-    #   1) 疊圖的 -loop 1／loop 讓圖永遠不結束，不給上限就會一直編下去
-    #      （實測踩過：檔案無限長大）。
-    #   2) 就算給了上限，上限若「大於」原始長度，因為圖還在、主影片已經 EOF，
-    #      overlay 會 repeatlast 把最後一格重複到上限 —— 影片被撐長、音訊卻在
-    #      原始長度就結束。實測 209 秒的影片被做成 450 秒：影格 13500 格（450 秒）
-    #      但音軌只有 209.1 秒。播出端 -c copy 走到那段「有影無聲」的尾巴會卡住，
-    #      我的看門狗 20 秒後把播出端砍掉重連，觀眾看到的就是「播到第二支又跳回
-    #      第一支」（2026-09-19 實測，每 728 秒循環一次）。
+    # The length cap must be the smaller of the cap and the source length, for two reasons:
+    #   1) the -loop 1 / loop on the overlay never ends, so without a cap ffmpeg encodes forever
+    #      (measured: the file grew without bound).
+    #   2) even with a cap, if the cap is larger than the source length the image is still there while
+    #      the main video has hit EOF, so overlay repeatlast pads the last frame to the cap: the video is
+    #      stretched while the audio ends at the original length. Measured: a 209-second video became 450
+    #      seconds with 13500 frames but only 209.1 seconds of audio. The playout -c copy stalls on that
+    #      picture-without-sound tail, my watchdog kills it 20 seconds later and the viewer sees it jump
+    #      back to the first video after the second one (measured on 2026-09-19, looping every 728 seconds).
     raw_d = int(probe_seconds(raw) or 0)
     if max_seconds and raw_d:
         max_seconds = min(int(max_seconds), int(raw_d + 0.999))
@@ -261,38 +261,38 @@ def normalize(raw, out, w, h, venc, abr, fps, overlays=None, max_seconds=0,
     if max_seconds:
         tail += ["-t", str(int(max_seconds))]
 
-    # 音訊淡入淡出：切換影片時，前後兩段的接縫兩邊都有淡化，不會突然斷掉或
-    # 蹦一聲。只動音訊，影像仍然是 copy（或走上面的 overlay 鏈）。
+    # Audio fade in/out: at a video change both sides of the seam fade, so it does not cut off or pop.
+    # Only audio is touched; video is still copied (or goes through the overlay chain above).
     dur = int(max_seconds) if max_seconds else (probe_seconds(raw) or 0)
     af = ""
     if fade_sec and dur > fade_sec * 2 + 1 and has_audio(raw):
         af = ("afade=t=in:st=0:d=%.2f,afade=t=out:st=%.2f:d=%.2f"
               % (fade_sec, dur - fade_sec, fade_sec))
-    # 以前這裡有 -movflags +faststart。實測（2026-09-19）它會讓 ffmpeg 隨機卡在收尾
-    # 階段：資料都寫完了、moov 沒寫出來、CPU 0%、主執行緒停在 sch_wait，同一支影片
-    # 重跑有時又正常（60 秒的短片也會中，跟長度無關；今天 4 次）。faststart 是為了
-    # 網路漸進播放，我們的播出端是本機檔案 + concat + -c copy，ffmpeg 會自己去檔尾
-    # 讀 moov，不需要它。拿掉之後同一支 60 秒素材 8.6 秒完成。
+    # This used to pass -movflags +faststart. Measured (2026-09-19), it made ffmpeg randomly stall while
+    # finishing: all the data written, no moov, 0% CPU, the main thread parked in sch_wait, and the same
+    # video sometimes ran fine on a retry (a 60-second clip hits it too, so length is irrelevant; 4 times today). faststart exists for
+    # progressive playback over the network, but our playout is local files + concat + -c copy and ffmpeg
+    # reads moov from the end by itself, so it is not needed. Without it the same 60-second clip finished in 8.6 seconds.
     tail += [out]
     if overlays:
         cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
                "-y", "-i", raw]
         for ov in overlays:
             if len(ov) > 3 and ov[3]:
-                # 每秒一張的序列（倒數用）：1 fps 輸入，overlay 依時間自動換圖
+                # One image per second (for the countdown): a 1 fps input, and overlay swaps frames by time
                 cmd += ["-thread_queue_size", "512", "-framerate", "1",
                         "-start_number", "0", "-i", ov[0]]
             else:
-                # 圖輸入是「單格」，重複的動作交給下面的 loop 濾鏡，不再用 -loop 1。
-                # -loop 1 是 demuxer 每一格都重送一次封包，等於每個輸出影格都把整張
-                # PNG 重解一次；倒數長條（450 秒 = 266x25650 px）的代價隨片長平方
-                # 成長，實測同一支 450 秒素材要 197 秒才編完。loop 濾鏡只解碼一次、
-                # 之後重複同一個 frame：同一支降到 47 秒（4.2 倍），而且畫面上的效果
-                # 一樣 —— 它照樣輸出帶遞增時間戳的影格，crop 的時間表達式照常運作。
+                # The image input is a single frame and the repetition is left to the loop filter below, not -loop 1.
+                # -loop 1 makes the demuxer resend a packet per frame, so every output frame decodes the whole
+                # PNG again; the cost of the countdown strip (450 seconds = 266x25650 px) grows with the square
+                # of the length (measured: the same 450-second clip took 197 seconds to encode). The loop filter decodes once
+                # and repeats one frame, bringing the same clip down to 47 seconds (4.2x), with the same
+                # visual result: it still emits frames with increasing timestamps and the crop time expression still works.
                 #
-                # -thread_queue_size 是修另一件事：無限輸入若由主執行緒餵，主執行緒
-                # 一旦卡在等濾鏡圖（sch_wait）就會互相等死，症狀是資料都寫完了、
-                # moov 沒寫出來、CPU 0%、其他執行緒全部閒置。實測 3/3 正常。
+                # -thread_queue_size fixes something else: when an infinite input is fed by the main thread, that
+                # thread waiting on the filter graph (sch_wait) deadlocks with it, with the same symptoms: data all
+                # written, no moov, 0% CPU, every other thread idle. Measured 3 out of 3 fine.
                 cmd += ["-thread_queue_size", "512", "-framerate", str(fps),
                         "-i", ov[0]]
         parts = ["[0:v]%s[v0]" % vf]
@@ -301,8 +301,8 @@ def normalize(raw, out, w, h, venc, abr, fps, overlays=None, max_seconds=0,
             png, pre, pos = (list(ov) + [None, None, None])[:3]
             is_seq = len(ov) > 3 and ov[3]
             src = "%d:v" % i
-            # 單格 PNG 用 loop 濾鏡重複（只解碼一次）；1 fps 序列輸入本來就是有限的，
-            # 不需要 loop（加了反而會凍在第一格）。
+            # A single-frame PNG is repeated with the loop filter (one decode); a 1 fps sequence input is finite anyway
+            # and must not be looped (adding it freezes on the first frame).
             chain = "" if is_seq else "loop=loop=-1:size=1:start=0"
             if pre:
                 chain = (chain + "," + pre) if chain else pre
@@ -329,11 +329,11 @@ def normalize(raw, out, w, h, venc, abr, fps, overlays=None, max_seconds=0,
 
 
 def make_countdown_frames(total, out_dir, size=28, prefix=""):
-    """產生每秒一張的倒數圖（前綴 ＋ 剩餘 MM:SS），檔名是 5 位數流水號。
+    """Generate one countdown image per second (prefix plus remaining MM:SS), named with a 5-digit sequence number.
 
-    為什麼要一秒一張：影片畫面不能直接畫字（沒有 freetype），倒數又必須隨
-    時間變化。所以事先把每一秒的圖畫好，交給 ffmpeg 用 1 fps 的序列輸入，
-    overlay 就會依時間自己換圖。
+    Why one per second: text cannot be drawn onto the video directly (no freetype) and the countdown has to
+    change over time. So every second is pre-rendered and handed to ffmpeg as a 1 fps sequence input,
+    which makes overlay swap images by time.
     """
     n = int(total)
     os.makedirs(out_dir, exist_ok=True)
@@ -345,15 +345,15 @@ def make_countdown_frames(total, out_dir, size=28, prefix=""):
     return n
 
 
-FP_VERSION = 1      # 改動會影響畫面的程式（浮水印、濾鏡、參數）時要 +1，讓舊檔重做
+FP_VERSION = 1      # bump when a change affects the picture (watermark, filters, parameters) so old files are redone
 
 
 def encode_fp(seg, args, w, h):
-    """這支影片的「編碼參數指紋」。
+    """The encoding-parameter fingerprint of one video.
 
-    用途：重新建置時，如果 media/<模式>/<id>.mp4 還在、指紋一樣、大小也一樣，
-    就直接跳過不要重編。以前是「暫存目錄沒有就重做」，所以每次建置都把整批
-    重編一次（實測 news 55 支要好幾小時）。
+    Purpose: on a rebuild, if media/<mode>/<id>.mp4 is still there with the same fingerprint and size,
+    skip it instead of re-encoding. It used to be not-in-staging-means-redo, so every build re-encoded
+    the whole batch (measured: 55 news videos take hours).
     """
     import hashlib
     raw = os.path.join(RAW_DIR, seg["id"] + ".mp4")
@@ -381,7 +381,7 @@ def encode_fp(seg, args, w, h):
 
 
 def black_runs(path, min_len=BLACK_TAIL_MIN):
-    """回傳 [(start, end, duration)]。只解關鍵帧，一趟約 1 秒，很便宜。"""
+    """Return [(start, end, duration)]. Only key frames are decoded, so a pass takes about a second and is cheap."""
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "info",
            "-skip_frame", "nokey", "-i", path,
            "-vf", "blackdetect=d=%.2f:pix_th=0.10" % min_len,
@@ -397,11 +397,11 @@ def black_runs(path, min_len=BLACK_TAIL_MIN):
 
 
 def black_tail(path, seconds, min_len=BLACK_TAIL_MIN):
-    """片尾黑畫面的起點秒數；沒有黑尾就回 None。
+    """Seconds at which the black tail starts; None when there is no black tail.
 
-    為什麼要這個：實測 8jtdcMDuV_A 片尾有 66 秒黑畫面。播出端完全看不出來
-    （傳輸連續、時間軸也沒有洞），但觀眾端就是一片黑。黑畫面是內容問題，
-    只有看像素才抓得到，所以要在落地時就擋掉。
+    Why: measured, 8jtdcMDuV_A has 66 seconds of black at the tail. The playout cannot tell at all
+    (the transfer is continuous and the timeline has no hole) but the viewer just sees black. Black frames are a content
+    problem that only pixel inspection catches, so it is caught at landing time.
     """
     if not seconds:
         return None
@@ -449,8 +449,8 @@ def main():
     ap.add_argument("--out-playlist", default=os.path.join(HERE, "playlist-local.json"),
                     help="output playout list path (default playlist-local.json)."
                          "point it elsewhere for a trial run so the live one is untouched")
-    # 播出中要換檔時，先寫到暫存目錄、驗完再 mv 進 media/：mv 是原子置換，
-    # 播出端（每個循環重開檔案）只會拿到完整的舊檔或新檔。要搭配 --force。
+    # When changing files while on air, write to a staging directory first and mv into media/ after verification:
+    # mv is atomic, so the playout (reopening files every loop) only sees a complete old or new file. Pair it with --force.
     ap.add_argument("--out-dir", default="",
                     help="directory for normalized files (default media/)."
                          "for live replacement point it at a staging dir, then mv the verified files in")
@@ -471,12 +471,12 @@ def main():
     ap.add_argument("--band-left", type=int, default=int(cfg("overlay", "band_left", 0)),
                     help="marquee left bound in pixels (0 = use 1/7 of the width)."
                          "that space is reserved for the original video's top-left logo; use a larger value for more")
-    # 內容改成「每個模式一份」：media/<模式>/。同一支影片在不同模式有不同長度
-    # 上限時才不會互相蓋掉，manifest 也各自一份（原始檔 media/.raw 仍共用）。
+    # One copy of the content per mode: media/<mode>/. When the same video has a different length
+    # cap per mode they cannot overwrite each other, and each keeps its own manifest (raw files in media/.raw are shared).
     ap.add_argument("--media-dir", default="",
                     help="content directory (default media/); use media/<mode> when several modes coexist")
-    # 過場是「第 i 支影片配第 i 支 short」，一輪只用到池子前 N 支。--passes 讓
-    # 一輪播出包含多趟影片，shorts 接著往下輪（第 2 趟從第 31 支起）。
+    # A transition pairs video i with short i, so one round uses only the first N of the pool. --passes lets
+    # a round contain several video passes so the shorts carry on (pass 2 starts at short 31).
     ap.add_argument("--passes", type=int, default=int(cfg("media", "passes", 1)),
                     help="how many passes of videos per round (default 1) so the whole shorts pool gets used")
     args = ap.parse_args()
@@ -510,10 +510,10 @@ def main():
         if args.force:
             missing.append(seg)
         elif args.out_dir and os.path.exists(staged):
-            continue                      # 暫存目錄裡有 → 續傳，不要重做
+            continue                      # already in staging, so resume instead of redoing it
         elif (os.path.exists(deployed) and rec.get("fp") == fp
               and rec.get("bytes") == os.path.getsize(deployed)):
-            skipped += 1                  # 已部署、參數沒變、大小一樣 → 跳過
+            skipped += 1                  # deployed, parameters unchanged and size equal, so skip
             continue
         else:
             missing.append(seg)
@@ -566,7 +566,7 @@ def main():
 
     w, h = TARGETS[args.target]
     done = fail = 0
-    # 影片在母清單裡的序號（倒數標籤要顯示「第幾支／共幾支」）
+    # The video index in the master list (the countdown badge shows n of total)
     seg_ord = {s["id"]: i for i, s in enumerate(segs, 1)}
     for seg in missing[:args.limit or None]:
         sid = seg["id"]
@@ -612,7 +612,7 @@ def main():
             overlays = []
             os.makedirs(RAW_DIR, exist_ok=True)
 
-            # 先做連結按鈕：它貼齊右上角、佔掉一段寬度，跑馬燈可用範圍要靠它算。
+            # Build the link button first: it hugs the top right and takes a width, and the marquee range depends on it.
             btn_w = 0
             btn_h = 0
             if not args.no_link_button and wmtext:
@@ -626,11 +626,11 @@ def main():
                     log("      %s link button failed, skipping the overlay: %s" % (sid, exc))
                     btn_w = btn_h = 0
 
-            # 倒數：QR 按鈕下方顯示這支影片的剩餘播放時間。
-            # 用「每秒一張圖」的序列疊上去，overlay 會依時間自動換圖。
+            # Countdown: show the remaining playing time of this video under the QR button.
+            # Overlay it as a one-image-per-second sequence and overlay swaps images by time.
             if btn_w and wmtext and not args.no_countdown:
-                # 倒數長條的秒數也要跟原始長度取較小值，否則畫面會從 07:30 開始
-                # 倒數，但影片 3 分半就結束了。
+                # The countdown strip length must also take the smaller value against the source length, or the picture
+                # starts counting from 07:30 while the video ends after three and a half minutes.
                 raw_d = probe_seconds(raw) or 0
                 total = args.max_seconds or raw_d
                 if args.max_seconds and raw_d:
@@ -642,9 +642,9 @@ def main():
                         strip = os.path.join(RAW_DIR, "cd-%s.png" % sid)
                         bw, bh = wmtext.render_countdown_strip(
                             prefix, total, strip, pre=CD_PRE, suf=CD_SUF)
-                        # 用時間裁切挑出當下那一格（跟跑馬燈同一套機制）。
-                        # 不能用 1 fps 的序列輸入：跟 30 fps 主畫面在 overlay
-                        # 裡對不起來，整層會消失而且不會報錯（實測）。
+                        # Pick the current tile with a time-based crop (the same mechanism as the marquee).
+                        # A 1 fps sequence input cannot be used: it does not line up with the 30 fps main picture
+                        # inside overlay, the whole layer disappears and no error is reported (measured).
                         pre = ("crop=w=%d:h=%d:x=0:y='floor(t)*%d'"
                                % (bw, bh, bh))
                         overlays.append((strip, pre,
@@ -655,9 +655,9 @@ def main():
                 except Exception as exc:
                     log("      %s countdown failed, skipping the overlay: %s" % (sid, exc))
 
-            # 標題列的可視範圍：[原片 logo 讓出的左界, 按鈕的左緣]
-            # 左界固定留畫面寬度的 1/7 給原片左上角的 logo（自動判定容易誤判，
-            # 所以採用固定比例；要覆寫就用 --band-left 給像素值）
+            # Visible range of the title bar: [left bound freed for the source logo, left edge of the button]
+            # The left bound always frees 1/7 of the frame width for the source top-left logo (automatic detection
+            # misjudges easily, so a fixed ratio is used; override it with --band-left in pixels)
             band_left = args.band_left if args.band_left > 0 else w // 7
             band_right = w - btn_w
             span = band_right - band_left
@@ -714,7 +714,7 @@ def main():
             "bytes": os.path.getsize(out),
             "fetched_at": int(time.time()),
             "target": "raw" if args.no_normalize else "%dx%d" % (w, h),
-            # 編碼參數指紋：下一輪比對這個（+ 檔案大小）就知道要不要重編
+            # Encoding fingerprint: the next round compares this (plus the file size) to decide on a re-encode
             "fp": encode_fp(seg, args, w, h),
         }
         cut = black_tail(out, seconds, args.black_tail_min)
@@ -732,8 +732,8 @@ def main():
             % (sid, seconds or -1, "%.1f MB" % (os.path.getsize(out) / 1e6),
                time.time() - t0))
 
-    # 過場影片：--transition 給來源（URL／video id／本機檔案）。
-    # 已落地就不重抓，--no-transition 可停用。
+    # Transition clip: --transition gives the source (URL / video id / local file).
+    # Once landed it is not fetched again; --no-transition disables it.
     if args.transition and (args.force or not os.path.exists(TRANSITION_FILE)):
         src = os.path.expanduser(args.transition)
         raw = None
@@ -760,16 +760,16 @@ def main():
                         pass
                 log("transition ready: %.1fs" % (probe_seconds(TRANSITION_FILE) or -1))
 
-    # 重新產生離線播出清單：只納入真的在磁碟上、也量得到長度的檔案。
+    # Regenerate the offline playout list: only files really on disk with a readable duration are included.
     def transition_for(episode_id, p=0):
-        """某一集後面要接的過場。
+        """The transition that follows one episode.
 
-        優先使用「一集一份」的 media/_tr_<影片id>.mp4 —— 它的 QR Code 指向
-        剛播完那一集，觀眾掃碼就能去看原片；沒有專屬檔就退回共用的
-        _transition.mp4。用影片 ID 而不是序號，換清單時才不會互相蓋掉。
+        Prefer the per-episode media/_tr_<video id>.mp4, whose QR code points at the episode
+        that just finished so viewers can scan through to it; fall back to the shared
+        _transition.mp4 when there is no dedicated file. Video ids are used instead of indices so a list change cannot overwrite them.
 
-        p > 0（多趟輪播）時用 _tr_<id>_p<N>.mp4：同一支影片在不同趟要配不同的
-        short，所以每一趟都要有自己的過場檔。
+        For p > 0 (multi-pass rotation) use _tr_<id>_p<N>.mp4: the same video pairs with a different
+        short in each pass, so every pass needs its own transition file.
         """
         if args.no_transition:
             return None

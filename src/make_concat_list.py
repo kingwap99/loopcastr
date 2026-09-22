@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""從 playlist 產生 ffmpeg concat 清單，供「單一行程零縫播出」使用。
+"""Build the ffmpeg concat list from a playlist, for gapless single-process playout.
 
-只有本機檔案片段（type=file / vod_local）會被寫進清單；YouTube 之類的
-遠端片段必須先落地（build_local_content.py），否則播放中斷會變成縫。
+Only local file segments (type=file / vod_local) are written to the list; remote
+segments such as YouTube must be landed first (build_local_content.py), otherwise an
+interruption in playback becomes a gap.
 """
 
 import argparse
@@ -42,7 +43,8 @@ def main():
         if s.get("outpoint"):
             lines.append("outpoint %.3f" % float(s["outpoint"]))
             trims += 1
-        # 用浮點相加：逐段取整累積誤差會到 20 秒以上，跟實際播放長度對不上
+        # Add as floats: rounding each segment accumulates an error of 20+ seconds,
+        # which no longer matches the real playing time
         total += float(s.get("outpoint") or s.get("seconds") or 0)
 
     with open(a.out, "w") as f:

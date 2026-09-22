@@ -5,8 +5,8 @@
 	<key>Label</key>
 	<string>com.loopcastr.webui</string>
 
-	<!-- 本機控制台。預設只綁 127.0.0.1；要從別台機器開就在 ProgramArguments 加上
-	     --host 0.0.0.0 --token-file <prefix>/webui-token（沒有 token 時它會拒絕啟動）。 -->
+	<!-- Local console. Binds to 127.0.0.1 by default; to reach it from another machine add
+	     --host 0.0.0.0 --token-file <prefix>/webui-token (it refuses to start without a token). -->
 	<key>ProgramArguments</key>
 	<array>
 		<string>/opt/homebrew/bin/python3</string>

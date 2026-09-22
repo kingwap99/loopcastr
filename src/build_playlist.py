@@ -26,7 +26,8 @@ import subprocess
 import sys
 import time
 
-# yt-dlp 的位置：優先用 PATH 上的（不是每個人都用 brew 裝），找不到才退回 brew 的預設路徑。
+# Where yt-dlp lives: prefer whatever is on PATH (not everyone installs it with brew)
+# and only fall back to brew's default path.
 YTDLP = shutil.which("yt-dlp") or "/opt/homebrew/bin/yt-dlp"
 FMT = "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]/b"
 
@@ -91,7 +92,7 @@ def meta(vid, retries=3):
                 if ts > 0:
                     air = time.strftime("%Y/%m/%d %H:%M", time.localtime(ts))
                 elif up_date and up_date != "NA" and len(up_date) == 8:
-                    # 只有日期沒有時間，就當成當天 00:00
+                    # A date without a time is treated as 00:00 that day
                     air = "%s/%s/%s 00:00" % (up_date[:4], up_date[4:6], up_date[6:])
                 else:
                     air, ts = "", 0

@@ -5,7 +5,7 @@
     <key>Label</key>
     <string>com.loopcastr.playout</string>
 
-    <!-- 播出端：單一行程 concat 餵 MediaMTX。實測換片與繞回清單開頭皆 0 縫。 -->
+    <!-- Playout: one single concat process feeds MediaMTX. Measured 0 gaps at segment changes and at the wrap back to the top. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
@@ -33,7 +33,7 @@
     <key>ThrottleInterval</key>
     <integer>5</integer>
 
-    <!-- 即時編碼不要被 App Nap／排程節流壓到 -->
+    <!-- Keep live encoding from being throttled by App Nap / scheduler pressure -->
     <key>ProcessType</key>
     <string>Interactive</string>
 

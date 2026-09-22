@@ -1,5 +1,5 @@
 {
-  "_comment": "母清單範例。實際要用的是 build_playlist.py 產生的 playlist.json：python3 build_playlist.py --url '<播放清單或頻道網址>' -o playlist.json。下面三筆的影片 id 是假的，換成真的才能播；seconds 是長度（秒），build_local_content.py 會用它核對下載結果是不是完整的一支。",
+  "_comment": "Master playlist example. The real file is playlist.json, produced by build_playlist.py: python3 build_playlist.py --url '<playlist or channel URL>' -o playlist.json. The three video ids below are fake - replace them with real ones to play; seconds is the duration and build_local_content.py uses it to check that the download is a complete video.",
   "target": "rtmp://127.0.0.1:1935/live/main",
   "clients": [
     "web_embedded",

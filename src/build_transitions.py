@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""為每一集產生專屬的過場影片：右下角 QR Code 指向「剛播完那一集」的原始網址。
+"""Build a dedicated transition clip for every episode: the bottom-right QR code points at the original URL of the episode that just finished.
 
-為什麼要一集一份：過場的用途是讓觀眾掃碼去看剛播完的影片，所以 QR 內容必須
-是那一集的網址，而不是頻道網址。53 集就是 53 份過場。
+Why one per episode: the transition exists so viewers can scan through to the video that just
+finished, so the QR must hold that episode URL rather than the channel URL. 53 episodes means 53 transitions.
 
-來源是 media/_transition-clean.mp4（沒有 QR 的乾淨版）。改 QR 一律從它出發，
-不要從已經疊過的版本再疊，否則會愈疊愈花。
+The source is media/_transition-clean.mp4 (the clean copy without a QR). Always start from it when
+changing the QR; overlaying onto an already-overlaid copy gets muddier every time.
 
-用法
-  python3 build_transitions.py                 # 全部重做
-  python3 build_transitions.py --limit 3       # 試跑前 3 集
-  python3 build_transitions.py --verify 5      # 做完後抽 5 支從影片解碼驗證
+Usage
+  python3 build_transitions.py                 # redo everything
+  python3 build_transitions.py --limit 3       # trial run on the first 3 episodes
+  python3 build_transitions.py --verify 5      # decode-verify 5 of them afterwards
 """
 
 import argparse
@@ -22,11 +22,11 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 try:
-    import build_local_content as blc      # 重用它的正規化（參數才會一致）
+    import build_local_content as blc      # reuse its normalisation so the parameters match
 except ImportError:
     blc = None
 
-import wmtext                              # 標題列與 QR 按鈕的繪製
+import wmtext                              # draws the title bar and the QR button
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MEDIA = os.path.join(HERE, "media")
@@ -35,11 +35,11 @@ TMP = "/tmp/wm"
 
 
 
-FP_VERSION = 1          # 改動會影響過場畫面的程式時要 +1，讓舊檔重做
+FP_VERSION = 1          # bump when a change affects the transition picture, so old files are redone
 
 
 def transition_fp(base_id, seconds, caption, title, air, sid, p, stride):
-    """這一支過場的「參數指紋」：底稿、長度、文字、QR、贊助…沒變就不必重做。"""
+    """The parameter fingerprint of one transition: base, length, text, QR, sponsor... unchanged means no redo."""
     if blc is None:
         return ""
     import hashlib
@@ -64,7 +64,7 @@ def load_manifest(path):
 
 
 def deployed_ok(skip_dir, name, fp):
-    """已部署的那一份還在、指紋也一樣 → 可以跳過。"""
+    """The deployed copy is still there and the fingerprint matches, so it can be skipped."""
     if not skip_dir or not fp:
         return False
     p = os.path.join(skip_dir, name)
@@ -83,10 +83,10 @@ def make_qr(url, path, scale=8, border=4):
 
 
 def title_overlays(title, air, w=1280, tag="", band_left=0):
-    """標題列的 overlay：放得下就靜態置右，放不下就跑馬燈（固定視窗裁切）。
+    """The title-bar overlay: static and right-aligned when it fits, otherwise a marquee (fixed crop window).
 
-    過場的空間大（直式短片兩側是黑邊），所以 band_left 給 0，不用保留 logo 的
-    位置；集數那條則會讓開 logo。
+    A transition has plenty of room (a vertical short is pillarboxed), so band_left is 0 and no space
+    is reserved for a logo; the episode bar does leave that space.
     """
     if blc is None or not air:
         return []
@@ -112,11 +112,11 @@ def title_overlays(title, air, w=1280, tag="", band_left=0):
 
 
 def overlay(base, out, seconds, overlays):
-    """把多層 overlay 疊到 base 上。base 可以是固定過場，也可以是輪播的 short。
+    """Overlay several layers onto base. base can be the fixed transition or a rotating short.
 
-    長度上限要取「指定上限」與「base 本身長度」的較小值：疊圖用了 -loop 1
-    之後永遠不會結束，若只給 -t 上限，比它短的 base 會被撐長、尾巴變成凍結的
-    最後一格（實測踩過：53 秒的 short 變成 90 秒）。
+    The length cap must be the smaller of the requested cap and the length of base itself: after
+    overlaying with -loop 1 the stream never ends, so giving only a -t cap stretches a shorter base and
+    freezes its last frame at the tail (measured: a 53-second short became 90 seconds).
     """
     base_d = blc.probe_seconds(base) or 0
     lim = int(min(seconds, base_d)) if base_d else int(seconds)
@@ -138,10 +138,10 @@ def fetch_shorts(url, count):
 
 
 def land_short(sid, media_dir, raw_dir):
-    """下載一支 short 並正規化成與其他片段一致的參數。
+    """Download one short and normalise it to the same parameters as the other segments.
 
-    shorts 是直式（例如 1080x1920），這裡會等比縮小後補黑邊放進 1280x720，
-    也就是「放不下就縮小」的做法 —— 不裁切、不變形。
+    Shorts are vertical (1080x1920 for example), so this scales them down proportionally and pads them
+    into 1280x720 with black bars: shrink to fit, without cropping or distorting.
     """
     dst = os.path.join(media_dir, "short-%s.mp4" % sid)
     if os.path.exists(dst):
@@ -169,7 +169,7 @@ def land_short(sid, media_dir, raw_dir):
 
 
 def verify(path):
-    """從編碼後的影片抽格解碼 —— 只看畫面有東西不算數。"""
+    """Decode a frame from the encoded file: merely having pixels on screen does not count."""
     try:
         import cv2
     except ImportError:
@@ -204,22 +204,22 @@ def main():
                          "default comes from settings.json overlay.transition_caption")
     ap.add_argument("--no-button", action="store_true",
                     help="do not overlay the QR button on transitions")
-    # 播出中要換過場時，先輸出到暫存目錄、驗完再 mv 進去：mv 是原子置換，
-    # 播出端（-c copy 每個循環重開檔案）只會拿到完整的舊檔或新檔。
+    # When changing transitions while on air, write to a staging directory first and mv them in after
+    # verification: mv is atomic, so the playout (-c copy reopening files every loop) only ever sees a complete old or new file.
     ap.add_argument("--out-dir", default="",
                     help="output directory (default media/); a staging dir keeps the playout from reading half-written files")
-    # shorts 是獨立輪動、不跟影片趟數對齊：第 p 趟第 i 支用的是池子裡第
-    # (p*集數 + i - 1) 支。所以 30 支影片配 50 支 shorts 時，passes=2 會讓
-    # 第二趟從第 31 支 short 接著播。
+    # The shorts rotate independently of the video passes: pass p, video i uses short
+    # (p * episodes + i - 1) of the pool. So with 30 videos and 50 shorts, passes=2 makes the
+    # second pass continue from short 31.
     ap.add_argument("--passes", type=int, default=1,
                     help="how many passes of videos per round (default 1) so the whole shorts pool gets used")
     ap.add_argument("--stride", type=int, default=0,
-                    help="shorts 輪動的步幅（預設＝本輪集數）。分批建置時要給固定值，"
-                         "否則集數一變、所有過場的指紋都變、全部重做")
+                    help="stride of the shorts rotation (default: the episode count of this round). A batched build must pass a fixed value,"
+                         "otherwise a change in the episode count changes every transition fingerprint and redoes them all")
     ap.add_argument("--skip-dir", default="",
-                    help="已部署的目錄；同一支過場的參數指紋沒變就跳過不做（分批建置用）")
+                    help="deployed directory; a transition whose fingerprint is unchanged is skipped (used by the batched build)")
     ap.add_argument("--force", action="store_true",
-                    help="忽略指紋，全部重做")
+                    help="ignore fingerprints and redo everything")
     a = ap.parse_args()
 
     out_dir = a.out_dir or MEDIA
@@ -235,7 +235,7 @@ def main():
         eps = eps[:a.limit]
     os.makedirs(TMP, exist_ok=True)
 
-    # 過場底稿：固定一支，或一池 shorts 輪流用
+    # Transition base: one fixed clip, or a pool of shorts used in turn
     if a.shorts_url:
         n = min(a.shorts_count or 30, 50)
         ids = fetch_shorts(a.shorts_url, n)
@@ -262,14 +262,14 @@ def main():
         for i, seg in enumerate(eps, 1):
             sid = seg["id"]
             url = "https://youtu.be/%s" % sid
-            # 用影片 ID 命名，不要用序號 —— 序號在換清單時會互相覆蓋，
-            # 而且切回舊清單時會拿到錯的 QR。第 2 趟之後加 _pN，因為同一支影片
-            # 在不同趟要配不同的 short。
+            # Name by video id, not by index: indices overwrite each other when the list changes,
+            # and switching back to an old list would pick up the wrong QR. From pass 2 on add _pN, because the same video
+            # pairs with a different short in each pass.
             name = "_tr_%s.mp4" % sid if p == 0 else "_tr_%s_p%d.mp4" % (sid, p + 1)
             out = os.path.join(out_dir, name)
 
-            # QR：位置與格式都跟集數一模一樣（右上角、同樣的面板與說明文字），
-            # 不做任何區分。先做按鈕才知道佔多寬，跑馬燈的右界要靠它算。
+            # QR: position and format are identical to an episode (top right, same panel and caption),
+            # with no distinction. The button is built first because the marquee right edge depends on its width.
             btn = os.path.join(TMP, "qrb-%s.png" % sid)
             btn_w = 0
             if not a.no_button:
@@ -278,7 +278,7 @@ def main():
                                                  qr_px=blc.QR_PX,
                                                  **kw)
 
-            # 標題列：右界到按鈕左緣，左界 0（直式短片兩側是黑邊，不用讓開 logo）
+            # Title bar: right edge at the button left edge, left edge 0 (a vertical short is pillarboxed, so no logo space is needed)
             ov = title_overlays(seg.get("title") or "", seg.get("air_date") or "",
                                 w=1280 - btn_w, tag=sid, band_left=0)
             if not a.no_button:
@@ -291,11 +291,11 @@ def main():
                                           show_url=False)
                 ov.append((sb, None, "x=W-w:y=H-h"))
 
-            # shorts 連續輪動：第 p 趟第 i 支用池子裡第 (p*len(eps) + i - 1) 支。
-            # ⚠ 這兩行原本被縮排在「有贊助連結」的 if 裡面 —— 沒設 sponsor_url 就
-            #   一支過場都不會做（實測 .22：concat 六段全是影片、_tr_ 檔 0 個）。
-            # 步幅：預設是「這一輪的集數」，分批建置時由 --stride 給固定值（例如
-            # 模式的 video_limit），這樣中途加入集數不會讓已做好的過場全部重做。
+            # Continuous shorts rotation: pass p, video i uses pool entry (p * len(eps) + i - 1).
+            # WARNING: these two lines used to be indented inside the has-a-sponsor-link if, so with no
+            #   sponsor_url set no transition was built at all (measured on .22: the six concat segments were all videos and there were zero _tr_ files).
+            # Stride: by default the episode count of this round; a batched build passes a fixed value (for example
+            # the mode video_limit) so adding episodes midway does not redo every finished transition.
             stride = a.stride or len(eps)
             idx = p * stride + (i - 1)
             base = bases[idx % len(bases)]
@@ -324,7 +324,7 @@ def main():
                 done += 1
     print("encoding done OK=%d FAIL=%d in %.0f s" % (done, fail, time.time() - t0))
 
-    # 記下指紋（含 bytes）：下一輪如果檔案還在、指紋一樣、大小一樣就跳過。
+    # Record the fingerprint (with bytes): the next round skips when the file is still there with the same fingerprint and size.
     if a.skip_dir:
         mp = os.path.join(a.skip_dir, "transitions.json")
         rec = load_manifest(mp)

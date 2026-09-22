@@ -1,15 +1,15 @@
 #!/bin/bash
-# 把 MediaMTX 的 live/main 推進 YouTube 直播。
+# Push MediaMTX live/main into the YouTube live stream.
 #
-# 單一長命 publisher：上游怎麼換手、重開、切墊片，YouTube 端都只看到這一條
-# 連續連線。這是把 24/7 縫隙問題從 YouTube 端移除掉的關鍵。
+# One long-lived publisher: however the upstream hands over, reopens or splices, YouTube only
+# sees this one continuous connection. That is the key to removing the 24/7 gap problem on the YouTube side.
 #
-# 為什麼要自己看門（2026-09-17 加）：
-#   實測遇過 ffmpeg 行程還活著、但與 MediaMTX 的連線已經斷掉（MediaMTX 的
-#   readers 變 0）而它不會結束的狀況。這種「卡住」不會觸發 launchd 的
-#   KeepAlive，會一路黑下去 —— 當晚就是這樣黑了 28 分鐘。
-#   所以 ffmpeg 改用背景執行，同時盯 readers；連續 WATCH_MISSES 次看不到
-#   自己就把 ffmpeg 砍掉重連。
+# Why it watches itself (added 2026-09-17):
+#   Measured: ffmpeg stayed alive while its connection to MediaMTX was already gone (readers
+#   went to 0) and it never exited. A stall like that does not trigger the launchd
+#   KeepAlive, so it stays black - that is how it went dark for 28 minutes that night.
+#   So ffmpeg runs in the background while readers are watched; after WATCH_MISSES misses in a
+#   row, ffmpeg is killed and reconnected.
 set -u
 export PATH=/opt/homebrew/bin:$PATH
 
@@ -42,7 +42,7 @@ except Exception:
 }
 
 wait_ready() {
-  # 上游還沒開始推就一直等，不要每 3 秒去敲 YouTube 的 ingest 一次。
+  # While the upstream is not publishing yet, keep waiting instead of hitting the YouTube ingest every 3 seconds.
   while :; do
     if curl -sf --max-time 2 "$API/v3/paths/get/$PATH_NAME" | grep -q '"ready":true'; then
       return 0
@@ -52,8 +52,8 @@ wait_ready() {
 }
 
 reap_orphans() {
-  # 前一次留下的孤兒 ffmpeg 可能還佔著 YouTube 的 publisher 位置，
-  # 讓新的一條連不上（YouTube ingest 一個金鑰只收一條）。
+  # An orphaned ffmpeg from the previous run may still hold the YouTube publisher slot,
+  # which stops the new one from connecting (a YouTube ingest key accepts only one).
   pkill -f "ffmpeg.*live2" 2>/dev/null
   sleep 1
 }

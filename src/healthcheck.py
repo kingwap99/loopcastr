@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""播出鏈路健康檢查。由 launchd 每 60 秒跑一次（com.loopcastr.health）。
+"""Broadcast chain health check. launchd runs it every 60 seconds (com.loopcastr.health).
 
-檢查鏈路上「真的有在動」的三個點，而不是只看程序存不存在：
+It checks the three points that prove the chain is really moving, rather than only whether a process exists:
 
-  1. MediaMTX 的 live/main 是否 ready
-  2. 是否掛著讀者（＝ yt_publish.sh 的推流端還連著）
-  3. inboundBytes 在 6 秒內是否真的成長（＝播出端真的在餵）
+  1. whether MediaMTX live/main is ready
+  2. whether a reader is attached (= the yt_publish.sh publisher is still connected)
+  3. whether inboundBytes really grows within 6 seconds (= the playout is really feeding)
 
-程序活著但來源卡住、或推流端掉了，這三項都抓得到。加 --check-youtube 會再
-對外查 YouTube 的 is_live，但那是公開查詢，比較貴，預設不開。
+All three catch a live process with a stalled source, or a dropped publisher. --check-youtube
+also queries YouTube is_live externally, but that is a public lookup and costs more, so it is off by default.
 
-狀態變化才告警（正常->異常、異常->正常），持續異常每 30 分鐘提醒一次，
-避免每分鐘洗版。告警寫進 logs/alerts.jsonl；若存在 alert_webhook 檔
-（內容是一條 URL），會另外 POST 一份 JSON 過去。
+Alerts only on state changes (ok -> bad, bad -> ok); a fault that persists reminds every 30 minutes
+so it does not flood every minute. Alerts go to logs/alerts.jsonl; when an alert_webhook file
+(containing one URL) exists, a JSON copy is also POSTed there.
 
-用法
-  python3 healthcheck.py                 # 檢查一次，異常時 exit 1
-  python3 healthcheck.py --check-youtube # 連 YouTube 端一起查
-  python3 healthcheck.py --json          # 輸出機器可讀結果
+Usage
+  python3 healthcheck.py                 # check once, exit 1 when unhealthy
+  python3 healthcheck.py --check-youtube # also check the YouTube side
+  python3 healthcheck.py --json          # machine-readable output
 """
 
 import argparse
@@ -39,8 +39,8 @@ TG_FILE = os.path.join(HERE, "telegram.json")
 
 API = os.environ.get("API", "http://127.0.0.1:9997")
 PATH_NAME = os.environ.get("PATH_NAME", "live/main")
-GROW_WINDOW = 6.0          # 量流量成長的觀察窗
-RE_ALERT_SEC = 1800        # 持續異常時，多久重提醒一次
+GROW_WINDOW = 6.0          # window used to measure traffic growth
+RE_ALERT_SEC = 1800        # how often a persisting fault is reminded
 
 
 def load(path, default):
@@ -82,7 +82,7 @@ def yt_is_live(video_id):
 
 
 def check(youtube_id=None):
-    """回傳 (ok, 問題清單, 觀測值)。"""
+    """Return (ok, list of problems, observed values)."""
     problems = []
     obs = {"api_ok": False}
     try:
@@ -124,10 +124,10 @@ def check(youtube_id=None):
 
 
 def playout_uptime_days():
-    """播出端「這一條命」已經跑多久（天）。讀 playout.log 最後一次啟動時間。
+    """How long the current playout process has been up, in days, from the last start time
 
-    為什麼需要：concat 的 -stream_loop -1 時間軸是連續累加的（實測），FLV 的
-    32 位元毫秒上限約 49.7 天，跑超過會回繞。定期重啟讓時間軸歸零。
+    Why it is needed: the concat -stream_loop -1 timeline accumulates continuously (measured),
+    and the 32-bit millisecond limit of FLV is about 49.7 days, after which it wraps. Periodic restarts reset it.
     """
     path = os.path.join(HERE, "logs", "playout.log")
     last = None
@@ -149,7 +149,7 @@ def playout_uptime_days():
     return (time.time() - t) / 86400.0
 
 
-# 服務 label 前綴不寫死：改名前（loopcastr 之前叫 ytpl）的安裝是 com.ytpl.*。
+# The service label prefix is not hard-coded: installs from before the rename (loopcastr was ytpl) are com.ytpl.*.
 def service_prefix():
     try:
         for name in sorted(os.listdir(HERE)):
@@ -164,11 +164,11 @@ SVC = service_prefix()
 
 
 def kick(label):
-    """對指定 launchd 服務做 kickstart -k（等於重啟）。
+    """Run kickstart -k on the given launchd service (which restarts it).
 
-    先試 system domain（LaunchDaemon），再退回 gui domain（LaunchAgent）。
-    服務從 Agent 換成 Daemon 的過程中兩種都可能存在，這樣兩邊都不會壞。
-    system domain 只有 root 敲得動，所以 health 服務本身以 root 執行。
+    The system domain (LaunchDaemon) is tried first, then the gui domain (LaunchAgent).
+    During a migration from Agent to Daemon both can exist, so neither path breaks.
+    Only root can drive the system domain, which is why the health service itself runs as root.
     """
     last = ""
     for target in ("system/%s" % label, "gui/%d/%s" % (os.getuid(), label)):
@@ -187,11 +187,11 @@ def kick(label):
 
 
 def heal(obs):
-    """依症狀重啟對應服務。回傳動作清單。
+    """Restart the service that matches the symptom. Returns the list of actions.
 
-    刻意分工：沒讀者＝推流端掉了，重啟推流端；流量不成長＝播出端卡住，重啟
-    播出端。重啟播出端會讓時間軸回到第一段，所以只在真的卡住時才做。
-    API 完全問不到時不動手，避免把正常的東西重啟掉。
+    The split is deliberate: no readers means the publisher dropped, so restart the publisher;
+    no growth means the playout is stuck, so restart the playout. Restarting it sends the
+    timeline back to the first segment, so it is only done when it is really stuck. When the API cannot be reached at all nothing is touched.
     """
     if not obs.get("api_ok"):
         return []
@@ -210,10 +210,10 @@ def tg_config():
 
 
 def tg_discover_chat_id(tok):
-    """從 getUpdates 找最近一個跟 bot 講過話的 chat id。
+    """Find the most recent chat id that has talked to the bot, from getUpdates.
 
-    Telegram 的 bot 不能主動對人發訊息，必須對方先敲過它一次。所以第一次
-    設定時請對 bot 傳 /start，這裡就會自動抓到 chat_id 並記進 telegram.json。
+    A Telegram bot cannot message a person first; the person has to talk to it once. So on the
+    first setup, send /start to the bot and the chat_id is picked up and stored in telegram.json.
     """
     try:
         with urllib.request.urlopen(
@@ -231,7 +231,7 @@ def tg_discover_chat_id(tok):
 
 
 def tg_send(text):
-    """回傳 (成功?, 說明)。token 放 telegram.json（chmod 600），不進版控。"""
+    """Return (ok?, detail). The token lives in telegram.json (chmod 600) and is never committed."""
     cfg = tg_config()
     tok = (cfg.get("token") or "").strip()
     if not tok:
@@ -335,7 +335,7 @@ def main():
     vid = args.youtube_id or (load(os.path.join(HERE, "stream.json"), {}) or {}).get("video_id")
     do_yt = bool(args.check_youtube and vid)
     if do_yt and last_yt and (now - last_yt) < args.youtube_every:
-        do_yt = False          # 還沒到查 YouTube 的時間，這輪只查本地鏈路
+        do_yt = False          # not time to check YouTube yet; this round only checks the local chain
     ok, problems, obs = check(vid if do_yt else None)
     yt_stamp = int(now) if do_yt else int(last_yt)
 
@@ -353,7 +353,7 @@ def main():
             record["healed"] = acts
             last_heal = now
 
-    # 預防性重啟：鏈路正常但播出端連跑太久時，主動歸零時間軸。
+    # Preventive restart: when the chain is healthy but the playout has run too long, reset the timeline.
     if ok and args.recycle_after_days > 0 and (now - last_recycle) > 86400:
         days = playout_uptime_days()
         if days is not None and days >= args.recycle_after_days:
@@ -364,11 +364,11 @@ def main():
 
     if not ok:
         overdue = (now - last_alert) > RE_ALERT_SEC
-        # 第一次告警要連續failed達門檻；已經在告警狀態中則照原本的 30 分鐘重提醒。
+        # The first alert needs a run of failures; while already alerting, keep the 30-minute reminder.
         due = ((was_ok and streak >= args.alert_after)
                or ((not was_ok) and overdue))
-        # 只有真的發過中斷通知，之後才發恢復通知。否則像「抖一下 30 秒自己好」
-        # 這種情況會只收到一則沒有對應中斷的「已恢復」，反而更困惑。
+        # A recovery notice is only sent after a real outage notice, otherwise a 30-second blip
+        # would produce a recovery with no matching outage, which is more confusing than useful.
         alerted_down = bool(prev.get("alerted_down"))
         record["alerted"] = due
         if due:
