@@ -145,6 +145,13 @@ def check(mode, cfg, f, args):
     if not vids:
         log("could not list videos, skipping this round")
         return False
+    # Compare like for like: the master list holds at most video_limit videos,
+    # so the listing has to be cut the same way.  Without this every round looks
+    # like "N new videos" whenever the limit is below the channel size, and the
+    # whole playlist gets rebuilt and restarted every refresh interval.
+    limit = cfg.get("video_limit") or 0
+    if limit:
+        vids = vids[:limit]
     old_vids = []
     if os.path.exists(f["mother"]):
         old_vids = [s["id"] for s in
