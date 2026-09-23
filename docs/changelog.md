@@ -942,3 +942,20 @@ repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU�
 【實測】.22 的真實後台（headless Chrome 載入 `192.168.31.22:8787`）：
 `<img class="sponqr" src="https://raw.githubusercontent.com/kingwap99/loopcastr/main/assets/sponsor-qr.png">`
 ＋「來源：贊助 QR 圖片」＋「已隱藏：連結還留著，但影片不會畫這顆 QR」。
+
+## 換來源頻道被「拒絕縮短」擋下（2026-09-23）
+
+使用者把 `news` 模式的來源換成另一個頻道後，建置在掃描階段就停住：
+
+    ERROR: the source listing looks partial: 893 videos now vs 1489 before.
+    Refusing to shrink the playlist; playlist-news.json is left untouched.
+
+原因是 2026-09-22 加的防縮水保護拿「上一次的原始 listing 數」當基準，而那份基準是舊頻道
+（`@TPP_Media`，1489 支）留下的 —— 換頻道本來就會比較短，保護卻把它當成 yt-dlp 只回了
+部分結果。
+
+修法：只有在**同一個來源**時才套用（比對輸出的 `source_playlist`，忽略結尾斜線）；
+換來源時印一行 `source changed (...); not applying the shrink guard` 之後照常寫入。
+
+【實測】同來源仍會擋（893 < 9999 → 直接拒絕、檔案不動）；換來源則放行
+（寫入 `source_count: 893`、`source_playlist` 更新為新頻道）。

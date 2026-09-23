@@ -128,16 +128,19 @@ def main():
     elif "list=" in url and "/playlist?" in url:
         url = "https://www.youtube.com/playlist?list=" + url.split("list=")[1].split("&")[0]
 
-    # Compare against the previous source count before touching anything: the
-    # listing above can come back partial, and overwriting the master playlist
-    # with it would cut a 24/7 channel down to whatever that answer contained.
+    # Compare against the previous source count before touching anything: the listing above can
+    # come back partial, and overwriting the master playlist with it would cut a 24/7 channel
+    # down to whatever that answer contained. The comparison only means something for the same
+    # source: pointing a mode at another channel or playlist legitimately gives a shorter list.
     prev_raw = None
+    prev_src = ""
     if os.path.exists(a.out):
         try:
             with open(a.out, encoding="utf-8") as fh:
                 old = json.load(fh)
             if isinstance(old, dict):
                 prev_raw = old.get("source_count")
+                prev_src = str(old.get("source_playlist") or "")
                 if prev_raw is None and not a.max_age_hours:
                     prev_raw = len(old.get("segments") or [])
         except (OSError, ValueError):
@@ -153,11 +156,15 @@ def main():
     # Compare the raw listing, not the limited one: lowering --limit is a
     # deliberate choice, while a shorter listing means yt-dlp answered partial.
     if not a.allow_shrink and prev_raw and raw_count < prev_raw:
-        print("ERROR: the source listing looks partial: %d videos now vs %d before. "
-              "Refusing to shrink the playlist; %s is left untouched. "
-              "Pass --allow-shrink if the videos were really removed."
-              % (raw_count, prev_raw, a.out), file=sys.stderr)
-        return 3
+        if prev_src and prev_src.rstrip("/") != url.rstrip("/"):
+            print("source changed (%s -> %s); not applying the shrink guard"
+                  % (prev_src, url), flush=True)
+        else:
+            print("ERROR: the source listing looks partial: %d videos now vs %d before. "
+                  "Refusing to shrink the playlist; %s is left untouched. "
+                  "Pass --allow-shrink if the videos were really removed."
+                  % (raw_count, prev_raw, a.out), file=sys.stderr)
+            return 3
 
     segs = []
     fail = 0
