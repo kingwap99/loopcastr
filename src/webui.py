@@ -66,6 +66,10 @@ def set_prefix(path):
         return os.path.join(PREFIX, name)
 
     MEDIA = pick("media")
+    # media.dir can point the library at another disk; an empty value keeps the default folder.
+    _md = str(((read_json(SETTINGS, {}) or {}).get("media") or {}).get("dir") or "").strip()
+    if _md:
+        MEDIA = _md if os.path.isabs(_md) else os.path.join(PREFIX, _md)
     LOGS = pick("logs")
     MODES = pick("modes.json")
     SETTINGS = pick("settings.json")
@@ -199,7 +203,9 @@ SETTINGS_SCHEMA = [
         ("lang", "介面與畫面語言", "choice", ["zh", "en"], None,
          "後台右上角的切換鈕就是改這個；畫面字樣（首播日期、QR 說明）也跟著換", "zh"),
     ]),
-    ("media", "畫質與流量", [
+    ("media", "媒體與畫質", [
+        ("dir", "媒體資料夾", "text", None, None,
+         "留空＝程式目錄下的 media；要放到別顆硬碟就填絕對路徑（例如 /Volumes/media/loopcastr）。改完下次建置生效", ""),
         ("target", "解析度", "choice", ["1080", "720", "480"], None,
          "所有片段都正規化到這個尺寸。播出端是純複製，所以全部必須一致", "720"),
         ("fps", "影格率", "int", None, (1, 60), "一般用 30", 30),
@@ -1401,7 +1407,11 @@ UI_TEXT = {
     "越快＝同流量下畫質越差；veryfast 是多數情況的平衡點":
         "faster means worse quality at the same bitrate; veryfast is the usual balance",
     # ── settings.json form
-    "畫質與流量": "Quality and traffic",
+    "媒體與畫質": "Media and quality",
+    "媒體資料夾": "Media folder",
+    "留空＝程式目錄下的 media；要放到別顆硬碟就填絕對路徑（例如 /Volumes/media/loopcastr）。改完下次建置生效":
+        "empty = the media folder beside the programs; use an absolute path to keep the library on another disk "
+        "(for example /Volumes/media/loopcastr). Takes effect on the next build",
     "畫面元素": "On-screen elements",
     "內容處理": "Content handling",
     "解析度": "Resolution",

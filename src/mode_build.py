@@ -27,7 +27,6 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MEDIA = os.path.join(HERE, "media")
 
 # Quality and layout parameters live in settings.json; they are read from there so there is no second hard-coded copy.
 sys.path.insert(0, HERE)
@@ -37,6 +36,9 @@ except ImportError:
     BLC = None
 
 import playout_ctl as pctl      # boundary calculation and restarting (shared with refreshwatch)
+
+# settings.json media.dir can put the library on another disk; the builders share one resolver.
+MEDIA = BLC.media_root() if BLC else os.path.join(HERE, "media")
 
 
 def setting(section, key, default):

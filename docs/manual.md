@@ -287,13 +287,28 @@ as if the mechanism did not exist.
 
 | Section | Contents |
 |---|---|
-| `media` | `target` (720 / 1080 / 480), `fps`, `venc`, `abr`, `audio_fade` (fade in/out seconds at a segment change), `max_seconds` |
+| `media` | `dir` (where the library lives; empty = the `media/` folder beside the programs), `target` (720 / 1080 / 480), `fps`, `venc`, `abr`, `audio_fade` (fade in/out seconds at a segment change), `max_seconds` |
 | `overlay` | `date_label`, position (`overlay_y` / `overlay_margin` / `band_left`), marquee (`marquee_speed` / `marquee_gap`), button (`link_button` / `link_caption`), `countdown`, `transition_caption`, and the sponsor block (`sponsor_qr_image` / `sponsor_url` / `sponsor_show` / `sponsor_caption`). **Every caption has an `_en` counterpart** (for example `date_label_en`) used when `ui.lang=en` |
 | `ui` | `lang`: `zh` (Chinese) / `en` (English). Both the console interface and the on-screen captions follow it, and **only one language is shown at a time**; the Chinese / English switch at the top right of the console changes it |
 | `content` | `black_tail_min` (how many seconds of black at the tail count as a black tail) |
 
 To change *what* is broadcast, edit `modes.json`; do not put source information into `settings.json`, or the two
 sources of truth will fight each other.
+
+#### Putting the library on another disk
+
+`media.dir` moves the whole content library - episodes, transitions, the shorts pool and the raw downloads -
+to another volume. This is the supported way to keep a 24/7 library off the system disk:
+
+1. Set `media.dir` to the new location (an absolute path, for example `/Volumes/media/loopcastr`).
+2. Copy the files there: `rsync -a ~/loopcastr/media/ /Volumes/media/loopcastr/`. Copying rather than
+   moving keeps the library that is on air intact until the switch is verified.
+3. Rebuild the concat list (the console button, or `make_concat_list.py`) so its paths point at the new
+   location, then restart the playout.
+4. Delete the old copy once the stream is confirmed healthy.
+
+The playout itself never reads `media.dir`: it follows the absolute paths in the concat list, which is why
+step 3 matters. Every builder resolves the setting, and `--media-dir` still overrides it for a single run.
 
 ### Troubleshooting
 

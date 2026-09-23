@@ -959,3 +959,21 @@ repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU�
 
 【實測】同來源仍會擋（893 < 9999 → 直接拒絕、檔案不動）；換來源則放行
 （寫入 `source_count: 893`、`source_playlist` 更新為新頻道）。
+
+## 可自訂 media 資料夾（2026-09-23）
+
+起因：換頻道要重建 99 支時發現目標機只剩 20 GiB（已用 96%），而 `media/` 已經佔 24 GB
+（舊頻道 66 支影片 16.9 GB ＋ 135 段過場 3.3 GB ＋ `media/.raw` 4 GB ＋ shorts 1.4 GB），
+新的 99 支連原始檔大約要 25 GB，跑下去會中途爆碟。
+
+新增 `settings.json` 的 `media.dir`：留空＝程式目錄下的 `media/`，填絕對路徑就把整個內容庫
+指到別顆硬碟。三個建置程式（`build_local_content`、`build_transitions`、`mode_build`）共用
+`build_local_content.media_root()` 解析，`--media-dir` 仍然可以逐次覆寫；後台的「媒體與畫質」
+多一個「媒體資料夾」欄位，內容大小也跟著改讀該目錄。
+
+播出端**不讀**這個設定 —— 它只認 concat 清單裡的絕對路徑，所以搬完資料庫要重建 concat 清單
+再重啟播出端（manual 有寫四步流程：設路徑 → rsync → 重建清單並重啟 → 確認後刪舊的）。
+
+【實測】把 `media.dir` 指到 scratch 目錄：三個程式回報的 `MEDIA_DIR`／`MEDIA` 都跟著改、
+`build_local_content.py --status` 改去新目錄找檔案、後台的 `media_size` 也改讀新目錄
+（在新目錄放一個 1 MB 檔案，後台就顯示 1.0 MB）。

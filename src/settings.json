@@ -5,6 +5,7 @@
     "lang": "zh"
   },
   "media": {
+    "dir": "",
     "target": "720",
     "fps": 30,
     "venc": "libx264",

@@ -38,9 +38,6 @@ except ImportError:
     wmtext = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MEDIA_DIR = os.path.join(HERE, "media")
-RAW_DIR = os.path.join(MEDIA_DIR, ".raw")
-MANIFEST = os.path.join(MEDIA_DIR, "manifest.json")
 
 # ── Shared settings ─────────────────────────────────────────────────
 # settings.json is the copy meant to be edited by hand (the WebUI edits it too). The values below are
@@ -67,6 +64,27 @@ def cfg(section, key, default):
     except (KeyError, TypeError):
         return default
     return default if v is None else v
+
+
+def media_root():
+    """Where the media library lives: settings.json media.dir wins, else the folder beside the programs.
+
+    Pointing this at another disk is the supported way to keep a 24/7 library off the system volume;
+    a relative value is resolved against this directory. Everything that writes content
+    (build_local_content, build_transitions, mode_build) resolves it here, and --media-dir still
+    overrides it for a single run. The playout does not read this: it follows the absolute paths in
+    the concat list, so after moving the library you rebuild the list (or switch edition) and restart
+    the playout.
+    """
+    d = str(cfg("media", "dir", "") or "").strip()
+    if not d:
+        return os.path.join(HERE, "media")
+    return d if os.path.isabs(d) else os.path.join(HERE, d)
+
+
+MEDIA_DIR = media_root()
+RAW_DIR = os.path.join(MEDIA_DIR, ".raw")
+MANIFEST = os.path.join(MEDIA_DIR, "manifest.json")
 
 # Landing at 720p is enough (the normalisation target is 720p); fetching 1080p only doubles the bandwidth.
 # m3u8 must be excluded: measured, Ig3vtqtXowY over HLS only gives 137s while DASH gives the full 270s.

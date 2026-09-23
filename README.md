@@ -107,7 +107,7 @@ such page to open.
 
 | File | Covers |
 |---|---|
-| `src/settings.json` | resolution, fps, bitrate, **audio fade seconds**, watermark and marquee, black-tail threshold |
+| `src/settings.json` | **media folder location**, resolution, fps, bitrate, **audio fade seconds**, watermark and marquee, black-tail threshold |
 | `src/modes.json` | per-mode sources: channel, duration cap, shorts pool, rescan interval |
 | `src/playlist.example.json` | sample master list; generate the real `playlist.json` with `build_playlist.py` (gitignored) |
 

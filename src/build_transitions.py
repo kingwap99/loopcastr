@@ -29,7 +29,8 @@ except ImportError:
 import wmtext                              # draws the title bar and the QR button
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MEDIA = os.path.join(HERE, "media")
+# Follow the configured library location (settings.json media.dir), like every other builder does.
+MEDIA = blc.media_root() if blc else os.path.join(HERE, "media")
 CLEAN = os.path.join(MEDIA, "_transition-clean.mp4")
 TMP = "/tmp/wm"
 
