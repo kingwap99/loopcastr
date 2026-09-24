@@ -5,9 +5,9 @@
 	<key>Label</key>
 	<string>com.loopcastr.webui</string>
 
-	<!-- Local console. Binds to 127.0.0.1 by default; to reach it from another machine add the host
-	     and token-file arguments (host 0.0.0.0, token-file <prefix>/webui-token). Without a token it
-	     refuses to start. -->
+	<!-- Local console. Binds to 127.0.0.1 by default; to reach it from another machine run install.sh
+	     with its webui-host and webui-token-file options, which add the host and token-file arguments
+	     here. Without a token the console refuses to start. -->
 	<key>ProgramArguments</key>
 	<array>
 		<string>__PYTHON__</string>

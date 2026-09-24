@@ -17,6 +17,8 @@ SCOPE="daemon"        # daemon | agents
 DO_SERVICES=1
 FORCE_SERVICES=0
 DRY=0
+WEBUI_HOST=""         # non-empty exposes the console on that address (it then needs a token)
+WEBUI_TOKEN_FILE=""   # defaults to <prefix>/webui-token
 
 usage() {
   cat <<'EOF'
@@ -28,6 +30,9 @@ Options
   --agents           install as LaunchAgents (no root, but they only run with a graphical login)
   --no-services      copy files only, leave launchd alone
   --force-services   register the services even when there is no broadcast content yet
+  --webui-host HOST  expose the console on HOST (e.g. 0.0.0.0) instead of localhost only;
+                     webui.py refuses to start without a token, so one is generated if needed
+  --webui-token-file PATH   where the console reads its token (default <prefix>/webui-token)
   --dry-run          show what would happen without changing anything
   -h, --help         show this help
 
@@ -48,6 +53,8 @@ while [ $# -gt 0 ]; do
     --agents)         SCOPE="agents"; shift ;;
     --no-services)    DO_SERVICES=0; shift ;;
     --force-services) FORCE_SERVICES=1; shift ;;
+    --webui-host)     WEBUI_HOST="${2:-}"; shift 2 ;;
+    --webui-token-file) WEBUI_TOKEN_FILE="${2:-}"; shift 2 ;;
     --dry-run)        DRY=1; shift ;;
     -h|--help)        usage ;;
     *) echo "unknown argument: $1 (use -h for usage)" >&2; exit 2 ;;
@@ -56,6 +63,7 @@ done
 
 [ -n "$PREFIX" ] || { echo "--prefix must not be empty" >&2; exit 2; }
 case "$PREFIX" in /*) ;; *) echo "--prefix must be an absolute path" >&2; exit 2 ;; esac
+[ -n "$WEBUI_TOKEN_FILE" ] || WEBUI_TOKEN_FILE="$PREFIX/webui-token"
 # Placeholder substitution uses python3 rather than sed, so paths containing & | or backslashes are safe.
 [ "$SCOPE" = "daemon" ] || [ "$SCOPE" = "agents" ] || { echo "internal error: scope" >&2; exit 2; }
 
@@ -143,6 +151,30 @@ done
 run find "$PREFIX" -maxdepth 1 -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
 
 step "Generating service definitions (plist placeholder substitution)"
+# An operator who exposes the console has to add --host and --token-file to its plist by hand. Regenerating
+# that plist drops them, the console rebinds to localhost and remote access dies with no error. Say so
+# instead of silently breaking it, and offer the two options that put them back.
+if [ "$DRY" = 0 ] && [ -z "$WEBUI_HOST" ] && [ -f "$PREFIX/com.loopcastr.webui.plist" ]; then
+  old_extra="$("$PYTHON" - "$PREFIX/com.loopcastr.webui.plist" <<'PYCHK'
+import plistlib, sys
+try:
+    args = (plistlib.load(open(sys.argv[1], "rb")).get("ProgramArguments") or [])[2:]
+except Exception:
+    args = []
+print(" ".join(args))
+PYCHK
+)"
+  if [ -n "$old_extra" ]; then
+    say "  NOTE: the existing console plist passes extra arguments:"
+    say "        $old_extra"
+    say "        this run regenerates it without them. Keep them with:"
+    say "        ./install.sh --webui-host <host> --webui-token-file $WEBUI_TOKEN_FILE"
+  fi
+fi
+if [ -n "$WEBUI_HOST" ] && [ "$DRY" = 0 ] && [ ! -f "$WEBUI_TOKEN_FILE" ]; then
+  run sh -c "umask 077; openssl rand -hex 24 > \"$WEBUI_TOKEN_FILE\""
+  say "  generated the console token: $WEBUI_TOKEN_FILE"
+fi
 for f in "$SRC_DIR"/launchd/*.plist; do
   label="$(basename "$f")"
   out="$PREFIX/$label"
@@ -150,13 +182,21 @@ for f in "$SRC_DIR"/launchd/*.plist; do
     printf '   [dry-run] would generate %s\n' "$out"
     continue
   fi
-  "$PYTHON" - "$f" "$out" "$PREFIX" "$HOME_DIR" "$USER_NAME" "${YT_VIDEO_ID:-}" "$PYTHON" "$PYTHON_PATH" <<'PYGEN'
-import sys
-src, dst, prefix, home, user, vid, py, pypath = sys.argv[1:9]
+  "$PYTHON" - "$f" "$out" "$PREFIX" "$HOME_DIR" "$USER_NAME" "${YT_VIDEO_ID:-}" "$PYTHON" "$PYTHON_PATH" "$WEBUI_HOST" "$WEBUI_TOKEN_FILE" <<'PYGEN'
+import os, sys
+src, dst, prefix, home, user, vid, py, pypath, whost, wtoken = sys.argv[1:11]
 t = open(src, encoding="utf-8").read()
 t = (t.replace("__HOME__/loopcastr", prefix).replace("__HOME__", home)
       .replace("__YT_VIDEO_ID__", vid).replace("__USER__", user)
       .replace("__PYTHON_PATH__", pypath).replace("__PYTHON__", py))
+if whost and os.path.basename(src) == "com.loopcastr.webui.plist":
+    import re
+    m = re.search(r"([ \t]*<string>%s/webui\.py</string>\n)" % re.escape(prefix), t)
+    if not m:
+        raise SystemExit("cannot find the console program arguments in " + src)
+    extra = ["--host", whost, "--token-file", wtoken]
+    indent = m.group(1)[:len(m.group(1)) - len(m.group(1).lstrip())]
+    t = t.replace(m.group(1), m.group(1) + "".join(indent + "<string>%s</string>\n" % v for v in extra))
 open(dst, "w", encoding="utf-8").write(t)
 PYGEN
   if [ "$SCOPE" = "agents" ]; then

@@ -107,6 +107,12 @@ interpreter, so starting it as `/usr/bin/python3` (which has no `qrcode`) makes 
 write videos with no QR codes. When that is the case the console shows a red warning at the top and
 refuses to start a build.)
 
+The console binds to localhost only. To reach it from another machine, install with
+`./install.sh --webui-host 0.0.0.0` (`webui.py` refuses to run exposed without a token, so the
+installer generates `<prefix>/webui-token` when there is none; change the path with
+`--webui-token-file`). Those two settings live in the service plist, so pass them on every upgrade -
+`install.sh` warns when it is about to regenerate a console plist that had extra arguments.
+
 It is one page of blocks, top to bottom in the order you use them:
 
 | Block | Contents |
@@ -305,6 +311,11 @@ QR 與字樣，都是 `modes.json` ＋ 控制台「建置並切換（開始直�
 `/opt/homebrew/bin/python3 ~/loopcastr/webui.py`。控制台建置用的是**它自己的**直譯器，所以用
 `/usr/bin/python3`（沒有 `qrcode`）啟動的話，它觸發的每一次建置都會產出沒有 QR code 的影片。
 發生這種情況時，控制台最上面會出現紅色警告，並且拒絕開始建置。）
+
+控制台預設只綁 localhost。要從別台機器連，安裝時加 `./install.sh --webui-host 0.0.0.0`
+（`webui.py` 對外開放時沒有 token 會拒絕啟動，所以安裝程式會在沒有 token 檔時產生
+`<prefix>/webui-token`；路徑可用 `--webui-token-file` 改）。這兩個設定是寫在服務 plist 裡的，
+所以每次升級都要帶著；`install.sh` 要覆蓋一個帶有額外參數的控制台 plist 之前會先警告。
 
 它是一頁由上而下的區塊，順序就是你操作的順序：
 
