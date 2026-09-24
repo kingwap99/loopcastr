@@ -394,11 +394,19 @@ def continue_from(f, active_before):
     else:
         log("no boundary wait (%.0f s away)" % wait)
     if not pctl.rotate_playlist_to(active_before, f["local"], next_index, f["local"]):
-        log("cannot map the current position into the new list; keeping the on-air list")
-        shutil.copyfile(active_before, f["local"])
-        return False
+        # Nothing that is on air maps into the new list. The guard was written to avoid jumping back
+        # to the first video, but it has no way out: once the source window has moved on far enough
+        # that none of the on-air ids survive, every future hand-over gives up and the channel stays
+        # on its old list forever. Measured on a 24/7 news mode: 183 hand-overs in a row gave up, and
+        # the channel was still playing a list from two days earlier with every new upload missing.
+        # Hand over anyway. The wait for the segment boundary above already happened, so no video is
+        # cut off; the round simply starts at the first video of the new list, which is what a mode
+        # that rescans for new uploads promises to do. A partial scan cannot reach this branch:
+        # build_playlist.py refuses to write a shorter list unless the source itself changed.
+        log("nothing on air maps into the new list; handing over at this boundary "
+            "(the new round starts at the first video)")
     if make_concat(f) != 0:
-        log("generating the rotated concat list failed")
+        log("generating the concat list failed; keeping the on-air list")
         shutil.copyfile(active_before, f["local"])
         return False
     how = pctl.restart_playout()
