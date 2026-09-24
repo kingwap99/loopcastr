@@ -249,7 +249,7 @@ SETTINGS_SCHEMA = [
         ("link_caption", "按鈕文字（集數）", "text", None, None, "集數的按鈕說明", "▶ 看原片"),
         ("link_caption_en", "按鈕文字（集數，英文）", "text", None, None, "", "▶ Watch original"),
         ("countdown", "顯示剩餘時間倒數", "bool", None, None,
-         "QR 下方那一行「01/03　剩餘 02:57」", True),
+         "QR 下方那一行「剩餘 02:57」", True),
         ("countdown_prefix", "倒數前綴（中文）", "text", None, None,
          "中文放在秒數前面（剩餘 02:57）", "剩餘 "),
         ("countdown_suffix_en", "倒數後綴（英文）", "text", None, None,
@@ -1277,6 +1277,12 @@ UI_TEXT = {
     "日誌": "Logs",
     "畫質與版面": "Quality and layout",
     "進階設定（原始 JSON）": "Advanced (raw JSON)",
+    "進階選項": "Advanced",
+    "平常不用打開。要調畫質與版面、看細節，或改原始 JSON 再展開。":
+        "You will not need these day to day. Open one to change quality and layout, look at the "
+        "details, or edit the raw JSON.",
+    "更多設定（影片數上限、長度、shorts、掃描間隔）":
+        "More settings (video limit, lengths, shorts, rescan interval)",
     "直播金鑰": "Stream key",
     "服務": "Services",
     "填這兩個網址 → 按「儲存這個模式」→ 再按下面的「開始直播」。\n「驗證網址」會先實際解析一次，確認網址沒打錯（填錯不用等整場建置跑完才發現）。":
@@ -1501,7 +1507,7 @@ UI_TEXT = {
     "按鈕文字（集數）": "Caption (episodes)",
     "集數的按鈕說明": "the caption on episode buttons",
     "顯示剩餘時間倒數": "Show remaining time",
-    "QR 下方那一行「01/03　剩餘 02:57」": "the line under the QR, e.g. 01/03  02:57 left",
+    "QR 下方那一行「剩餘 02:57」": "the line under the QR, e.g. 02:57 left",
     "按鈕文字（過場）": "Caption (transitions)",
     "過場的按鈕說明": "the caption on transition buttons",
     "贊助連結（QR）": "Sponsor link (QR)",
@@ -1677,6 +1683,14 @@ border:1px solid;line-height:1.5}
 button.primary{font-weight:700;border-color:#0a0}
 .warnbox{background:#c001;border:1px solid #c006;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:13px;line-height:1.6}
 .warnbox code{font-size:12px;background:#0001;padding:1px 4px;border-radius:4px}
+details{border:1px solid #8884;border-radius:8px;padding:0 14px 4px;margin:10px 0}
+details>summary{cursor:pointer;font-size:15px;font-weight:600;padding:8px 0;list-style:none}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸ ";opacity:.55;font-weight:400}
+details[open]>summary::before{content:"▾ "}
+details[open]>summary{border-bottom:1px solid #8884;margin-bottom:8px}
+details details{border:0;padding:0;margin:6px 0}
+details details>summary{font-size:13px;opacity:.9}
 </style></head><body>
 <div id="langsw"></div>
 <h1><svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><path d="M74 34 A29 29 0 0 0 25 36" fill="none" stroke="#40DCCD" stroke-width="8" stroke-linecap="round"/><path d="M25 36 L24 19 L41 26Z" fill="#40DCCD"/><path d="M26 66 A29 29 0 0 0 75 64" fill="none" stroke="#7567FF" stroke-width="8" stroke-linecap="round"/><path d="M75 64 L76 81 L59 74Z" fill="#7567FF"/><path d="M42 34 L42 66 L68 50Z" fill="currentColor"/></svg><a href="__REPO_URL__" target="_blank" rel="noopener" title="GitHub：__PROJECT__">__PROJECT__</a> 控制台</h1>
@@ -1707,19 +1721,31 @@ button.primary{font-weight:700;border-color:#0a0}
 <pre id="task"></pre>
 
 <h2>播出狀態</h2><table id="play"></table>
-<h2>服務行程</h2><table id="proc"></table>
-<h2>內容</h2><table id="content"></table>
-<h2>日誌</h2><table id="logs"></table>
 
-<h2>畫質與版面</h2>
+<h2>服務</h2><div class="row" id="svc"></div>
+<p class="dim">「沒有載入」＝launchd 根本沒這個 job（例如金鑰貼好了卻沒有畫面，就是推流服務沒被載入）。
+按「啟動」會把資料目錄裡的 plist 複製到 ~/Library/LaunchAgents 再 bootstrap。
+系統 domain 的服務需要非互動 sudo；失敗時會顯示要加哪一條 sudoers。</p>
+
+<h2>直播金鑰</h2>
+<p class="dim">寫入 stream.key（權限 600）。金鑰只進不出，這個頁面不會把它顯示出來。</p>
+<div class="row"><input type="password" id="key" size="42" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx">
+<button onclick="writeKey()">寫入</button></div>
+
+<h2>進階選項</h2>
+<p class="dim">平常不用打開。要調畫質與版面、看細節，或改原始 JSON 再展開。</p>
+<details><summary>服務行程</summary><table id="proc"></table></details>
+<details><summary>內容</summary><table id="content"></table></details>
+<details><summary>日誌</summary><table id="logs"></table></details>
+<details><summary>畫質與版面</summary>
 <p class="dim">存檔後要重新建置才會套用到已下載的內容（改畫質等於重新轉檔）。</p>
 <div id="settings"></div>
-
-<h2>贊助 QR（只出現在過場的右下角）</h2>
+</details>
+<details><summary>贊助 QR（只出現在過場的右下角）</summary>
 <p class="dim">這是影片上實際會畫出來的樣子。集數不會有這顆 QR。</p>
 <div id="sponbox"></div>
-
-<h2>進階設定（原始 JSON）</h2>
+</details>
+<details><summary>進階設定（原始 JSON）</summary>
 <details>
 <summary>settings.json（畫質、版面、淡化、黑尾門檻）</summary>
 <div class="row"><b>settings.json</b><button onclick="saveSettings()">儲存</button></div>
@@ -1730,16 +1756,7 @@ button.primary{font-weight:700;border-color:#0a0}
 <div class="row"><b>modes.json</b><button onclick="saveModes()">儲存原始 JSON</button></div>
 <textarea id="ta-modes" spellcheck="false"></textarea>
 </details>
-
-<h2>直播金鑰</h2>
-<p class="dim">寫入 stream.key（權限 600）。金鑰只進不出，這個頁面不會把它顯示出來。</p>
-<div class="row"><input type="password" id="key" size="42" placeholder="xxxx-xxxx-xxxx-xxxx-xxxx">
-<button onclick="writeKey()">寫入</button></div>
-
-<h2>服務</h2><div class="row" id="svc"></div>
-<p class="dim">「沒有載入」＝launchd 根本沒這個 job（例如金鑰貼好了卻沒有畫面，就是推流服務沒被載入）。
-按「啟動」會把資料目錄裡的 plist 複製到 ~/Library/LaunchAgents 再 bootstrap。
-系統 domain 的服務需要非互動 sudo；失敗時會顯示要加哪一條 sudoers。</p>
+</details>
 <script>
 // 組合字串用：fmt("已儲存 %s：%s", a, b)。整句才翻得乾淨。
 // 也支援位置參數（%1$s），翻譯時要調換順序才不會卡住。
@@ -2049,6 +2066,9 @@ var FIELDS = [
   ["refresh_seconds", "重新掃描間隔（秒，0＝不掃）", "number", 6, ""],
   ["shorts_passes", "一輪播幾趟（0＝用預設）", "number", 6, ""]
 ];
+// The mode name and the two source URLs are what an operator touches; everything after them is tuning,
+// and three modes in a row would otherwise put thirty inputs on screen at once.
+var COMMON_FIELDS = 3;
 var MODES_CACHE = {};
 
 function renderModes(modes){
@@ -2075,7 +2095,7 @@ function renderModes(modes){
       box.appendChild(warn);
     }
     var inputs = {};
-    FIELDS.forEach(function(f){
+    function addField(f, into){
       var row = document.createElement("div");
       row.className = "row";
       var lab = document.createElement("label");
@@ -2087,9 +2107,16 @@ function renderModes(modes){
       inp.value = (m[f[0]] === undefined || m[f[0]] === null) ? "" : m[f[0]];
       row.appendChild(lab);
       row.appendChild(inp);
-      box.appendChild(row);
+      into.appendChild(row);
       inputs[f[0]] = inp;
-    });
+    }
+    FIELDS.slice(0, COMMON_FIELDS).forEach(function(f){ addField(f, box); });
+    var more = document.createElement("details");
+    var msum = document.createElement("summary");
+    msum.textContent = "更多設定（影片數上限、長度、shorts、掃描間隔）";
+    more.appendChild(msum);
+    FIELDS.slice(COMMON_FIELDS).forEach(function(f){ addField(f, more); });
+    box.appendChild(more);
     var bar = document.createElement("div");
     bar.className = "row";
     var b1 = document.createElement("button");
