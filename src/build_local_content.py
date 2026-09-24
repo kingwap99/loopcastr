@@ -198,6 +198,25 @@ def sponsor_image():
 TRANSITION_FILE = os.path.join(MEDIA_DIR, "_transition.mp4")
 TRANSITION_ID = "_tr"
 
+_QRCODE = None
+
+
+def have_qrcode():
+    """Is the qrcode package importable by this interpreter? It is what draws every QR code.
+
+    This goes into the fingerprints. A build on a machine without it skips the QR overlays and still
+    writes the file, so without this flag a later build (after installing the package) would consider
+    that file complete and never draw the QR.
+    """
+    global _QRCODE
+    if _QRCODE is None:
+        try:
+            import qrcode          # noqa: F401
+            _QRCODE = True
+        except ImportError:
+            _QRCODE = False
+    return _QRCODE
+
 
 def log(msg):
     print("[%s] %s" % (time.strftime("%H:%M:%S"), msg), flush=True)
@@ -431,6 +450,9 @@ def encode_fp(seg, args, w, h):
         "qr": [QR_SIZE, QR_PX], "txt": [TEXT_SIZE, TEXT_STROKE],
         "marquee": [MARQUEE_SPEED, MARQUEE_GAP], "y": OVERLAY_Y,
         "margin": OVERLAY_MARGIN, "cd": [CD_PRE, CD_SUF],
+        # What this interpreter can actually draw: a build without PIL or qrcode silently skips those
+        # overlays, and the fingerprint has to differ so that installing them and rebuilding fixes it.
+        "tools": [bool(wmtext), have_qrcode()],
         # The sponsor QR is not drawn on episodes, so the sponsor settings are deliberately
         # NOT part of this fingerprint: toggling them must not re-encode every video. They are
         # in build_transitions.py's fingerprint instead, where they belong.
@@ -548,6 +570,13 @@ def main():
         MANIFEST = os.path.join(MEDIA_DIR, "manifest.json")
         TRANSITION_FILE = os.path.join(MEDIA_DIR, "_transition.mp4")
     os.makedirs(MEDIA_DIR, exist_ok=True)
+    # Say this once, loudly, with the interpreter named: the QR overlays need the qrcode package, and a
+    # missing one used to fail per video with nothing but a traceback in the log.
+    if not args.no_link_button and not have_qrcode():
+        log("WARNING: %s cannot import the qrcode package, so QR buttons are skipped "
+            "(install it for that interpreter: %s -m pip install --user qrcode); the files record "
+            "this in their fingerprint, so installing it and rebuilding draws them"
+            % (sys.executable, sys.executable))
     pl = load_json(args.playlist, None)
     if not pl:
         raise SystemExit("playlist not found: %s" % args.playlist)

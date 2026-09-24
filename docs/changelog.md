@@ -1038,3 +1038,35 @@ repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU�
 | clone 在別處、`--prefix` 指到空目錄 | 安裝目錄出現 19 支程式、`settings.json`，plist 指向 `<prefix>/playout.sh`（存在） |
 | **直接把 clone 當安裝目錄**（`.41` 的情況） | 程式被攤平到 clone 根目錄、`settings.json` 就位、`src/` 保持完整，**plist 指向的檔案存在** |
 | 第二次執行 | `keeping the existing settings: settings.json / modes.json`，手改的 `ui.lang` 保留 |
+
+## 缺少 qrcode 時 QR 被靜默跳過，而檔案仍被記成完成（2026-09-24）
+
+使用者在 `.41` 手動裝好 loopcastr 後回報「原影片網址的 qrcode 不見了」。查證：那個建置是用
+**沒有 `qrcode` 套件的直譯器**跑的（`.41` 上 `/opt/homebrew/bin/python3` 有 PIL＋qrcode，
+`/usr/bin/python3` 沒有），日誌裡只有一行 traceback：
+
+    import qrcode
+    ModuleNotFoundError: No module named 'qrcode'
+
+`build_local_content.py` 對每一種 overlay 都是「失敗就跳過、繼續完成影片」，所以 QR 沒畫、
+影片照樣寫出。**更糟的是指紋照樣記成「已完成」** —— 之後就算把 qrcode 裝好，重建也會因為指紋
+相同而跳過，QR 永遠不會出現。
+
+修法兩件：
+
+1. **把直譯器的能力納入指紋**（`"tools": [bool(wmtext), have_qrcode()]`，影片與過場各一份）。
+   沒有 qrcode 的機器產生的檔案指紋不同，所以裝好套件後重建就會重畫 QR。
+2. **缺套件時在建置開始就明講，並印出是哪個直譯器**：
+   `WARNING: <python 路徑> cannot import the qrcode package, so QR buttons are skipped
+   (install it for that interpreter: <python 路徑> -m pip install --user qrcode)`。
+
+【實測】同一支影片、同一組參數下比對指紋：
+
+| qrcode | 影片指紋 | 過場指紋 |
+|---|---|---|
+| 有 | `7e8667ac0158` | `6882c9083db9` |
+| 沒有 | `c860ba035124` | `1e8ed2f88ed1` |
+
+因為公式多了 `tools` 欄位，`.22` 上的 66 筆影片指紋用同一個公式就地重算（跟上次 sponsor 那次
+一樣的手法），避免只是為了這個欄位而重編全部影片；`.41` 則**刻意不重算**，讓指紋差異去觸發
+那 15 支影片重做、把 QR 補回來。

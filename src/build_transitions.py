@@ -51,6 +51,7 @@ def transition_fp(base_id, seconds, caption, title, air, sid, p, stride):
         "qr_size": blc.QR_SIZE, "qr_px": blc.QR_PX,
         "text_size": blc.TEXT_SIZE, "text_stroke": blc.TEXT_STROKE,
         "date_label": blc.DATE_LABEL,
+        "tools": [bool(blc.wmtext), blc.have_qrcode()],
         "sponsor_url": blc.SPONSOR_URL, "sponsor_qr_image": blc.SPONSOR_QR_IMAGE,
         "sponsor_caption": blc.SPONSOR_CAPTION,
     }, sort_keys=True, ensure_ascii=False)
