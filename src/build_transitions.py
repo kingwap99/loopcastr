@@ -228,6 +228,15 @@ def main():
     out_dir = a.out_dir or MEDIA
     os.makedirs(out_dir, exist_ok=True)
 
+    # Same reasoning as build_local_content: a transition without its QR is not what was asked for.
+    if not a.no_button and blc is not None and not blc.have_qrcode():
+        print("ERROR: the transition QR button is enabled but this interpreter cannot import the "
+              "qrcode package:", file=sys.stderr)
+        print("  %s" % sys.executable, file=sys.stderr)
+        print("  install it with: %s -m pip install --user qrcode" % sys.executable, file=sys.stderr)
+        print("  (or pass --no-button to build transitions without QR codes)", file=sys.stderr)
+        return 2
+
     if not os.path.exists(CLEAN) and not a.shorts_url:
         print("%s not found; keep a clean transition without a QR first" % CLEAN, file=sys.stderr)
         return 2

@@ -5,8 +5,9 @@
 	<key>Label</key>
 	<string>com.loopcastr.webui</string>
 
-	<!-- Local console. Binds to 127.0.0.1 by default; to reach it from another machine add
-	     --host 0.0.0.0 --token-file <prefix>/webui-token (it refuses to start without a token). -->
+	<!-- Local console. Binds to 127.0.0.1 by default; to reach it from another machine add the host
+	     and token-file arguments (host 0.0.0.0, token-file <prefix>/webui-token). Without a token it
+	     refuses to start. -->
 	<key>ProgramArguments</key>
 	<array>
 		<string>/opt/homebrew/bin/python3</string>

@@ -5,7 +5,7 @@
     <key>Label</key>
     <string>com.loopcastr.health</string>
 
-    <!-- Checks the chain every 60 seconds. The YouTube side is limited by --youtube-every to once per 15 minutes. -->
+    <!-- Checks the chain every 60 seconds. The YouTube side is rate limited (youtube_every) to once per 15 minutes. -->
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/python3</string>

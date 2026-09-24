@@ -570,13 +570,15 @@ def main():
         MANIFEST = os.path.join(MEDIA_DIR, "manifest.json")
         TRANSITION_FILE = os.path.join(MEDIA_DIR, "_transition.mp4")
     os.makedirs(MEDIA_DIR, exist_ok=True)
-    # Say this once, loudly, with the interpreter named: the QR overlays need the qrcode package, and a
-    # missing one used to fail per video with nothing but a traceback in the log.
+    # Refuse to build rather than quietly produce files without the QR the operator asked for. This used
+    # to skip the overlay per video with nothing but a traceback in the log, which is how a channel ends
+    # up on air with no QR codes and a rebuild that will not fix it.
     if not args.no_link_button and not have_qrcode():
-        log("WARNING: %s cannot import the qrcode package, so QR buttons are skipped "
-            "(install it for that interpreter: %s -m pip install --user qrcode); the files record "
-            "this in their fingerprint, so installing it and rebuilding draws them"
-            % (sys.executable, sys.executable))
+        log("ERROR: the QR buttons are enabled but this interpreter cannot import the qrcode package:")
+        log("  %s" % sys.executable)
+        log("  install it with: %s -m pip install --user qrcode" % sys.executable)
+        log("  (or pass --no-link-button to build without QR codes)")
+        return 2
     pl = load_json(args.playlist, None)
     if not pl:
         raise SystemExit("playlist not found: %s" % args.playlist)

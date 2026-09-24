@@ -1088,3 +1088,22 @@ repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU�
 2. `build_local_content.py` 的「暫存目錄裡有就續傳」也一併比對指紋：以前只要暫存目錄裡有檔案
    就跳過（不管參數是否已變），所以一個由「不會畫 QR 的直譯器」產生的暫存檔，會在下次建置時
    被當成完成品 deploy 進去。
+
+## QR 又被洗掉：缺 qrcode 的直譯器重建了影片（2026-09-24）
+
+使用者回報「現在是只有過場的影片才有 qrcode」。查證 `.41`：15:44 那次（用對的直譯器）30 支影片
+與 30 段過場都畫上了 QR，但 **17:35 又有一次建置只重建了影片**，那次的直譯器沒有 `qrcode`，
+於是影片的 QR 被洗掉、15:44 的過場還留著 —— 症狀正好就是「只有過場有 QR」。
+
+上一則修的是「讓它能恢復」，這次修的是「不要讓它發生」：
+
+- `build_local_content.py` 與 `build_transitions.py` 在「QR 按鈕啟用、但這個直譯器 import 不到
+  `qrcode`」時**直接拒跑**（exit 2），並印出：是哪個直譯器、要對它下哪一行 pip、以及要放棄 QR
+  可以用哪個參數（`--no-link-button`／`--no-button`）。以前是「每支影片跳過 overlay 繼續完成」，
+  這種安靜的降級正是讓頻道帶著沒有 QR 的檔案上線的原因。
+  【實測】用 `/usr/bin/python3`（在 macOS 上會解析到 Xcode 內建的直譯器）跑：兩支程式都印出
+  `ERROR: ... cannot import the qrcode package` 並以 exit 2 結束；換成 `/opt/homebrew/bin/python3`
+  就照常進行。
+- 順手修掉兩個 plist 範本的 XML 註解：裡面有 `--`（XML 註解不允許），Python 的 `plistlib` 會直接
+  解析失敗（`launchd` 與 `plutil` 寬容，所以一直沒被發現）。六個 plist 現在 `plistlib` 與
+  `plutil -lint` 都能通過。
