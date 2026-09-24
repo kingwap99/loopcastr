@@ -599,8 +599,13 @@ def main():
         fp = encode_fp(seg, args, *(TARGETS.get(args.target) or (0, 0)))
         if args.force:
             missing.append(seg)
-        elif args.out_dir and os.path.exists(staged):
-            continue                      # already in staging, so resume instead of redoing it
+        elif (args.out_dir and os.path.exists(staged) and rec.get("fp") == fp
+              and rec.get("bytes") == os.path.getsize(staged)):
+            # Already in staging with the same parameters: resume instead of redoing it. The
+            # fingerprint matters here too - a staged file built by an interpreter that could not
+            # draw the QR (or with other settings since changed) must not be deployed as if it were
+            # the wanted one.
+            continue
         elif (os.path.exists(deployed) and rec.get("fp") == fp
               and rec.get("bytes") == os.path.getsize(deployed)):
             skipped += 1                  # deployed, parameters unchanged and size equal, so skip

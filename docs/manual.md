@@ -124,6 +124,9 @@ needs sudo; `--agents` installs LaunchAgents instead, which need no root but do 
 
 Safe to run repeatedly; an existing `mediamtx.yml` and `stream.key` are never overwritten.
 
+**To upgrade**: `git pull` and then run `./install.sh` again. The pull only updates `src/`; what runs is
+the flattened copy in the install directory, and `install.sh` is what refreshes it.
+
 **The services are registered only when there is content to play.** On a first install there is none, so that
 run just copies the files and generates the plists and nothing starts - otherwise launchd would restart a
 process that is bound to fail. Build the content (see "Adding new episodes"), then run `./install.sh` again:

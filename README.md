@@ -88,6 +88,10 @@ the console's "Build and switch (go live)", which runs the whole chain for you.
 `install.sh --agents` installs LaunchAgents instead (no root, but a graphical login is required);
 `./install.sh --help` lists every option.
 
+**To upgrade**: `git pull` and then run `./install.sh` again. The pull only updates `src/`; the programs
+that actually run (and that the service plists point at) are the copies `install.sh` puts in the install
+directory.
+
 ### Local console
 
 Day-to-day operation needs no shell commands. The installer registers the console as a launchd service
@@ -278,6 +282,9 @@ This project does **not** redistribute any of the following; install them yourse
 QR 與字樣，都是 `modes.json` ＋ 控制台「建置並切換（開始直播）」在處理的。
 
 `install.sh --agents` 可裝成 LaunchAgent（不需要 root，但要有圖形登入才會跑）；`./install.sh --help` 看全部選項。
+
+**升級**：`git pull` 之後要**再跑一次 `./install.sh`**。pull 只更新 `src/`；實際在跑、服務 plist
+指向的是安裝目錄裡那份被攤平的複本，那正是 `install.sh` 負責更新的。
 
 ### 本機控制台
 
