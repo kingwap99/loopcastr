@@ -51,12 +51,17 @@ Design points, each measured on the target machine:
 
 ### Quick start
 
-    git clone <repo> && cd <repo>
-    ./install.sh --dry-run     # see what it would do
-    ./install.sh               # install to ~/loopcastr and register launchd services (needs sudo)
+Requirements: macOS with Python 3, plus `ffmpeg`, `yt-dlp` and `mediamtx` on `PATH`
+(`brew install ffmpeg yt-dlp mediamtx`) and the Python packages `qrcode` and `pillow`
+(`python3 -m pip install --user qrcode pillow`). `install.sh` checks all of them and prints what is
+missing; `opencv` is optional and only used by `build_transitions.py --verify`.
 
-The services deliberately do **not** start until there is content to play, so launchd does not
-restart a process that cannot succeed. To build content:
+    git clone https://github.com/kingwap99/loopcastr && cd loopcastr
+    ./install.sh --dry-run     # show what it would do first (changes nothing)
+    ./install.sh               # copy the programs to ~/loopcastr and generate the service plists
+
+The first run deliberately does **not** register the launchd services: with no content to play they
+would only restart forever. Build the content, then run the installer again to register and start them:
 
     cd ~/loopcastr
     python3 build_playlist.py --url '<playlist or channel URL>' -o playlist.json
@@ -64,20 +69,33 @@ restart a process that cannot succeed. To build content:
     python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
     printf %s '<YouTube stream key>' > stream.key && chmod 600 stream.key
 
-`install.sh --agents` installs LaunchAgents instead (no root, but requires a GUI login). See `--help`.
+    cd <the clone> && ./install.sh      # the second run registers and starts the services
+
+Add `--force-services` to the first run if you would rather register them before any content exists.
+That command-line path is the minimum: it plays the videos without transitions. Per-mode sources,
+transitions, incremental builds and the on-screen QR/captions all come from `modes.json` and the
+console's "Build and switch (go live)", which runs the whole chain for you.
+
+`install.sh --agents` installs LaunchAgents instead (no root, but a graphical login is required);
+`./install.sh --help` lists every option.
 
 ### Local console
 
-Once installed, day-to-day operation needs no shell commands:
+Day-to-day operation needs no shell commands. The installer registers the console as a launchd service
+(`com.loopcastr.webui`), so once the services are running it is already there:
 
-    python3 ~/loopcastr/webui.py     # http://127.0.0.1:8787
+    http://127.0.0.1:8787/          # before the services exist: python3 ~/loopcastr/webui.py
 
-| Tab | Contents |
+It is one page of blocks, top to bottom in the order you use them:
+
+| Block | Contents |
 |---|---|
-| Status | processes, MediaMTX ready/readers/traffic, round length and next loop time, missing concat entries, health and alerts |
-| Settings | edit `settings.json` and `modes.json` (JSON is validated; the previous version is kept as `.bak`) |
-| Actions | build / scan only / build and switch, rebuild concat, check for missing files, **stop build** (kills the whole process tree and deletes the interrupted output files); runs in the background with progress |
-| Services | each launchd service as running / loaded but idle / not loaded; a not-loaded one can be started from here (`com.loopcastr.publish`, the service that pushes to YouTube, is exactly this case) |
+| 1 Sources | one card per mode: playlist URL, shorts URL, video count and length cap, rescan interval, plus that mode's status chip |
+| 2 Go live | build / scan only / build and switch, rebuild concat, check for missing files, **stop build** (kills the whole process tree and deletes the interrupted output files); runs in the background with live progress |
+| Playout status / services / content / logs | processes, MediaMTX ready/readers/traffic, round length and next loop time, missing concat entries, media size, the tail of health and alerts |
+| Quality and layout | the form generated from `settings.json` (bitrate, preset, text and QR sizes, fade seconds, black-tail threshold, media folder) |
+| Advanced settings | the raw JSON of `settings.json` and `modes.json` (validated before saving, previous version kept as `.bak`) |
+| Services | each launchd service as running / loaded but idle / not loaded; a not-loaded **gui-domain** service can be started from here (`com.loopcastr.publish`, the one that pushes to YouTube, is often exactly this case). A system-domain install has to be started with `sudo launchctl` instead |
 
 Standard library only, so there is nothing to install. It binds to `127.0.0.1` by default; exposing it
 requires a token or it refuses to start. It never runs as root and never stores passwords, and the
@@ -134,7 +152,7 @@ Change what plays in `modes.json`, not in `settings.json` - two sources of truth
 
 | Item | Value |
 |---|---|
-| Host | one Apple silicon Mac (test machine: M1 / 8 GB / macOS 27); the system Python is enough |
+| Host | one Apple silicon Mac (test machine: M1 / 8 GB / macOS 27); Python 3 from Homebrew plus the `qrcode` and `pillow` packages |
 | Services | com.loopcastr.mediamtx / .playout / .publish / .health / .refresh (LaunchDaemons: start at boot, no login needed) |
 | Playout | single-process concat with `-c copy`; 0 second seam at every cut |
 | Boot recovery | measured: after a reboot with nobody logged in, the chain recovered automatically; 25 second interruption |
@@ -215,11 +233,17 @@ This project does **not** redistribute any of the following; install them yourse
 
 ### 快速開始
 
-    git clone <repo> && cd <repo>
-    ./install.sh --dry-run     # 先看它會做什麼
-    ./install.sh               # 裝到 ~/loopcastr，並註冊 launchd 服務（需要 sudo）
+需求：macOS ＋ Python 3，`PATH` 上要有 `ffmpeg`、`yt-dlp`、`mediamtx`
+（`brew install ffmpeg yt-dlp mediamtx`），以及 Python 套件 `qrcode`、`pillow`
+（`python3 -m pip install --user qrcode pillow`）。`install.sh` 會逐項檢查並告訴你缺什麼；
+`opencv` 是選配，只有 `build_transitions.py --verify` 會用到。
 
-服務**不會**在還沒有播出內容時啟動，避免 launchd 一直重啟一個註定失敗的行程。建內容的順序：
+    git clone https://github.com/kingwap99/loopcastr && cd loopcastr
+    ./install.sh --dry-run     # 先看它會做什麼（不會動任何東西）
+    ./install.sh               # 把程式複製到 ~/loopcastr、產生服務 plist
+
+第一次**刻意不註冊** launchd 服務：還沒有內容可播時，它們只會一直重啟。先建內容，再跑一次安裝
+讓服務註冊並啟動：
 
     cd ~/loopcastr
     python3 build_playlist.py --url '<播放清單或頻道網址>' -o playlist.json
@@ -227,20 +251,31 @@ This project does **not** redistribute any of the following; install them yourse
     python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
     printf %s '<YouTube 串流金鑰>' > stream.key && chmod 600 stream.key
 
-`install.sh --agents` 可裝成 LaunchAgent（不需要 root，但要有圖形登入才會跑）；`--help` 看全部選項。
+    cd <剛才 clone 的目錄> && ./install.sh    # 第二次執行才會註冊並啟動服務
+
+想在還沒有內容時就先註冊，第一次執行加 `--force-services` 即可。上面這條命令列路徑是**最小可播**
+版本（沒有過場）；每個模式的來源、過場、分批建置、畫面上的 QR 與字樣，都是 `modes.json` ＋
+控制台「建置並切換（開始直播）」在處理的。
+
+`install.sh --agents` 可裝成 LaunchAgent（不需要 root，但要有圖形登入才會跑）；`./install.sh --help` 看全部選項。
 
 ### 本機控制台
 
-裝好之後，日常操作不必再背指令：
+日常操作不必再背指令。安裝程式會把控制台也註冊成 launchd 服務（`com.loopcastr.webui`），所以
+服務跑起來之後它就在那裡：
 
-    python3 ~/loopcastr/webui.py     # http://127.0.0.1:8787
+    http://127.0.0.1:8787/          # 服務還沒建立時：python3 ~/loopcastr/webui.py
+
+它是一頁由上而下的區塊，順序就是你操作的順序：
 
 | 區塊 | 內容 |
 |---|---|
-| 狀態 | 服務行程、MediaMTX ready／讀者數／流量、單輪長度與下次循環時間、concat 缺檔、health 與 alerts |
-| 設定 | 直接編輯 `settings.json` 與 `modes.json`（存檔前驗 JSON，舊版留 `.bak`） |
-| 動作 | 建置／只掃描／建置並切換、重建 concat、檢查缺檔（背景執行並回報進度）、**停止建置**（連子行程一起收，並清掉被中斷的輸出檔） |
-| 服務 | 每個 launchd 服務是「執行中／已載入但沒在跑／沒有載入」；沒載入的可以直接按「啟動」（推上 YouTube 的 `com.loopcastr.publish` 就是這一格） |
+| ① 來源設定 | 每個模式一張卡片：播放清單網址、shorts 網址、影片支數與長度上限、掃描間隔，以及該模式的狀態標籤 |
+| ② 開始直播 | 建置／只掃描／建置並切換、重建 concat、檢查缺檔、**停止建置**（連子行程一起收並清掉半成品）；背景執行並即時顯示進度 |
+| 播出狀態／服務行程／內容／日誌 | 服務行程、MediaMTX ready／讀者數／流量、單輪長度與下次循環時間、concat 缺檔、media 大小、health 與 alerts 尾端 |
+| 媒體與畫質 | 由 `settings.json` 產生的表單（位元率、preset、文字與 QR 尺寸、淡化秒數、黑尾門檻、媒體資料夾） |
+| 進階設定 | `settings.json` 與 `modes.json` 原始 JSON（存檔前驗 JSON，舊版留成 `.bak`） |
+| 服務 | 每個 launchd 服務是「執行中／已載入沒在跑／沒有載入」；**gui domain** 且沒載入的可以從這裡按「啟動」（推流用的 `com.loopcastr.publish` 常常就是這一種）。system domain 的安裝要用 `sudo launchctl` 自己啟動 |
 
 只用標準庫，不必額外安裝。預設只綁 `127.0.0.1`，要對外開放**必須**帶 token 否則拒絕啟動；
 不以 root 執行、不保管密碼，**stream key 只進不出**。細節見 [操作手冊](docs/manual.md)。
@@ -293,7 +328,7 @@ MediaMTX 的 HLS 頁（就是播出端真正送出去的那一路）。`mediamtx
 
 | 項目 | 值 |
 |---|---|
-| 執行環境 | 一台 Apple silicon Mac（測試機為 M1 / 8 GB / macOS 27），用系統內建 Python 即可 |
+| 執行環境 | 一台 Apple silicon Mac（測試機為 M1 / 8 GB / macOS 27）；Python 3（Homebrew 的即可）＋ `qrcode`、`pillow` 兩個套件 |
 | 服務 | com.loopcastr.mediamtx / .playout / .publish / .health / .refresh（LaunchDaemon，開機自啟、不需登入） |
 | 播出方式 | 單一行程 concat ＋ `-c copy`，換片縫 0 秒 |
 | 開機自啟 | 已實測：重開機後全程無人登入仍自動恢復，中斷約 25 秒 |

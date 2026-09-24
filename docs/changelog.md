@@ -977,3 +977,24 @@ repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU�
 【實測】把 `media.dir` 指到 scratch 目錄：三個程式回報的 `MEDIA_DIR`／`MEDIA` 都跟著改、
 `build_local_content.py --status` 改去新目錄找檔案、後台的 `media_size` 也改讀新目錄
 （在新目錄放一個 1 MB 檔案，後台就顯示 1.0 MB）。
+
+## 安裝說明校正（2026-09-24）
+
+使用者指出 GitHub 上的安裝說明有誤，逐項對照 `install.sh` 的實際行為之後找到四個問題：
+
+1. **服務永遠不會被註冊（最嚴重）**。`install.sh` 在「還沒有播出內容」時會跳過服務註冊
+   （避免 launchd 一直重啟註定失敗的行程），而 README 的快速開始寫完建置步驟就結束了 ——
+   照著做完，頻道根本不會開始跑。已補上「建完內容再跑一次 `./install.sh`」這一步，
+   並註明 `--force-services` 可以先註冊。
+   【實測】在 scratch 目錄先建好內容再跑 `install.sh --dry-run`，輸出確實變成「會註冊服務」
+   而不是原本的「還沒有內容，先不啟動服務」。
+2. **沒有列需求**。`install.sh` 會檢查 python3／ffmpeg／ffprobe／yt-dlp／mediamtx／curl／plutil
+   與 Python 套件 PIL／qrcode（缺了直接 exit 3），但 README 直接跳到 `./install.sh`。
+   已補上 `brew install ffmpeg yt-dlp mediamtx` 與 `python3 -m pip install --user qrcode pillow`。
+3. **控制台的描述不符**。README 說控制台是「分頁（Tab）」而且要自己 `python3 webui.py` 啟動；
+   實際上它是一頁由上而下的區塊，而且 `install.sh` 會把它註冊成 `com.loopcastr.webui` 服務。
+   已改成實際的區塊順序，並補上「沒載入的服務只有 gui domain 能從控制台啟動」。
+4. **參考部署寫「用系統內建 Python 即可」**，但其實需要 `qrcode` 與 `pillow`。已更正。
+
+另外把快速開始的 `<repo>` 佔位符換成實際的 repo 網址，並註明那條命令列路徑是「最小可播」
+版本（沒有過場），完整的模式／過場／分批建置走 `modes.json` ＋ 控制台。

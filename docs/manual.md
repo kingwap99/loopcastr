@@ -109,7 +109,11 @@ audible effect. If you need a perfectly clean timeline, splice offline into one 
 
 ## Deployment
 
-Use `install.sh`. It copies the programs to the install directory, substitutes the `__HOME__` / `__USER__`
+Requirements: macOS with Python 3, plus `ffmpeg`, `yt-dlp` and `mediamtx` on `PATH`
+(`brew install ffmpeg yt-dlp mediamtx`) and the Python packages `qrcode` and `pillow`
+(`python3 -m pip install --user qrcode pillow`). `install.sh` checks all of them and prints what is missing.
+
+`install.sh` copies the programs to the install directory, substitutes the `__HOME__` / `__USER__`
 placeholders in the plists, generates `mediamtx.yml` and registers the launchd services:
 
     ./install.sh --dry-run     # show what it would do first (changes nothing)
@@ -117,8 +121,14 @@ placeholders in the plists, generates `mediamtx.yml` and registers the launchd s
     ./install.sh --agents      # install as LaunchAgents: no root, but a graphical login is required
 
 Safe to run repeatedly; an existing `mediamtx.yml` and `stream.key` are never overwritten.
-The services do not start while there is no broadcast content (`playlist-local.json` / `concat.txt`), so
-launchd does not keep restarting a process that is bound to fail.
+
+**The services are registered only when there is content to play.** On a first install there is none, so that
+run just copies the files and generates the plists and nothing starts - otherwise launchd would restart a
+process that is bound to fail. Build the content (see "Adding new episodes"), then run `./install.sh` again:
+the second run registers and starts the services. `--force-services` skips the wait.
+
+The console can also start a not-loaded service, but only for a gui-domain (LaunchAgent) install; with
+LaunchDaemons the services have to be registered by `./install.sh` again, or started with `sudo launchctl`.
 
 Acceptance check (while broadcasting, in another terminal):
 
