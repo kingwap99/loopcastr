@@ -76,20 +76,42 @@ if [ -n "$missing" ]; then
 fi
 say "  all required commands present: python3 ffmpeg ffprobe yt-dlp mediamtx curl plutil"
 
+# Which python3 do the services actually get? The plists below are written with this exact path, so the
+# checks here have to run against the same interpreter, and it has to be one that can import qrcode
+# (that is what draws every QR code). Measured failure this prevents: on a machine where the services ran
+# Homebrew python, the operator started the console by hand as /usr/bin/python3, and every rebuild it
+# triggered wrote a whole channel with no QR codes - the console inherits its own interpreter.
+PYTHON=""
+for cand in /opt/homebrew/bin/python3 /usr/local/bin/python3 "$(command -v python3)"; do
+  [ -n "$cand" ] && [ -x "$cand" ] || continue
+  if "$cand" -c "import qrcode" 2>/dev/null; then PYTHON="$cand"; break; fi
+  [ -n "$PYTHON" ] || PYTHON="$cand"        # nothing has qrcode yet: keep the first that exists
+done
+[ -n "$PYTHON" ] || { say "no python3 found"; exit 3; }
+PYTHON_DIR="$(cd "$(dirname "$PYTHON")" && pwd)"
+# One PATH for every service: the interpreter's own directory first (a venv's pip-installed commands live
+# there), then the usual brew and system directories, each listed once.
+PYTHON_PATH="$PYTHON_DIR"
+for d in /opt/homebrew/bin /opt/homebrew/sbin /usr/local/bin /usr/bin /bin /usr/sbin /sbin; do
+  case ":$PYTHON_PATH:" in *":$d:"*) ;; *) PYTHON_PATH="$PYTHON_PATH:$d" ;; esac
+done
+say "  the services will run on: $PYTHON"
+
 absent=""
 for m in PIL qrcode; do
-  python3 -c "import $m" 2>/dev/null || absent="$absent $m"
+  "$PYTHON" -c "import $m" 2>/dev/null || absent="$absent $m"
 done
 if [ -n "$absent" ]; then
   say "  missing Python packages: $absent"
   say "    no PIL    -> the watermark falls back to a bitmap font with digits and symbols only"
   say "    no qrcode -> episode and transition QR codes cannot be built"
-  say "    install: python3 -m pip install --user qrcode pillow"
+  say "    install: $PYTHON -m pip install --user qrcode pillow"
   say "    (if the system Python refuses, add --break-system-packages or use a venv)"
+  say "    install it for THAT interpreter: the console and the services both draw the QR codes with it"
 else
-  say "  Python packages present: PIL, qrcode"
+  say "  Python packages present for $PYTHON: PIL, qrcode"
 fi
-python3 -c "import cv2" 2>/dev/null \
+"$PYTHON" -c "import cv2" 2>/dev/null \
   || say "  (optional) opencv is missing: build_transitions.py --verify reports every QR decode as a failure, which does not mean the files are broken"
 
 # ── Files ──────────────────────────────────────────────────────────
@@ -128,12 +150,13 @@ for f in "$SRC_DIR"/launchd/*.plist; do
     printf '   [dry-run] would generate %s\n' "$out"
     continue
   fi
-  python3 - "$f" "$out" "$PREFIX" "$HOME_DIR" "$USER_NAME" "${YT_VIDEO_ID:-}" <<'PYGEN'
+  "$PYTHON" - "$f" "$out" "$PREFIX" "$HOME_DIR" "$USER_NAME" "${YT_VIDEO_ID:-}" "$PYTHON" "$PYTHON_PATH" <<'PYGEN'
 import sys
-src, dst, prefix, home, user, vid = sys.argv[1:7]
+src, dst, prefix, home, user, vid, py, pypath = sys.argv[1:9]
 t = open(src, encoding="utf-8").read()
 t = (t.replace("__HOME__/loopcastr", prefix).replace("__HOME__", home)
-      .replace("__YT_VIDEO_ID__", vid).replace("__USER__", user))
+      .replace("__YT_VIDEO_ID__", vid).replace("__USER__", user)
+      .replace("__PYTHON_PATH__", pypath).replace("__PYTHON__", py))
 open(dst, "w", encoding="utf-8").write(t)
 PYGEN
   if [ "$SCOPE" = "agents" ]; then
@@ -146,7 +169,7 @@ if [ "$DRY" = 0 ]; then
   if [ -z "${YT_VIDEO_ID:-}" ]; then
     say "  (YT_VIDEO_ID not set: the health YouTube is_live check is skipped)"
   fi
-  leftover="$(grep -l '__HOME__\|__USER__\|__YT_VIDEO_ID__' "$PREFIX"/*.plist 2>/dev/null || true)"
+  leftover="$(grep -l '__HOME__\|__USER__\|__YT_VIDEO_ID__\|__PYTHON__\|__PYTHON_PATH__' "$PREFIX"/*.plist 2>/dev/null || true)"
   [ -z "$leftover" ] || { say "  WARNING: placeholders left unsubstituted: $leftover"; exit 4; }
 fi
 
@@ -175,16 +198,16 @@ fi
 step "Installing services (${SCOPE})"
 if [ "$DO_SERVICES" = 0 ]; then
   say "  --no-services: skipped"
-elif [ ! -f "$PREFIX/playlist-local.json" ] || [ ! -f "$PREFIX/concat.txt" ]; then
+elif ! ls "$PREFIX"/concat*.txt >/dev/null 2>&1; then
   if [ "$FORCE_SERVICES" = 1 ]; then
-    say "  WARNING: no playlist-local.json / concat.txt yet, but --force-services asked for installation"
+    say "  WARNING: no concat*.txt yet, but --force-services asked for installation"
   else
-    say "  WARNING: no broadcast content yet (playlist-local.json / concat.txt), not starting the services"
+    say "  WARNING: no broadcast content yet (no concat*.txt in $PREFIX), not starting the services"
     say "    otherwise launchd keeps restarting a process that is bound to fail. Build content first:"
     say "      cd $PREFIX"
-    say "      python3 build_playlist.py --url '<playlist or channel URL>' -o playlist.json"
-    say "      python3 build_local_content.py --playlist playlist.json --target 720"
-    say "      python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir $PREFIX"
+    say "      $PYTHON build_playlist.py --url '<playlist or channel URL>' -o playlist.json"
+    say "      $PYTHON build_local_content.py --playlist playlist.json --target 720"
+    say "      $PYTHON make_concat_list.py playlist-local.json -o concat.txt --base-dir $PREFIX"
     say "    then run this script again (or add --force-services to install now)."
     DO_SERVICES=0
   fi

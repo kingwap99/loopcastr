@@ -8,7 +8,7 @@
     <!-- Checks the chain every 60 seconds. The YouTube side is rate limited (youtube_every) to once per 15 minutes. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/python3</string>
+        <string>__PYTHON__</string>
         <string>__HOME__/loopcastr/healthcheck.py</string>
         <string>--check-youtube</string>
         <string>--youtube-every</string>
@@ -21,7 +21,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>__PYTHON_PATH__</string>
         <key>API</key>
         <string>http://127.0.0.1:9997</string>
         <key>PATH_NAME</key>

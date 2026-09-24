@@ -55,6 +55,8 @@ Requirements: macOS with Python 3, plus `ffmpeg`, `yt-dlp` and `mediamtx` on `PA
 (`brew install ffmpeg yt-dlp mediamtx`) and the Python packages `qrcode` and `pillow`
 (`python3 -m pip install --user qrcode pillow`). `install.sh` checks all of them and prints what is
 missing; `opencv` is optional and only used by `build_transitions.py --verify`.
+It also picks the interpreter that has `qrcode` (Homebrew python3 when it is installed) and writes that
+exact path into the service plists, so what the checks verify is what the services run.
 
     git clone https://github.com/kingwap99/loopcastr && cd loopcastr
     ./install.sh --dry-run
@@ -99,7 +101,11 @@ Day-to-day operation needs no shell commands. The installer registers the consol
 
     http://127.0.0.1:8787/
 
-(Before the services exist, start it by hand with `python3 ~/loopcastr/webui.py`.)
+(Before the services exist, start it by hand with the interpreter the services use - on a Homebrew
+machine that is `/opt/homebrew/bin/python3 ~/loopcastr/webui.py`. The console builds with **its own**
+interpreter, so starting it as `/usr/bin/python3` (which has no `qrcode`) makes every build it triggers
+write videos with no QR codes. When that is the case the console shows a red warning at the top and
+refuses to start a build.)
 
 It is one page of blocks, top to bottom in the order you use them:
 
@@ -252,6 +258,8 @@ This project does **not** redistribute any of the following; install them yourse
 （`brew install ffmpeg yt-dlp mediamtx`），以及 Python 套件 `qrcode`、`pillow`
 （`python3 -m pip install --user qrcode pillow`）。`install.sh` 會逐項檢查並告訴你缺什麼；
 `opencv` 是選配，只有 `build_transitions.py --verify` 會用到。
+它也會挑一個能 `import qrcode` 的直譯器（有裝 Homebrew 就用它的 python3），並把該路徑寫進服務
+plist，所以「檢查的那顆」和「服務實際跑的那顆」是同一顆。
 
     git clone https://github.com/kingwap99/loopcastr && cd loopcastr
     ./install.sh --dry-run
@@ -293,7 +301,10 @@ QR 與字樣，都是 `modes.json` ＋ 控制台「建置並切換（開始直�
 
     http://127.0.0.1:8787/
 
-（服務還沒建立時，自己用 `python3 ~/loopcastr/webui.py` 啟動。）
+（服務還沒建立時，自己用「服務用的那一顆」啟動——Homebrew 機器上是
+`/opt/homebrew/bin/python3 ~/loopcastr/webui.py`。控制台建置用的是**它自己的**直譯器，所以用
+`/usr/bin/python3`（沒有 `qrcode`）啟動的話，它觸發的每一次建置都會產出沒有 QR code 的影片。
+發生這種情況時，控制台最上面會出現紅色警告，並且拒絕開始建置。）
 
 它是一頁由上而下的區塊，順序就是你操作的順序：
 

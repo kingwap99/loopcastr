@@ -16,7 +16,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>__PYTHON_PATH__</string>
         <key>SRC</key>
         <string>rtmp://127.0.0.1:1935/live/main</string>
         <key>API</key>

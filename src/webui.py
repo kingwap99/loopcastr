@@ -451,11 +451,30 @@ def content_info():
     }
 
 
+def have_qrcode():
+    """這個直譯器畫不畫得出 QR code。控制台啟動子行程時用的是 sys.executable，所以控制台本身
+    沒有 qrcode 時，它觸發的建置就畫不出 QR，而且會安靜地產出沒有 QR 的影片（實測：.41 的控制台
+    被手動用 /usr/bin/python3 起起來，之後每一次重建都把整批影片的 QR 洗掉）。"""
+    try:
+        import qrcode          # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def python_info():
+    ok = have_qrcode()
+    return {"executable": sys.executable,
+            "qrcode": ok,
+            "install": "%s -m pip install --user qrcode" % sys.executable}
+
+
 def status(api, path_name):
     return {
         "now": time.strftime("%Y-%m-%d %H:%M:%S"),
         "prefix": PREFIX,
         "lang": ui_lang(),
+        "python": python_info(),
         "proc": procs(),
         "mtx": mtx(api, path_name),
         "preview": hls_preview(path_name),
@@ -870,6 +889,14 @@ def build_cmd(action, body):
                           % mode)
         if not _is_youtube(src):
             return None, "%s 的來源不是 YouTube 網址：%s" % (mode, src)
+        # A full build draws the QR buttons with the interpreter that runs the build, which is this
+        # console's sys.executable. Without qrcode the whole run produces QR-less video, so stop it here
+        # with the fix instead of letting it fill the disk with files that have to be rebuilt again.
+        # --scan-only and --deploy-only never encode, so they stay usable on a machine without qrcode.
+        if not (body.get("scan-only") or body.get("deploy-only")) and not have_qrcode():
+            return None, ("這個控制台用的 Python 少了 qrcode，建置出來的影片不會有 QR code。"
+                          "改用有 qrcode 的 Python 重啟控制台，或安裝："
+                          + python_info()["install"])
         cmd = [sys.executable, os.path.join(HERE, "mode_build.py"), "--mode", mode]
         for flag in ("scan-only", "deploy-only", "skip-transitions"):
             if body.get(flag):
@@ -1511,6 +1538,17 @@ UI_TEXT = {
         "hls is no in mediamtx.yml (the default; set it to yes to use this)",
     "hlsAddress 讀不出埠號：%s": "cannot read a port from hlsAddress: %s",
     "沒有直播畫面預覽：%s": "no live preview: %s",
+    # ── The console's own interpreter cannot draw QR codes
+    "⚠ 這個控制台用的 Python 少了 qrcode": "⚠ this console's Python has no qrcode",
+    "控制台目前跑在 %s，它觸發的建置會沿用同一個 Python，轉出來的影片不會有 QR code。":
+        "The console is running on %s and the builds it starts inherit the same Python, "
+        "so the videos it produces would have no QR code.",
+    "改用有 qrcode 的 Python 重啟控制台，或先安裝：%s":
+        "restart the console with a Python that has qrcode, or install it first: %s",
+    "這個控制台用的 Python 少了 qrcode，建置出來的影片不會有 QR code。"
+    "改用有 qrcode 的 Python 重啟控制台，或安裝：":
+        "this console's Python has no qrcode, so a build would produce videos without QR codes. "
+        "Restart the console with a Python that has qrcode, or install it: ",
 }
 
 
@@ -1627,9 +1665,12 @@ border:1px solid;line-height:1.5}
 .chip-wait{background:#fa01;border-color:#fa06}
 .chip-bad{background:#c001;border-color:#c006}
 button.primary{font-weight:700;border-color:#0a0}
+.warnbox{background:#c001;border:1px solid #c006;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:13px;line-height:1.6}
+.warnbox code{font-size:12px;background:#0001;padding:1px 4px;border-radius:4px}
 </style></head><body>
 <div id="langsw"></div>
 <h1><svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><path d="M74 34 A29 29 0 0 0 25 36" fill="none" stroke="#40DCCD" stroke-width="8" stroke-linecap="round"/><path d="M25 36 L24 19 L41 26Z" fill="#40DCCD"/><path d="M26 66 A29 29 0 0 0 75 64" fill="none" stroke="#7567FF" stroke-width="8" stroke-linecap="round"/><path d="M75 64 L76 81 L59 74Z" fill="#7567FF"/><path d="M42 34 L42 66 L68 50Z" fill="currentColor"/></svg><a href="__REPO_URL__" target="_blank" rel="noopener" title="GitHub：__PROJECT__">__PROJECT__</a> 控制台</h1>
+<div id="warn"></div>
 <div class="dim" id="head"></div>
 <div class="row" id="quick"></div>
 <div id="msg"></div>
@@ -1750,6 +1791,22 @@ function renderQuick(s){
     : ('<span class="dim">' + fmt("沒有直播畫面預覽：%s", esc(p.why || "")) + "</span>"));
 }
 
+// 控制台自己的 Python 能不能畫 QR code。這裡畫不出來的話，它觸發的每一次建置都畫不出來，
+// 所以要在一進頁面就看到，而不是等建置跑完才發現影片沒有 QR。
+function renderWarn(s){
+  var el = document.getElementById("warn");
+  if (!el) { return; }
+  var p = s.python || {};
+  var sig = p.qrcode ? "ok" : (p.executable + "|" + (p.install || ""));
+  if (el.getAttribute("data-sig") === sig) { return; }
+  el.setAttribute("data-sig", sig);
+  if (p.qrcode) { el.innerHTML = ""; return; }
+  el.innerHTML = '<div class="warnbox"><b>⚠ 這個控制台用的 Python 少了 qrcode</b><br>' +
+    fmt("控制台目前跑在 %s，它觸發的建置會沿用同一個 Python，轉出來的影片不會有 QR code。", esc(p.executable)) +
+    '<br>' + fmt("改用有 qrcode 的 Python 重啟控制台，或先安裝：%s", '<code>' + esc(p.install) + '</code>') +
+    '</div>';
+}
+
 // 語系切換：兩顆永遠都是「中文」「English」，切到哪個就寫進 settings.json 再重載。
 // 這一段由 JS 產生（不是伺服器端的字串），所以不會被語系替換影響。
 function renderLang(s){
@@ -1816,6 +1873,7 @@ function refresh(){
   getJSON("/api/status").then(function(s){
     STAT_FAIL = 0;
     text("head", s.now + "　目錄 " + s.prefix);
+    renderWarn(s);
     renderQuick(s);
     renderLang(s);
     renderServices(s);

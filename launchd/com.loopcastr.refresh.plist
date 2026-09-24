@@ -9,11 +9,11 @@
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>
-		<string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<string>__PYTHON_PATH__</string>
 	</dict>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/opt/homebrew/bin/python3</string>
+		<string>__PYTHON__</string>
 		<string>__HOME__/loopcastr/refreshwatch.py</string>
 		<string>--mode</string>
 		<string>auto</string>

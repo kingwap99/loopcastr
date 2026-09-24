@@ -10,14 +10,14 @@
 	     refuses to start. -->
 	<key>ProgramArguments</key>
 	<array>
-		<string>/opt/homebrew/bin/python3</string>
+		<string>__PYTHON__</string>
 		<string>__HOME__/loopcastr/webui.py</string>
 	</array>
 
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key>
-		<string>/opt/homebrew/bin:/usr/bin:/bin</string>
+		<string>__PYTHON_PATH__</string>
 	</dict>
 
 	<key>RunAtLoad</key>
