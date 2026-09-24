@@ -500,8 +500,13 @@ transitions (`--button-caption` changes it, `--no-button` turns it off entirely)
 Below the episode's QR button there is a "remaining MM:SS" badge that updates every second.
 
 Text cannot be drawn onto the video directly (no freetype) and the countdown has to change over time, so every
-second is pre-rendered (`make_countdown_frames`) and handed to ffmpeg as a `-framerate 1` sequence input, which
-makes overlay swap images by time. A 180-second video means 180 images.
+second is pre-rendered into one tall strip and overlaid with a time-based crop. A one-image-per-second sequence
+input was tried first and does not work: a 1 fps sequence does not line up with the 30 fps main picture inside
+overlay, the whole layer disappears, and ffmpeg reports no error at all (measured).
+
+There is deliberately **no "n of total" prefix**. That number describes a position inside the list, and the list
+is not part of the encode fingerprint, so it would either go stale the moment new videos arrive or force every
+video to be re-encoded whenever the list changes. The remaining time depends on the video alone.
 
 Disable it with `--no-countdown`.
 

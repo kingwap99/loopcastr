@@ -423,7 +423,8 @@ def make_countdown_frames(total, out_dir, size=28, prefix=""):
     return n
 
 
-FP_VERSION = 1      # bump when a change affects the picture (watermark, filters, parameters) so old files are redone
+FP_VERSION = 2      # bump when a change affects the picture (watermark, filters, parameters) so old files are redone
+                    # 2: the countdown lost its "n of total" prefix, so every video has to be redone once
 
 
 def encode_fp(seg, args, w, h):
@@ -663,8 +664,6 @@ def main():
 
     w, h = TARGETS[args.target]
     done = fail = 0
-    # The video index in the master list (the countdown badge shows n of total)
-    seg_ord = {s["id"]: i for i, s in enumerate(segs, 1)}
     for seg in missing[:args.limit or None]:
         sid = seg["id"]
         t0 = time.time()
@@ -725,6 +724,10 @@ def main():
 
             # Countdown: show the remaining playing time of this video under the QR button.
             # Overlay it as a one-image-per-second sequence and overlay swaps images by time.
+            # Deliberately no "n of total" prefix: that number describes the position inside the list,
+            # and the list is not part of the fingerprint, so it would either go stale the moment new
+            # videos arrive or force every video to be re-encoded whenever the list changes. The
+            # remaining time depends on the video alone, so it survives a rebuild of the list.
             if btn_w and wmtext and not args.no_countdown:
                 # The countdown strip length must also take the smaller value against the source length, or the picture
                 # starts counting from 07:30 while the video ends after three and a half minutes.
@@ -734,11 +737,9 @@ def main():
                     total = min(args.max_seconds, raw_d)
                 try:
                     if total >= 10:
-                        prefix = "%02d/%02d　" % (seg_ord.get(sid, 0),
-                                                  len(segs))
                         strip = os.path.join(RAW_DIR, "cd-%s.png" % sid)
                         bw, bh = wmtext.render_countdown_strip(
-                            prefix, total, strip, pre=CD_PRE, suf=CD_SUF)
+                            "", total, strip, pre=CD_PRE, suf=CD_SUF)
                         # Pick the current tile with a time-based crop (the same mechanism as the marquee).
                         # A 1 fps sequence input cannot be used: it does not line up with the 30 fps main picture
                         # inside overlay, the whole layer disappears and no error is reported (measured).
@@ -746,8 +747,8 @@ def main():
                                % (bw, bh, bh))
                         overlays.append((strip, pre,
                                          "x=W-w:y=%d" % btn_h))
-                        log("      %s countdown strip %dx%d (%d s, starts at '%s%s%02d:%02d%s')"
-                            % (sid, bw, bh * int(total), int(total), prefix, CD_PRE,
+                        log("      %s countdown strip %dx%d (%d s, starts at '%s%02d:%02d%s')"
+                            % (sid, bw, bh * int(total), int(total), CD_PRE,
                                int(total) // 60, int(total) % 60, CD_SUF))
                 except Exception as exc:
                     log("      %s countdown failed, skipping the overlay: %s" % (sid, exc))
