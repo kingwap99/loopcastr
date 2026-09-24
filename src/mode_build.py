@@ -36,6 +36,7 @@ except ImportError:
     BLC = None
 
 import playout_ctl as pctl      # boundary calculation and restarting (shared with refreshwatch)
+import buildlock                # only one build may write the playlists at a time
 
 # settings.json media.dir can put the library on another disk; the builders share one resolver.
 MEDIA = BLC.media_root() if BLC else os.path.join(HERE, "media")
@@ -442,6 +443,14 @@ def main():
     if a.mode not in modes:
         log("no such mode in modes.json: %s (have %s)" % (a.mode, ", ".join(modes)))
         return 2
+    # Two builds write the same playlist, concat list and manifest. Take the slot or stop: racing the
+    # other build interleaves those writes, and whichever finishes last decides what is on air.
+    lock = buildlock.BuildLock(HERE)
+    if not lock.acquire():
+        log("another build is already running (pid %s); stopping instead of writing the same "
+            "files as it. Nothing is broken - that build is doing this work."
+            % (buildlock.holder(HERE) or "?"))
+        return buildlock.EXIT_BUSY
     cfg = modes[a.mode]
     f = files_for(a.mode)
     log("mode %s (%s): source %s, limit %s s, %s shorts, max age %s h"

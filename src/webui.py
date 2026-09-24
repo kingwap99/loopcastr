@@ -29,6 +29,8 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import buildlock                 # the build slot, so the button cannot race the refresh service
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # The console title links to the project itself. This is the only project address, so it needs no parameter.
@@ -897,6 +899,12 @@ def build_cmd(action, body):
             return None, ("這個控制台用的 Python 少了 qrcode，建置出來的影片不會有 QR code。"
                           "改用有 qrcode 的 Python 重啟控制台，或安裝："
                           + python_info()["install"])
+        # The refresh service starts its own build every few minutes when the source has new videos.
+        # Starting a second one would have two processes writing the same playlists; say so instead of
+        # spawning a build that immediately stops itself.
+        if not (body.get("scan-only") or body.get("deploy-only")) and buildlock.busy(HERE):
+            return None, ("已經有另一個建置在跑，請等它結束再按。"
+                          + " (pid %s)" % (buildlock.holder(HERE) or "?"))
         cmd = [sys.executable, os.path.join(HERE, "mode_build.py"), "--mode", mode]
         for flag in ("scan-only", "deploy-only", "skip-transitions"):
             if body.get(flag):
@@ -1549,6 +1557,8 @@ UI_TEXT = {
     "改用有 qrcode 的 Python 重啟控制台，或安裝：":
         "this console's Python has no qrcode, so a build would produce videos without QR codes. "
         "Restart the console with a Python that has qrcode, or install it: ",
+    "已經有另一個建置在跑，請等它結束再按。":
+        "another build is already running; wait for it to finish.",
 }
 
 

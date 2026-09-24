@@ -35,6 +35,7 @@ tmp/
 .DS_Store
 
 # Reproducible content and lists (keeps multi-GB media out of commits)
+.build.lock
 media/
 media-test/
 playlist-local.json

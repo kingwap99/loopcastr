@@ -181,6 +181,11 @@ def check(mode, cfg, f, args):
     rc = subprocess.run([sys.executable, os.path.join(HERE, "mode_build.py"),
                          "--mode", mode, "--switch"],
                         stdin=subprocess.DEVNULL).returncode
+    if rc == 4:
+        # Another build (the console button, or a manual run) is already writing these files. Not a
+        # failure: leave the change unrecorded and look again on the next check instead of alerting.
+        log("another build is running; leaving this change for the next check")
+        return False
     if rc != 0:
         log("rebuild failed rc=%d, the playout content is unchanged" % rc)
         notify("[%s] rebuild failed rc=%d" % (mode, rc))
