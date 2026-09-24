@@ -182,7 +182,8 @@ Playout then reads the single file (`-stream_loop -1 -i media/all-in-one.mp4 -c 
 The concat demuxer with `-c copy` requires every segment to have identical parameters; mixing them produces errors at the seam or fails the whole run. So the conversion to uniform parameters has to happen **at landing time** rather than being left to the playout (transcoding in the playout would keep an 8 GB target machine fully loaded around the clock):
 
     python3 build_local_content.py --target 720
-    # output is uniform: H.264 High L3.1 / 1280x720 / yuv420p / 30fps / AAC-LC 48kHz stereo / +faststart
+
+The output is uniform: H.264 High L3.1 / 1280x720 / yuv420p / 30fps / AAC-LC 48kHz stereo / +faststart.
 
 [measured] After the fix, 5 files were spot-checked (including 720p and 718p sources): the output parameters are identical and `-c copy` splices correctly.
 
@@ -564,21 +565,17 @@ T-01 -> T-13 -> T-14 -> **T-11** -> T-16 to T-18 -> T-20 -> T-22 -> **T-07 (in p
 
 ## Appendix B: verification commands
 
-    # While broadcasting, measure gaps at the receiver (in another terminal)
     python3 ~/loopcastr/gapwatch.py http://127.0.0.1:9997 live/main 120
-
-    # Local hub status
     curl -s http://127.0.0.1:9997/v3/paths/get/live/main
-
-    # Is anonymous resolution still blocked? (exit 2 means everything failed)
     python3 ~/loopcastr/relay.py --playlist ~/loopcastr/playlist.json --check
-
-    # Landing progress
     python3 ~/loopcastr/build_local_content.py --status
-
-    # Service status
     launchctl list | grep loopcastr
     tail -f ~/loopcastr/logs/playout.log ~/loopcastr/logs/publish.log
-
-    # Does this ffmpeg have freetype? (0 means no drawtext)
     ffmpeg -hide_banner -filters | grep -c drawtext
+
+- the first measures receiver gaps while broadcasting (run it in another terminal);
+- the second prints the local hub status;
+- `relay.py --check` reports whether anonymous resolution still works (exit 2 means everything failed);
+- `--status` reports landing progress;
+- `launchctl list` and the log tails show the services and what they are doing;
+- the last line counts the `drawtext` filter: 0 means this ffmpeg has no freetype.

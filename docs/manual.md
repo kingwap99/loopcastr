@@ -103,7 +103,6 @@ point had no offline window.
 boundaries are rounded, measured overlap about 11 ms). ffmpeg clamps them back automatically and there is no
 audible effect. If you need a perfectly clean timeline, splice offline into one file first:
 
-    # Splice into one file (done once, offline; playout then never touches the concat demuxer)
     python3 src/make_concat_list.py playlist-local.json -o concat.txt --base-dir .
     ffmpeg -hide_banner -f concat -safe 0 -i concat.txt -c copy media/all-in-one.mp4
 
@@ -116,9 +115,12 @@ Requirements: macOS with Python 3, plus `ffmpeg`, `yt-dlp` and `mediamtx` on `PA
 `install.sh` copies the programs to the install directory, substitutes the `__HOME__` / `__USER__`
 placeholders in the plists, generates `mediamtx.yml` and registers the launchd services:
 
-    ./install.sh --dry-run     # show what it would do first (changes nothing)
-    ./install.sh               # install to ~/loopcastr with LaunchDaemons (needs sudo)
-    ./install.sh --agents      # install as LaunchAgents: no root, but a graphical login is required
+    ./install.sh --dry-run
+    ./install.sh
+    ./install.sh --agents
+
+The first is a dry run and changes nothing. The second installs to `~/loopcastr` with LaunchDaemons and
+needs sudo; `--agents` installs LaunchAgents instead, which need no root but do need a graphical login.
 
 Safe to run repeatedly; an existing `mediamtx.yml` and `stream.key` are never overwritten.
 
@@ -146,9 +148,12 @@ Acceptance check (while broadcasting, in another terminal):
 ### The daily glance
 
     ssh <USER>@<TARGET_HOST>
-    launchctl list | grep loopcastr          # are the expected services there? (if not, see the Services block in the console)
-    tail -3 ~/loopcastr/logs/health.log      # is the whole chain healthy?
-    tail -3 ~/loopcastr/logs/alerts.jsonl    # has anything alerted?
+    launchctl list | grep loopcastr
+    tail -3 ~/loopcastr/logs/health.log
+    tail -3 ~/loopcastr/logs/alerts.jsonl
+
+`launchctl list` should show the expected services (if not, see the Services block in the console);
+`health.log` says whether the chain is healthy and `alerts.jsonl` whether anything has alerted.
 
 `health.log` writes one line every 60 seconds. A line like `OK chain healthy (traffic +N bytes / 6s)` means
 healthy; N is around 2,000,000. In Chinese mode the same line reads `OK 全鏈路正常（流量 +N bytes / 6s）`.
@@ -168,8 +173,11 @@ the whole chain from `modes.json` (scan -> land -> transitions -> deploy -> rebu
 The same thing on the command line:
 
     cd ~/loopcastr
-    python3 mode_build.py --mode news --switch     # scan + land + transitions + switch
-    python3 mode_build.py --mode news --scan-only  # rescan the master list only
+    python3 mode_build.py --mode news --switch
+    python3 mode_build.py --mode news --scan-only
+
+The first runs the whole chain (scan, land, transitions, deploy, rebuild the list) and then switches the
+playout; `--scan-only` just rescans the master list.
 
 You only touch the `segments` of the master list `playlist-<mode>.json` (`type: vod`, `url`, `seconds`) when
 hand-placing a few clips of your own, and then land and rebuild the list yourself:
@@ -203,14 +211,14 @@ First work out which kind of install this is: the launchd domain and the paths d
 
 With a LaunchAgent (gui) install:
 
-    # stop
     launchctl bootout gui/$(id -u)/com.loopcastr.publish
     launchctl bootout gui/$(id -u)/com.loopcastr.playout
-    # start
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.loopcastr.publish.plist
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.loopcastr.playout.plist
-    # restart (without unloading)
     launchctl kickstart -k gui/$(id -u)/com.loopcastr.playout
+
+The first pair stops the two services, the second pair starts them again, and the last line restarts the
+playout without unloading it.
 
 For a LaunchDaemon install, replace `gui/$(id -u)` with `system`, the paths with `/Library/LaunchDaemons/`,
 and prefix the commands with `sudo`.
@@ -226,11 +234,12 @@ An interface for people who would rather not ssh in and memorise commands. Stand
 to be installed.
 
     cd ~/loopcastr
-    python3 webui.py                 # http://127.0.0.1:8787
+    python3 webui.py
     python3 webui.py --port 9000
-
-    # to keep it running
     nohup python3 ~/loopcastr/webui.py > ~/loopcastr/logs/webui.log 2>&1 &
+
+The first serves on `http://127.0.0.1:8787`, the second on another port, and the third keeps it running in
+the background.
 
 Blocks (top to bottom is also the order of operation):
 
@@ -263,7 +272,9 @@ A build can run for tens of minutes, so press "Stop build" when you want to chan
 The project name in the page title (`loopcastr`) links to the GitHub project in a new tab.
 The "watch the stream" button below the title opens the MediaMTX HLS page:
 
-    http://<host>:<port of hlsAddress>/<path>/      # locally http://127.0.0.1:8888/live/main/ by default
+    http://<host>:<port of hlsAddress>/<path>/
+
+Locally that is `http://127.0.0.1:8888/live/main/` by default.
 
 The host name is filled in by the browser, so opening the console from another machine works too.
 The address and whether the button appears at all are read from `mediamtx.yml`: with `hls: no` (the repo default)
@@ -359,7 +370,9 @@ not fall back to 0 at the wrap and DTS cannot be used as the signal. This script
 "start time + one-round length" and samples the MediaMTX API at high frequency around it:
 
     python3 loopwatch.py --lead 45 --tail 90
-    python3 loopwatch.py --at 04:19:07      # or name the moment directly
+    python3 loopwatch.py --at 04:19:07
+
+The second form names the moment to measure directly.
 
 The output lists the receiver-offline windows and the `bytesReceived` zero-growth windows across the loop point.
 The round length comes from playlist-local.json (including any outpoint trims), so changing the list or the
@@ -378,11 +391,14 @@ to an old list would pick up the wrong QR. When a round runs several passes (`--
 `build_local_content.py` inserts the matching `_tr_<id>.mp4` after each episode; if an episode has no dedicated
 file it falls back to the shared `media/<mode>/_transition.mp4` (the older mechanism, still usable).
 
-    python3 build_transitions.py --parallel 3 --verify 5     # rebuild everything, then spot-check
+    python3 build_transitions.py --parallel 3 --verify 5
 
-    # The older mechanism: one shared transition for everything (only needed when there is no per-episode QR)
     python3 build_local_content.py --transition <YouTube URL or video id>
-    python3 build_local_content.py --no-transition           # temporarily disable it (files stay, not inserted)
+    python3 build_local_content.py --no-transition
+
+`--verify 5` spot-checks five of them after the rebuild. The last two lines are the older mechanism - one
+shared transition for everything, only needed when there is no per-episode QR - and `--no-transition`
+temporarily disables transitions (the files stay, they are simply not inserted).
 
 Transitions are normalised like every other segment (1280x720 / H.264 High L3.1 / 30fps / AAC-LC 48k stereo), so
 concat stays a plain `-c copy` with no transcoding.
@@ -391,9 +407,12 @@ concat stays a plain `-c copy` with no transcoding.
 
 The test list is temporary, so switch back after testing or the channel keeps playing test clips.
 
-    ./switch_edition.sh            # show which list is active
-    ./switch_edition.sh live       # switch back to production (playlist-local.json)
-    SUDO_PASS=xxx ./switch_edition.sh test    # switch to the test edition
+    ./switch_edition.sh
+    ./switch_edition.sh live
+    SUDO_PASS=xxx ./switch_edition.sh test
+
+With no argument it shows which list is active, `live` switches back to production (`playlist-local.json`)
+and `test` switches to the test edition.
 
 Switching rebuilds the concat list, rewrites the playout plist, restarts the service and reattaches loopwatch (a
 different round length means the loop point is recomputed). Measured: the publisher only drops for 4 seconds and
@@ -541,7 +560,7 @@ Disable it with `--no-link-button`. The marquee y moves from 40 to 10 (half a li
 
 **Verification must decode the encoded video**; pixels on screen are not proof:
 
-    # build_transitions.py --verify 5 samples and reports on its own
+`build_transitions.py --verify 5` samples and reports on its own.
 
 The QR holds the short URL `https://youtu.be/<id>` (shorter than watch?v=, fewer modules, easier to scan).
 
@@ -550,7 +569,9 @@ After changing transitions, rebuild the list and restart the playout (the consol
 
     cd ~/loopcastr
     python3 make_concat_list.py playlist-<mode>-local.json -o concat-<mode>.txt --base-dir ~/loopcastr
-    launchctl kickstart -k gui/$(id -u)/com.loopcastr.playout     # for a LaunchDaemon install use system/ and sudo
+    launchctl kickstart -k gui/$(id -u)/com.loopcastr.playout
+
+For a LaunchDaemon install use `system/` instead of `gui/$(id -u)` and prefix the command with `sudo`.
 
 Restarting the playout **starts again from the first segment**, so viewers see the content jump back to the top.
 
@@ -593,7 +614,9 @@ volume `mv` is an atomic replace, so the playout only ever sees a complete old o
     python3 build_transitions.py --playlist playlist-tucheng3.json \
       --shorts-url "https://www.youtube.com/<SHORTS_CHANNEL>/shorts" --shorts-count 30 \
       --seconds 90 --button-caption 去追劇 --parallel 2 --out-dir /tmp/stage-tr
-    # after verification passes
+
+Once verification passes, move the staged files in:
+
     mv /tmp/stage-ep/*.mp4 media/
     mv /tmp/stage-tr/_tr_*.mp4 media/
 
@@ -625,13 +648,14 @@ single-channel setup, turning `hls: yes` back on adds a "watch the stream" butto
 output can be viewed directly, at the cost of that ~+1.1% CPU per path.
 
 ```bash
-# fd limit: the system default plus the service layer (only the plist survives a reboot)
 sudo launchctl limit maxfiles 8192 unlimited
-# add to the mediamtx plist:
-#   SoftResourceLimits / HardResourceLimits -> NumberOfFiles = 8192
 sudo launchctl bootout system/com.loopcastr.mediamtx
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.loopcastr.mediamtx.plist
 ```
+
+The first line raises the system default; only the service layer (the plist) survives a reboot, so the
+mediamtx plist also needs `SoftResourceLimits` / `HardResourceLimits` with `NumberOfFiles = 8192`. The last
+two lines restart mediamtx so it takes effect.
 
 Measured verification (2026-09-19 06:47-06:50):
 
@@ -666,11 +690,14 @@ overwrite** the existing list: an empty concat list would stop the playout, so i
 The first-air time on screen uses `YYYY/MM/DD HH:MM` in the machine's time zone, taken from yt-dlp's
 `release_timestamp`; failing that it falls back to `timestamp`, and failing that to the date plus `00:00`.
 
-    python3 mode_build.py --mode promotion            # scan -> land -> transitions -> deploy -> rebuild list
-    python3 mode_build.py --mode promotion --switch   # all of the above, then switch the playout
+    python3 mode_build.py --mode promotion
+    python3 mode_build.py --mode promotion --switch
     python3 mode_build.py --mode promotion --scan-only
 
-    ./switch_edition.sh promotion                     # when the list is already built, just switch the playout
+    ./switch_edition.sh promotion
+
+The first runs scan, land, transitions, deploy and rebuild; `--switch` then moves the playout over, and
+`switch_edition.sh` on its own is enough when the list is already built.
 
 `mode_build.py` deliberately stages: videos go to `/tmp/stage-ep-<mode>/` and transitions to
 `/tmp/stage-tr-<mode>/`, and each file is verified for duration before being moved into `media/<mode>/` (why not
@@ -705,15 +732,19 @@ Every video and transition records an "encoding parameter fingerprint plus file 
 media is still there with the same fingerprint and the same size it is skipped. Changing quality, watermark or a
 length cap changes the fingerprint, and only those files are redone.
 
-    python3 mode_build.py --mode news            # fill in what is missing (unchanged fingerprints are not redone)
-    python3 mode_build.py --mode news --force    # redo everything
+    python3 mode_build.py --mode news
+    python3 mode_build.py --mode news --force
+
+The first fills in what is missing (unchanged fingerprints are not redone); `--force` redoes everything.
 
 #### Rescanning and handing over
 
 `refreshwatch.py` rescans the source in flat mode according to `refresh_seconds` (a few seconds), compares video
 and shorts ids and **rebuilds only when something changed**:
 
-    sudo python3 refreshwatch.py --mode promotion     # run in the foreground
+    sudo python3 refreshwatch.py --mode promotion
+
+That runs it in the foreground; it is normally installed as the `com.loopcastr.refresh` service instead.
 
 After a rebuild it **waits for the next segment boundary** before restarting the playout. The concat list is read
 only when ffmpeg starts, so an update has to restart the process; waiting for the boundary keeps viewers from

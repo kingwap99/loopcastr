@@ -998,3 +998,25 @@ repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU�
 
 另外把快速開始的 `<repo>` 佔位符換成實際的 repo 網址，並註明那條命令列路徑是「最小可播」
 版本（沒有過場），完整的模式／過場／分批建置走 `modes.json` ＋ 控制台。
+
+## 文件裡的指令區塊在 zsh 下貼上會壞掉（2026-09-24）
+
+使用者在 `.41` 貼上快速開始的兩行：
+
+    ./install.sh --dry-run     # show what it would do first (changes nothing)
+    ./install.sh               # copy the programs to ~/loopcastr and generate the service plists
+
+得到 `zsh: number expected` 與 `unknown argument: #`。原因不是 `install.sh`：**zsh 互動模式預設
+沒有開 `interactive_comments`**，所以行尾的 `# 說明` 不會被當成註解，而是變成參數（第二行的
+`#` 就直接被 `install.sh` 當成未知參數拒絕）。bash 沒這個問題，所以先前沒發現。
+
+修法：把 README、`docs/manual.md`、`docs/spec-v1.2.md` **所有可貼上的指令區塊裡的 `#` 全部拿掉**，
+說明改寫到區塊外面（區塊內的 `#` 只剩 `/etc/sudoers.d/loopcastr-webui` 那種「檔案內容」的
+例子，那是真的註解、必須保留）。
+
+【實測】用程式掃過三份文件：程式碼區塊（縮排式與 ``` 圍籬式）內含 `#` 的行數 0／0／0，
+表格完整性 8／16／32 個表全部一致。
+
+順帶在快速開始補一句：clone 放哪裡都可以（`install.sh` 預設裝到 `~/loopcastr`，或用 `--prefix`），
+但直接裝在 clone 目錄裡時 `settings.json`／`modes.json` 是版控追蹤的檔案，之後 `git pull` 會
+看到本地修改。

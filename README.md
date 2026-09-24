@@ -57,10 +57,17 @@ Requirements: macOS with Python 3, plus `ffmpeg`, `yt-dlp` and `mediamtx` on `PA
 missing; `opencv` is optional and only used by `build_transitions.py --verify`.
 
     git clone https://github.com/kingwap99/loopcastr && cd loopcastr
-    ./install.sh --dry-run     # show what it would do first (changes nothing)
-    ./install.sh               # copy the programs to ~/loopcastr and generate the service plists
+    ./install.sh --dry-run
+    ./install.sh
 
-The first run deliberately does **not** register the launchd services: with no content to play they
+The first command is a dry run: it prints what it would do and changes nothing. The second copies the
+programs to `~/loopcastr` and generates the service plists.
+
+(The clone can live anywhere: `install.sh` copies the programs into `~/loopcastr`, or wherever `--prefix`
+points. Installing into the clone itself also works, but `settings.json` and `modes.json` are tracked
+files there, so a later `git pull` will see your local edits.)
+
+That second run deliberately does **not** register the launchd services: with no content to play they
 would only restart forever. Build the content, then run the installer again to register and start them:
 
     cd ~/loopcastr
@@ -68,13 +75,14 @@ would only restart forever. Build the content, then run the installer again to r
     python3 build_local_content.py --playlist playlist.json --target 720
     python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
     printf %s '<YouTube stream key>' > stream.key && chmod 600 stream.key
+    cd <the clone> && ./install.sh
 
-    cd <the clone> && ./install.sh      # the second run registers and starts the services
-
+The last `./install.sh`, run from the clone, sees the content and registers and starts the services.
 Add `--force-services` to the first run if you would rather register them before any content exists.
-That command-line path is the minimum: it plays the videos without transitions. Per-mode sources,
-transitions, incremental builds and the on-screen QR/captions all come from `modes.json` and the
-console's "Build and switch (go live)", which runs the whole chain for you.
+
+This command-line path is the minimum that plays: it plays the videos without transitions. Per-mode
+sources, transitions, incremental builds and the on-screen QR/captions all come from `modes.json` and
+the console's "Build and switch (go live)", which runs the whole chain for you.
 
 `install.sh --agents` installs LaunchAgents instead (no root, but a graphical login is required);
 `./install.sh --help` lists every option.
@@ -84,7 +92,9 @@ console's "Build and switch (go live)", which runs the whole chain for you.
 Day-to-day operation needs no shell commands. The installer registers the console as a launchd service
 (`com.loopcastr.webui`), so once the services are running it is already there:
 
-    http://127.0.0.1:8787/          # before the services exist: python3 ~/loopcastr/webui.py
+    http://127.0.0.1:8787/
+
+(Before the services exist, start it by hand with `python3 ~/loopcastr/webui.py`.)
 
 It is one page of blocks, top to bottom in the order you use them:
 
@@ -239,10 +249,17 @@ This project does **not** redistribute any of the following; install them yourse
 `opencv` 是選配，只有 `build_transitions.py --verify` 會用到。
 
     git clone https://github.com/kingwap99/loopcastr && cd loopcastr
-    ./install.sh --dry-run     # 先看它會做什麼（不會動任何東西）
-    ./install.sh               # 把程式複製到 ~/loopcastr、產生服務 plist
+    ./install.sh --dry-run
+    ./install.sh
 
-第一次**刻意不註冊** launchd 服務：還沒有內容可播時，它們只會一直重啟。先建內容，再跑一次安裝
+第一行是空跑：只印出它會做什麼、不會動任何東西。第二行才會把程式複製到 `~/loopcastr`、產生
+服務 plist。
+
+（clone 放哪裡都可以：`install.sh` 會把程式複製到 `~/loopcastr`，或用 `--prefix` 指定的位置。
+直接裝在 clone 目錄裡也可以，只是 `settings.json`、`modes.json` 在那裡是版控追蹤的檔案，之後
+`git pull` 會看到你本地的修改。）
+
+第二行**刻意不註冊** launchd 服務：還沒有內容可播時，它們只會一直重啟。先建內容，再跑一次安裝
 讓服務註冊並啟動：
 
     cd ~/loopcastr
@@ -250,12 +267,13 @@ This project does **not** redistribute any of the following; install them yourse
     python3 build_local_content.py --playlist playlist.json --target 720
     python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
     printf %s '<YouTube 串流金鑰>' > stream.key && chmod 600 stream.key
+    cd <剛才 clone 的目錄> && ./install.sh
 
-    cd <剛才 clone 的目錄> && ./install.sh    # 第二次執行才會註冊並啟動服務
+最後那行（在 clone 目錄執行）看到內容存在，就會註冊並啟動服務。想在還沒有內容時就先註冊，
+第一次執行加 `--force-services` 即可。
 
-想在還沒有內容時就先註冊，第一次執行加 `--force-services` 即可。上面這條命令列路徑是**最小可播**
-版本（沒有過場）；每個模式的來源、過場、分批建置、畫面上的 QR 與字樣，都是 `modes.json` ＋
-控制台「建置並切換（開始直播）」在處理的。
+上面這條命令列路徑是**最小可播**版本（沒有過場）；每個模式的來源、過場、分批建置、畫面上的
+QR 與字樣，都是 `modes.json` ＋ 控制台「建置並切換（開始直播）」在處理的。
 
 `install.sh --agents` 可裝成 LaunchAgent（不需要 root，但要有圖形登入才會跑）；`./install.sh --help` 看全部選項。
 
@@ -264,7 +282,9 @@ This project does **not** redistribute any of the following; install them yourse
 日常操作不必再背指令。安裝程式會把控制台也註冊成 launchd 服務（`com.loopcastr.webui`），所以
 服務跑起來之後它就在那裡：
 
-    http://127.0.0.1:8787/          # 服務還沒建立時：python3 ~/loopcastr/webui.py
+    http://127.0.0.1:8787/
+
+（服務還沒建立時，自己用 `python3 ~/loopcastr/webui.py` 啟動。）
 
 它是一頁由上而下的區塊，順序就是你操作的順序：
 
