@@ -16,6 +16,7 @@ Usage
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -130,14 +131,32 @@ def overlay(base, out, seconds, overlays):
 SHORTS_FMT = ("bv*[height<=1080][protocol^=https]+ba[protocol^=https]/"
               "b[height<=1080][protocol^=https]/b[height<=1080]/b")
 
+# Where yt-dlp lives: prefer whatever is on PATH (not everyone installs it with brew)
+YTDLP = shutil.which("yt-dlp") or "/opt/homebrew/bin/yt-dlp"
+
 
 def fetch_shorts(url, count):
-    p = subprocess.run(["/opt/homebrew/bin/yt-dlp", "--no-warnings",
-                        "--socket-timeout", "25", "--flat-playlist",
-                        "-I", "1:%d" % count, "--print", "%(id)s", url],
-                       capture_output=True, text=True, timeout=300,
-                       stdin=subprocess.DEVNULL)
-    return [x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
+    """The newest shorts, keeping the longest answer of a few attempts.
+
+    The flat listing intermittently comes back short, and a short answer here shrinks the pool the
+    transitions rotate through. build_playlist.py guards the video listing the same way.
+    """
+    best = []
+    for i in range(3):
+        p = subprocess.run([YTDLP, "--no-warnings",
+                            "--socket-timeout", "25", "--flat-playlist",
+                            "-I", "1:%d" % count, "--print", "%(id)s", url],
+                           capture_output=True, text=True, timeout=300,
+                           stdin=subprocess.DEVNULL)
+        ids = [x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
+        if len(ids) > len(best):
+            best = ids
+        elif best:
+            print("listing attempt %d returned %d shorts; keeping %d" % (i + 1, len(ids), len(best)),
+                  flush=True)
+        if not best:
+            time.sleep(2 + i * 2)
+    return best
 
 
 def land_short(sid, media_dir, raw_dir):
@@ -151,7 +170,7 @@ def land_short(sid, media_dir, raw_dir):
         return dst, ""
     os.makedirs(raw_dir, exist_ok=True)
     raw = os.path.join(raw_dir, "short-%s.mp4" % sid)
-    p = subprocess.run(["/opt/homebrew/bin/yt-dlp", "--no-warnings",
+    p = subprocess.run([YTDLP, "--no-warnings",
                         "--no-playlist", "--retries", "5",
                         "--fragment-retries", "10", "-f", SHORTS_FMT,
                         "--merge-output-format", "mp4", "--remux-video", "mp4",

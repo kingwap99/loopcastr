@@ -77,19 +77,31 @@ def log(msg):
 
 
 def flat_ids(url, limit):
-    """fast flat listing of IDs (no per-video metadata, takes seconds)."""
+    """Flat listing of IDs (no per-video metadata, takes seconds), longest answer of a few attempts.
+
+    The flat listing intermittently comes back short, the same behaviour build_playlist.py already
+    guards for the video list. It used to return the first non-empty answer, and a short answer is
+    harmful here in both directions: stored as the baseline it makes the next healthy listing look like
+    new content, and on the video side it hides genuinely new uploads. Measured on a 24/7 news mode:
+    the stored baseline held 12 videos and 12 shorts while the channel had 166 and 91, and every check
+    after that reported 91 new shorts and rebuilt the channel.
+    """
     cmd = [YTDLP, "--no-warnings", "--socket-timeout", "25", "--flat-playlist"]
     if limit:
         cmd += ["-I", "1:%d" % limit]
     cmd += ["--print", "%(id)s", url]
+    best = []
     for i in range(3):
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
                            stdin=subprocess.DEVNULL)
         ids = [x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
-        if ids:
-            return ids
-        time.sleep(15 + i * 15)
-    return []
+        if len(ids) > len(best):
+            best = ids
+        elif best:
+            log("listing attempt %d returned %d ids; keeping %d" % (i + 1, len(ids), len(best)))
+        if not best:
+            time.sleep(15 + i * 15)
+    return best
 
 
 def notify(text):
