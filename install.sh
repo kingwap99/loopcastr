@@ -98,24 +98,27 @@ run mkdir -p "$PREFIX" "$PREFIX/logs" "$PREFIX/media"
 say "  $PREFIX"
 
 step "Copying programs"
+# The programs always have to end up in the install directory itself: every service runs
+# <prefix>/<script>, and the console looks for its files beside itself. That also covers installing
+# into the clone (clone it to ~/loopcastr and run install.sh from there), where src/ is flattened up
+# one level; src/ itself is left alone.
 if [ "$SRC_DIR" = "$PREFIX" ]; then
-  say "  source and install directory are the same, skipping"
-else
-  for f in "$SRC_DIR"/src/*; do
-    [ -f "$f" ] || continue          # skip directories such as __pycache__
-    case "$(basename "$f")" in
-      settings.json|modes.json)
-        # These two are the settings meant to be edited by hand; an existing copy is kept, so an upgrade does not eat your tuning
-        if [ -f "$PREFIX/$(basename "$f")" ]; then
-          say "  keeping the existing settings: $(basename "$f")"
-          continue
-        fi
-        ;;
-    esac
-    run cp -fp "$f" "$PREFIX/"
-  done
-  run find "$PREFIX" -maxdepth 1 -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
+  say "  installing into the clone itself: flattening src/ into $PREFIX"
 fi
+for f in "$SRC_DIR"/src/*; do
+  [ -f "$f" ] || continue            # skip directories such as __pycache__
+  case "$(basename "$f")" in
+    settings.json|modes.json)
+      # These two are the settings meant to be edited by hand; an existing copy is kept, so an upgrade does not eat your tuning
+      if [ -f "$PREFIX/$(basename "$f")" ]; then
+        say "  keeping the existing settings: $(basename "$f")"
+        continue
+      fi
+      ;;
+  esac
+  run cp -fp "$f" "$PREFIX/"
+done
+run find "$PREFIX" -maxdepth 1 -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
 
 step "Generating service definitions (plist placeholder substitution)"
 for f in "$SRC_DIR"/launchd/*.plist; do

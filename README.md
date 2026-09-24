@@ -64,8 +64,9 @@ The first command is a dry run: it prints what it would do and changes nothing. 
 programs to `~/loopcastr` and generates the service plists.
 
 (The clone can live anywhere: `install.sh` copies the programs into `~/loopcastr`, or wherever `--prefix`
-points. Installing into the clone itself also works, but `settings.json` and `modes.json` are tracked
-files there, so a later `git pull` will see your local edits.)
+points. Installing into the clone itself works too - `src/` is flattened into that directory, so the clone
+root gains copies of the programs as untracked files - but `settings.json` and `modes.json` are tracked
+there, so a later `git pull` will see your local edits.)
 
 That second run deliberately does **not** register the launchd services: with no content to play they
 would only restart forever. Build the content, then run the installer again to register and start them:
@@ -256,8 +257,9 @@ This project does **not** redistribute any of the following; install them yourse
 服務 plist。
 
 （clone 放哪裡都可以：`install.sh` 會把程式複製到 `~/loopcastr`，或用 `--prefix` 指定的位置。
-直接裝在 clone 目錄裡也可以，只是 `settings.json`、`modes.json` 在那裡是版控追蹤的檔案，之後
-`git pull` 會看到你本地的修改。）
+直接裝在 clone 目錄裡也可以——`src/` 會被攤平到該目錄，所以 clone 根目錄會多出程式的複本
+（未進版控）——只是 `settings.json`、`modes.json` 在那裡是版控追蹤的檔案，之後 `git pull` 會
+看到你本地的修改。）
 
 第二行**刻意不註冊** launchd 服務：還沒有內容可播時，它們只會一直重啟。先建內容，再跑一次安裝
 讓服務註冊並啟動：

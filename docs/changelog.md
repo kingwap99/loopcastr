@@ -1020,3 +1020,21 @@ repo 的範例值仍然是 `hls: no`（多線產能時每條路徑約 +1.1% CPU�
 順帶在快速開始補一句：clone 放哪裡都可以（`install.sh` 預設裝到 `~/loopcastr`，或用 `--prefix`），
 但直接裝在 clone 目錄裡時 `settings.json`／`modes.json` 是版控追蹤的檔案，之後 `git pull` 會
 看到本地修改。
+
+## 裝在 clone 目錄裡時，plist 指向不存在的程式（2026-09-24）
+
+檢查 `.41` 的安裝狀態時發現：使用者把 repo clone 在 `~/loopcastr`（＝安裝目錄），而 `install.sh`
+在「來源與安裝目錄相同」時會**跳過複製程式**。結果產生的 plist 指向 `~/loopcastr/playout.sh`，
+但程式在 `~/loopcastr/src/` —— 服務一註冊就會找不到檔案。
+
+修法：不管是不是同一個目錄，都把 `src/*` 攤平到安裝目錄（服務一律執行 `<prefix>/<script>`，
+控制台也在自己旁邊找檔案）；`src/` 本身保持不動，同目錄時多印一行說明。
+`settings.json`／`modes.json` 的「已存在就不覆蓋」規則不變。
+
+【實測】兩種情況都跑過：
+
+| 情況 | 結果 |
+|---|---|
+| clone 在別處、`--prefix` 指到空目錄 | 安裝目錄出現 19 支程式、`settings.json`，plist 指向 `<prefix>/playout.sh`（存在） |
+| **直接把 clone 當安裝目錄**（`.41` 的情況） | 程式被攤平到 clone 根目錄、`settings.json` 就位、`src/` 保持完整，**plist 指向的檔案存在** |
+| 第二次執行 | `keeping the existing settings: settings.json / modes.json`，手改的 `ui.lang` 保留 |
