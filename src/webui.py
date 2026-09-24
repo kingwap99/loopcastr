@@ -1565,6 +1565,35 @@ UI_TEXT = {
         "Restart the console with a Python that has qrcode, or install it: ",
     "已經有另一個建置在跑，請等它結束再按。":
         "another build is already running; wait for it to finish.",
+    # ── Sponsor QR block and the remaining settings labels (these were only ever written in Chinese)
+    "贊助 QR（只出現在過場的右下角）": "Sponsor QR (transitions only, bottom right)",
+    "贊助 QR": "Sponsor QR",
+    "這是影片上實際會畫出來的樣子。集數不會有這顆 QR。":
+        "This is exactly what is drawn on the video. Episodes never carry this QR.",
+    "沒有設定贊助 QR（圖片與連結都是空的）—— 影片上不會出現。":
+        "No sponsor QR is configured (the image and the link are both empty), so it never appears.",
+    "顯示中：過場影片的右下角會出現這顆 QR，文字是「%s」。":
+        "Shown: this QR appears at the bottom right of transitions, captioned %s.",
+    "已隱藏：連結還留著，但影片不會畫這顆 QR（重新勾選再重建過場就會回來）。":
+        "Hidden: the link is kept, but the video will not draw this QR (tick it again and rebuild the "
+        "transitions to bring it back).",
+    "來源：贊助 QR 圖片。改圖片、連結或開關之後，要重建過場才會反映到影片上（集數不會重做）。":
+        "Source: the sponsor QR image. After changing the image, the link or the switch, rebuild the "
+        "transitions for it to reach the video (episodes are not redone).",
+    "來源：由贊助連結自動產生。改連結或開關之後，要重建過場才會反映到影片上（集數不會重做）。":
+        "Source: generated from the sponsor link. After changing the link or the switch, rebuild the "
+        "transitions for it to reach the video (episodes are not redone).",
+    "介面與畫面語言": "Interface and on-screen language",
+    "後台右上角的切換鈕就是改這個；畫面字樣（首播日期、QR 說明）也跟著換":
+        "The switch at the top right of the console sets this; the on-screen wording (the date prefix, "
+        "the QR captions) follows it.",
+    "ui.lang=en 時用這一個": "used when ui.lang=en",
+    "按鈕文字（集數，英文）": "Button caption (episodes, English)",
+    "倒數前綴（中文）": "Countdown prefix (Chinese)",
+    "中文放在秒數前面（剩餘 02:57）": "the prefix goes before the seconds in Chinese",
+    "倒數後綴（英文）": "Countdown suffix (English)",
+    "英文放在秒數後面（02:57 left）": "the suffix goes after the seconds in English",
+    "按鈕文字（過場，英文）": "Button caption (transitions, English)",
 }
 
 
@@ -1902,7 +1931,6 @@ function refresh(){
     text("head", s.now + "　目錄 " + s.prefix);
     renderWarn(s);
     renderQuick(s);
-    renderLang(s);
     renderServices(s);
     var selEl = document.getElementById("mode");
     var selMode = (selEl && selEl.value) || "";
@@ -2006,7 +2034,10 @@ function renderSponsor(cfg){
   var pic = String(ov.sponsor_qr_image || "");
   var url = String(ov.sponsor_url || "");
   var show = (ov.sponsor_show === undefined) ? true : !!ov.sponsor_show;
-  var cap = String(ov.sponsor_caption || "贊助");
+  // The video is drawn with the caption of the console language (build_local_content picks
+  // sponsor_caption or sponsor_caption_en from ui.lang), so the preview reads the same one.
+  var en = (((cfg || {}).ui || {}).lang === "en");
+  var cap = String((en ? ov.sponsor_caption_en : ov.sponsor_caption) || (en ? "Support" : "贊助"));
   var host = document.getElementById("sponbox");
   if (!host) { return; }
   host.innerHTML = "";
