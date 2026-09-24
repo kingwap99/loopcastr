@@ -981,7 +981,9 @@ def start_task(action, body):
 def task_state():
     with TASK_LOCK:
         st = dict(TASK)
-    st["log"] = tail(TASK_LOG, 200)
+    # While a build runs the whole tail is the progress view. Once it is done only the end matters, and
+    # 200 lines of it would push the everyday controls off the page.
+    st["log"] = tail(TASK_LOG, 200 if st.get("running") else 40)
     return st
 
 
