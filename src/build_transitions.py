@@ -151,7 +151,7 @@ def fetch_shorts(url, count):
         ids = [x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
         if len(ids) > len(best):
             best = ids
-        elif best:
+        elif len(best) > len(ids):
             print("listing attempt %d returned %d shorts; keeping %d" % (i + 1, len(ids), len(best)),
                   flush=True)
         if not best:

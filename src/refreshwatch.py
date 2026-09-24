@@ -97,7 +97,7 @@ def flat_ids(url, limit):
         ids = [x.strip() for x in (p.stdout or "").splitlines() if x.strip()]
         if len(ids) > len(best):
             best = ids
-        elif best:
+        elif len(best) > len(ids):
             log("listing attempt %d returned %d ids; keeping %d" % (i + 1, len(ids), len(best)))
         if not best:
             time.sleep(15 + i * 15)
