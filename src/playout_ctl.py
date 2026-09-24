@@ -82,6 +82,25 @@ def _segments(local_json):
         return []
 
 
+def same_round(list_a, list_b):
+    """Do two local playlists describe the same round: the same files in the same cyclic order?
+
+    A restart stops the stream for a few seconds, so it is only worth doing when the list on air is
+    actually different. A batch that added no new files rebuilds exactly the same list, and handing it
+    over would interrupt the channel for nothing (measured: a refresh-triggered rebuild with nothing
+    missing still restarted the playout once per batch). Files are compared by basename, which is unique
+    per segment; a rotation of the same round counts as the same, because the same videos are playing.
+    """
+    a = [os.path.basename(s.get("path") or "") for s in _segments(list_a)]
+    b = [os.path.basename(s.get("path") or "") for s in _segments(list_b)]
+    if not a or len(a) != len(b) or sorted(a) != sorted(b):
+        return False
+    for start in [i for i, name in enumerate(b) if name == a[0]]:
+        if b[start:] + b[:start] == a:
+            return True
+    return False
+
+
 def next_boundary_info(local_json):
     """Return ``(next_boundary, next_segment_index)`` or ``(None, None)``.
 

@@ -303,7 +303,12 @@ def batched_build(cfg, f, a, batch, bsize):
         # The concat demuxer reads its list once at ffmpeg startup, so the new
         # list is rotated to the next segment before the restart.
         if active_before:
-            continue_from(f, active_before)
+            if pctl.same_round(active_before, f["local"]):
+                # This batch added nothing, so the list is the one already on air. Restarting would
+                # stop the stream for a few seconds and change nothing at all.
+                log("the list on air is already this one; not restarting the playout for it")
+            else:
+                continue_from(f, active_before)
         else:
             log("no snapshot of the on-air list; keeping the playout untouched")
         if active_before:
@@ -511,6 +516,9 @@ def main():
 
     if a.switch:
         if live:
+            if active_before and pctl.same_round(active_before, f["local"]):
+                log("the list on air is already this one; not restarting the playout for it")
+                return 0
             if active_before and continue_from(f, active_before):
                 try:
                     os.remove(active_before)
