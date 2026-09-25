@@ -139,6 +139,10 @@ Rebuilds only fill in what is missing: every video and transition records an
 "encode-parameter fingerprint plus file size", and unchanged files are skipped
 (`--force` redoes everything).
 
+Each mode can also set `sort` — `source` (whatever order the source gave), `date-asc` or `date-desc`
+(by first-air time). The video limit and the age filter are applied first, then that selection is sorted,
+so "the last 24 hours, played oldest first" is `max_age_hours=24` with `sort=date-asc`.
+
 Brand assets (logo / icon / colours / tagline) live in [`assets/`](assets/):
 `icon.svg`, `icon-dark.svg`, `logo-dark.svg`, `logo-light.svg`. The console uses
 `icon-dark` as its favicon.
@@ -340,6 +344,10 @@ QR 與字樣，都是 `modes.json` ＋ 控制台「建置並切換（開始直�
 重新建置時也只補缺的：每支影片與過場都記了「編碼參數指紋 ＋ 檔案大小」，
 沒變就跳過（`--force` 才全部重做）。實測 `.22` 上重跑一次 `test` 模式：
 `3 skipped by fingerprint`、`0 transitions, 6 skipped`，整輪 15 秒、0 支重編。
+
+每個模式也可以設 `sort` —— `source`（來源給的順序）、`date-asc`／`date-desc`（依首播日期）。
+順序是「先取影片數上限、再過濾首播時間，之後才排序」，所以「最近 24 小時、由舊到新播」就是
+`max_age_hours=24` ＋ `sort=date-asc`。控制台在「① 來源設定 → 更多設定」有對應的下拉選單。
 
 品牌資產（Logo／Icon／配色／標語）在 [`assets/`](assets/)：`icon.svg`、`icon-dark.svg`、
 `logo-dark.svg`、`logo-light.svg`。控制台用 `icon-dark` 當 favicon。

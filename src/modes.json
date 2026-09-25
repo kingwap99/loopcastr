@@ -1,9 +1,10 @@
 {
-  "_comment": "Broadcast mode definitions. Each mode's source, length cap, shorts pool and rescan interval live here; changing channel or parameters means editing only this file. max_seconds=0 means full length. The example uses @YourChannel - replace it with your own channel handle.",
+  "_comment": "Broadcast mode definitions. Each mode's source, length cap, shorts pool and rescan interval live here; changing channel or parameters means editing only this file. max_seconds=0 means full length. sort is the play order: source = whatever order the source gave (a channel listing is newest first), date-asc / date-desc = by first-air time (the video limit and the age filter are applied first, then the selection is sorted). The example uses @YourChannel - replace it with your own channel handle.",
   "news": {
     "label": "News",
     "video_source": "https://www.youtube.com/@YourChannel/videos",
     "video_limit": 30,
+    "sort": "source",
     "max_seconds": 0,
     "shorts_url": "https://www.youtube.com/@YourChannel/shorts",
     "shorts_count": 15,
@@ -16,6 +17,7 @@
     "label": "Promotion",
     "video_source": "https://www.youtube.com/@YourChannel/videos",
     "video_limit": 30,
+    "sort": "source",
     "max_seconds": 450,
     "shorts_url": "https://www.youtube.com/@YourChannel/shorts",
     "shorts_count": 50,
@@ -28,6 +30,7 @@
     "label": "Test",
     "video_source": "https://www.youtube.com/@YourChannel/videos",
     "video_limit": 3,
+    "sort": "source",
     "max_seconds": 180,
     "shorts_url": "https://www.youtube.com/@YourChannel/shorts",
     "shorts_count": 6,

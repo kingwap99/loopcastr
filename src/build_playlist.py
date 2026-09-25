@@ -116,6 +116,11 @@ def main():
                     help="keep only videos first aired within N hours (0 = no limit). "
                          "Applied after --limit.")
     ap.add_argument("--target", default="rtmp://127.0.0.1:1935/live/main")
+    ap.add_argument("--sort", default="source",
+                    choices=("source", "date-asc", "date-desc"),
+                    help="play order: source (keep the order the source gave us), "
+                         "date-asc / date-desc (by first-air time; videos without a "
+                         "timestamp go last). Applied after --limit and the age filter.")
     ap.add_argument("--allow-shrink", action="store_true",
                     help="write the list even when it is shorter than the existing "
                          "one (default: refuse, so a partial listing cannot shrink "
@@ -194,6 +199,19 @@ def main():
                   "or the video limit." % a.max_age_hours, file=sys.stderr)
             return 2
         segs = kept
+
+    if a.sort != "source":
+        # 依首播時間排。沒有時間戳的放最後（排不出來的不該插在中間）。
+        dated = [s for s in segs if s.get("air_ts")]
+        undated = [s for s in segs if not s.get("air_ts")]
+        dated.sort(key=lambda s: int(s["air_ts"]), reverse=(a.sort == "date-desc"))
+        segs = dated + undated
+        print("Sort: %s -> first %s, last %s%s"
+              % (a.sort,
+                 dated[0].get("air_date") if dated else "-",
+                 dated[-1].get("air_date") if dated else "-",
+                 " (%d without a date at the end)" % len(undated) if undated else ""),
+              flush=True)
 
     total = sum(s["seconds"] or 0 for s in segs)
     out = {"target": a.target,

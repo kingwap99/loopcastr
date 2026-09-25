@@ -698,6 +698,18 @@ overwrite** the existing list: an empty concat list would stop the playout, so i
 The first-air time on screen uses `YYYY/MM/DD HH:MM` in the machine's time zone, taken from yt-dlp's
 `release_timestamp`; failing that it falls back to `timestamp`, and failing that to the date plus `00:00`.
 
+`sort` picks the **play order**:
+
+| value | meaning |
+|---|---|
+| `source` | whatever order the source gave (a channel listing is newest first) |
+| `date-asc` | by first-air time, oldest first |
+| `date-desc` | by first-air time, newest first |
+
+It is applied **after** the video limit and the age filter, so "the last 24 hours, played oldest first" is
+`max_age_hours=24` plus `sort=date-asc`. Videos without a timestamp always go last. In the console it is
+the play-order dropdown under block 1 → more settings.
+
     python3 mode_build.py --mode promotion
     python3 mode_build.py --mode promotion --switch
     python3 mode_build.py --mode promotion --scan-only

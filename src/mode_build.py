@@ -119,6 +119,8 @@ def scan(cfg, f):
         cmd += ["--limit", str(cfg["video_limit"])]
     if cfg.get("max_age_hours"):
         cmd += ["--max-age-hours", str(cfg["max_age_hours"])]
+    if cfg.get("sort"):
+        cmd += ["--sort", str(cfg["sort"])]
     return run(cmd)
 
 

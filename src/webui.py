@@ -1342,6 +1342,10 @@ UI_TEXT = {
     "只播幾小時內首播的（0＝不限）": "only videos first aired within N hours (0 = no limit)",
     "先做幾支就開播（0＝全部做完才切換）":
         "go live after building this many videos (0 = wait for everything)",
+    "播放順序": "play order",
+    "來源順序": "source order",
+    "首播日期：舊→新": "first aired: oldest first",
+    "首播日期：新→舊": "first aired: newest first",
     "語系只能是 zh 或 en": "the language must be zh or en",
     "%s 不存在；這個模式要先建置過": "%s does not exist; build this mode first",
     "%s 不存在；這個模式要先掃描過": "%s does not exist; scan this mode first",
@@ -2091,6 +2095,8 @@ var FIELDS = [
   ["shorts_url", "② 過場 shorts 網址（轉場輪播）", "text", 56,
    "https://www.youtube.com/@YourChannel/shorts"],
   ["video_limit", "影片數上限", "number", 6, ""],
+  ["sort", "播放順序", "choice",
+   [["source", "來源順序"], ["date-asc", "首播日期：舊→新"], ["date-desc", "首播日期：新→舊"]], ""],
   ["max_age_hours", "只播幾小時內首播的（0＝不限）", "number", 6, ""],
   ["first_batch", "先做幾支就開播（0＝全部做完才切換）", "number", 6, ""],
   ["max_seconds", "每支長度上限（秒，0＝全長）", "number", 6, ""],
@@ -2133,11 +2139,31 @@ function renderModes(modes){
       row.className = "row";
       var lab = document.createElement("label");
       lab.textContent = f[1];
-      var inp = document.createElement("input");
-      inp.type = f[2];
-      if (f[3]) { inp.size = f[3]; }
-      if (f[4]) { inp.placeholder = f[4]; }
-      inp.value = (m[f[0]] === undefined || m[f[0]] === null) ? "" : m[f[0]];
+      var inp;
+      if (f[2] === "choice") {
+        // 選項可以寫 "值" 或 ["值", "顯示文字"]
+        inp = document.createElement("select");
+        (f[3] || []).forEach(function(c){
+          var pair = Array.isArray(c) ? c : [c, c];
+          var o = document.createElement("option");
+          o.value = pair[0];
+          o.textContent = pair[1];
+          inp.appendChild(o);
+        });
+      } else {
+        inp = document.createElement("input");
+        inp.type = f[2];
+        if (f[3]) { inp.size = f[3]; }
+        if (f[4]) { inp.placeholder = f[4]; }
+      }
+      var cur = (m[f[0]] === undefined || m[f[0]] === null) ? "" : m[f[0]];
+      inp.value = cur;
+      // 舊的 modes.json 沒有這個 key 時，select 會變成「沒有選中」→ 顯示空白。
+      // 退回第一個選項，存檔時就會把預設值寫進去。
+      if (inp.tagName === "SELECT"
+          && !Array.prototype.some.call(inp.options, function(o){ return o.value === String(cur); })) {
+        inp.selectedIndex = 0;
+      }
       row.appendChild(lab);
       row.appendChild(inp);
       into.appendChild(row);
@@ -2176,6 +2202,7 @@ function saveMode(mk, inputs){
   if (!modes[mk]) { modes[mk] = {}; }
   FIELDS.forEach(function(f){
     var raw = inputs[f[0]].value.trim();
+    if (f[2] === "choice" && !raw) { return; }   // 空值不要寫進去，讓程式用預設
     if (f[2] === "number") {
       var n = parseInt(raw, 10);
       modes[mk][f[0]] = isNaN(n) ? 0 : n;
