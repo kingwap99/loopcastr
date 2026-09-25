@@ -1363,6 +1363,12 @@ UI_TEXT = {
     "串流沒有起來": "the stream is not up",
     "不確定的模式": "unknown mode",
     "來源還是範例值 @YourChannel": "the source is still the @YourChannel example",
+    "來源還是範例值 @YourChannel —— 建置前請先填上真實的頻道網址（貼上後要按「儲存這個模式」才會生效）。":
+        "the source is still the @YourChannel example — set a real channel URL before "
+        "building (and press Save this mode for it to take effect).",
+    "過場 shorts 網址還是範例值 @YourChannel —— 這個模式不會做過場（要有的話填上真實的 shorts 網址並存檔）。":
+        "the shorts URL is still the @YourChannel example — this mode will build no "
+        "transitions (fill in a real shorts URL and save to get them).",
     "來源還是範例值 @YourChannel —— 建置前請先填上真實的頻道網址。":
         "the source is still the @YourChannel example — set a real channel URL before building.",
     "請改成你真實的頻道或播放清單網址": "set your real channel or playlist URL",
@@ -2130,8 +2136,14 @@ function renderModes(modes){
     if (String(m.video_source || "").indexOf("YourChannel") >= 0) {
       var warn = document.createElement("p");
       warn.className = "down";
-      warn.textContent = "來源還是範例值 @YourChannel —— 建置前請先填上真實的頻道網址。";
+      warn.textContent = "來源還是範例值 @YourChannel —— 建置前請先填上真實的頻道網址（貼上後要按「儲存這個模式」才會生效）。";
       box.appendChild(warn);
+    }
+    if (String(m.shorts_url || "").indexOf("YourChannel") >= 0) {
+      var warn2 = document.createElement("p");
+      warn2.className = "down";
+      warn2.textContent = "過場 shorts 網址還是範例值 @YourChannel —— 這個模式不會做過場（要有的話填上真實的 shorts 網址並存檔）。";
+      box.appendChild(warn2);
     }
     var inputs = {};
     function addField(f, into){

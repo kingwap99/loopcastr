@@ -144,6 +144,11 @@ def transitions(cfg, f, passes, force=False, limit=0):
     if not cfg.get("shorts_url"):
         log("no shorts_url for this mode, skipping transitions")
         return 0
+    if "YourChannel" in str(cfg["shorts_url"]):
+        # 範例值：yt-dlp 抓不到任何 short。這裡直接跳過並講清楚，
+        # 不然會在下載階段白跑一輪才失敗（使用者只看到「過場建置失敗」）。
+        log("shorts_url is still the @YourChannel example; this mode builds no transitions")
+        return 0
     cmd = [sys.executable, os.path.join(HERE, "build_transitions.py"),
            "--playlist", f["mother"],
            "--shorts-url", cfg["shorts_url"],
