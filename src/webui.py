@@ -320,8 +320,17 @@ def mtx(api, path_name):
 # The service (launchd job) list. The front end no longer keeps its own copy and always uses what /api/status returns.
 # The label prefix is not hard-coded: installs from before the rename (loopcastr was ytpl) are com.ytpl.*,
 # so the prefix comes from the plist actually present in this directory.
-SERVICE_NAMES = ["mediamtx", "playout", "publish", "health", "refresh"]
+# 六個服務都要列出來，包含控制台自己 —— 少了自己會讓人以為「只有五個」。
+SERVICE_NAMES = ["mediamtx", "playout", "publish", "health", "refresh", "webui"]
 DEFAULT_PREFIX = "com.loopcastr."
+SERVICE_DOCS = {
+    "mediamtx": "媒體樞紐：收播出端的 RTMP，供推流端與 HLS 讀取",
+    "playout": "播出端：一個長命 ffmpeg 循環播 concat 清單（純複製）",
+    "publish": "推流端：把 MediaMTX 的 live/main 推到 YouTube ingest（啟動時讀 stream.key）",
+    "health": "健康檢查：每 60 秒驗 ready／讀者／流量，連續失敗會重啟對應服務",
+    "refresh": "自動重掃：有新片就重建，並在下一個換片點切換",
+    "webui": "控制台：這個頁面（預設 127.0.0.1:8787）",
+}
 
 
 def service_prefix():
@@ -375,7 +384,13 @@ def service_state(label, jobs):
 def services():
     jobs = launchctl_jobs()
     prefix = service_prefix()
-    return [service_state(prefix + s, jobs) for s in SERVICE_NAMES]
+    out = []
+    for s in SERVICE_NAMES:
+        st = service_state(prefix + s, jobs)
+        st["name"] = s
+        st["doc"] = SERVICE_DOCS.get(s, "")
+        out.append(st)
+    return out
 
 
 def hls_preview(path_name):
@@ -1477,6 +1492,18 @@ UI_TEXT = {
     "已停止 %s（%s）": "stopped %s (%s)",
     "重啟": "Restart",
     "停止": "Stop",
+    "媒體樞紐：收播出端的 RTMP，供推流端與 HLS 讀取":
+        "media hub: receives the playout's RTMP and serves the publisher (and HLS)",
+    "播出端：一個長命 ffmpeg 循環播 concat 清單（純複製）":
+        "playout: one long-lived ffmpeg loops the concat list with stream copy",
+    "推流端：把 MediaMTX 的 live/main 推到 YouTube ingest（啟動時讀 stream.key）":
+        "publisher: copies MediaMTX live/main to the YouTube ingest (reads stream.key at startup)",
+    "健康檢查：每 60 秒驗 ready／讀者／流量，連續失敗會重啟對應服務":
+        "health: every 60 s checks ready / readers / traffic and restarts the failing service",
+    "自動重掃：有新片就重建，並在下一個換片點切換":
+        "refresh: rescans the source and rebuilds at the next segment boundary when new videos appear",
+    "控制台：這個頁面（預設 127.0.0.1:8787）":
+        "console: this page (127.0.0.1:8787 by default)",
     "%s：%s %s": "%s: %s %s",
     "%s（%s 秒後）": "%s (%s s later)",
     "已儲存 %s：%s": "saved %s: %s",
@@ -1939,10 +1966,13 @@ function renderServices(s){
     if (x.loaded) {
       btn.textContent = "重啟";
       btn.onclick = function(){ svcCall(x.label, "restart"); };
-      var off = document.createElement("button");
-      off.textContent = "停止";
-      off.onclick = function(){ svcCall(x.label, "stop"); };
-      wrap.appendChild(off);
+      // 控制台自己不提供「停止」：按下去這個頁面就斷了，得回命令列才能救回來。
+      if (x.name !== "webui") {
+        var off = document.createElement("button");
+        off.textContent = "停止";
+        off.onclick = function(){ svcCall(x.label, "stop"); };
+        wrap.appendChild(off);
+      }
     } else {
       btn.textContent = "啟動";
       btn.disabled = !x.plist;
@@ -1950,6 +1980,13 @@ function renderServices(s){
       btn.onclick = function(){ svcCall(x.label, "start"); };
     }
     wrap.appendChild(b); wrap.appendChild(st); wrap.appendChild(btn);
+    if (x.doc) {
+      var doc = document.createElement("div");
+      doc.className = "dim";
+      doc.style.cssText = "margin:-2px 0 6px";
+      doc.textContent = x.doc;
+      wrap.appendChild(doc);
+    }
     d.appendChild(wrap);
   });
 }

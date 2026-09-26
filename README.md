@@ -184,7 +184,7 @@ Change what plays in `modes.json`, not in `settings.json` - two sources of truth
 | Item | Value |
 |---|---|
 | Host | one Apple silicon Mac (test machine: M1 / 8 GB / macOS 27); Python 3 from Homebrew plus the `qrcode` and `pillow` packages |
-| Services | com.loopcastr.mediamtx / .playout / .publish / .health / .refresh (LaunchDaemons: start at boot, no login needed) |
+| Services | com.loopcastr.mediamtx / .playout / .publish / .health / .refresh / .webui (LaunchDaemons: start at boot, no login needed) |
 | Playout | single-process concat with `-c copy`; 0 second seam at every cut |
 | Boot recovery | measured: after a reboot with nobody logged in, the chain recovered automatically; 25 second interruption |
 

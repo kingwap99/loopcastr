@@ -77,6 +77,22 @@ Service definitions (templates; `__HOME__` / `__USER__` / `__YT_VIDEO_ID__` are 
 | `launchd/com.loopcastr.publish.plist` | Publisher |
 | `launchd/com.loopcastr.health.plist` | Health monitoring (runs as root so it can kickstart the system domain) |
 | `launchd/com.loopcastr.refresh.plist` | Automatic rescan |
+| `launchd/com.loopcastr.webui.plist` | Local console |
+
+### What each service does
+
+| service | what it does | if it stops | restart it when |
+|---|---|---|---|
+| `mediamtx` | The media hub. Receives the playout's RTMP on `127.0.0.1:1935/live/main` and serves readers (the publisher, and HLS if enabled in `mediamtx.yml`). | Nothing reaches the publisher: YouTube goes dark even though the playout is still encoding. | You edited `mediamtx.yml` (HLS, fd limits). |
+| `playout` | One long-lived ffmpeg that plays `concat-<mode>.txt` round and round with `-c copy` and pushes it to MediaMTX. This is the thing that "plays". | YouTube goes dark (the publisher loses its input). Restarting it starts the round over from the first segment. | After switching editions, or to pick up changes to `playout.sh`. |
+| `publish` | One long-lived ffmpeg that copies MediaMTX's `live/main` to the YouTube ingest URL with the key from `stream.key`. A watchdog reconnects when MediaMTX drops it. | YouTube shows nothing (or ends), while every local check still looks healthy. | After changing `stream.key` (it is read once at startup). |
+| `health` | Every 60 s: MediaMTX ready, readers alive, bytes still growing (plus the YouTube `live_status` if `YT_VIDEO_ID` is set). Writes `health.log` / `alerts.jsonl` and restarts the playout or publisher after three failures in a row. | You lose the safety net: a stalled stream stays stalled until someone looks. | Rarely; it runs as root so it can kickstart the system domain. |
+| `refresh` | Follows whichever mode the playout is on and rescans its source every `refresh_seconds`. When new videos show up it rebuilds and switches at the next segment boundary. | New uploads never appear on the channel. | After changing `refresh_seconds`. |
+| `webui` | The local console on `127.0.0.1:8787`: status, source settings, build / stop build, service start-stop-restart. | You lose the UI only; the stream keeps running. | After updating `webui.py`. |
+
+A `--agents` install puts them in `~/Library/LaunchAgents` (gui domain, needs a graphical login);
+a plain `install.sh` puts them in `/Library/LaunchDaemons` (system domain, starts at boot, needs sudo).
+The console can start, stop and restart gui-domain services; system-domain ones need `sudo launchctl`.
 
 ## Why the playout uses concat rather than a relay
 
