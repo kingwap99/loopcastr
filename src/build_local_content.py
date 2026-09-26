@@ -87,10 +87,26 @@ RAW_DIR = os.path.join(MEDIA_DIR, ".raw")
 MANIFEST = os.path.join(MEDIA_DIR, "manifest.json")
 
 # Landing at 720p is enough (the normalisation target is 720p); fetching 1080p only doubles the bandwidth.
-# m3u8 must be excluded: measured, Ig3vtqtXowY over HLS only gives 137s while DASH gives the full 270s.
-DEFAULT_FMT = ("bv*[height<=720][protocol^=https]+ba[protocol^=https]/"
-               "b[height<=720][protocol^=https]/"
-               "bv*[height<=720]+ba/b[height<=720]/b")
+#
+# Two measured traps in picking that 720p:
+#
+#   * height<=720 tests the pixel height, so a vertical 720x1280 short fails it and the best format left is
+#     360x640 - which then gets padded into a 1280x720 frame and looks blurred. Capping both sides picks
+#     720x1280 for those instead.
+#   * yt-dlp on its own takes the sharpest-looking name, not the sharpest stream: on a 65-minute episode it
+#     chose the 267 kbps single-file copy while the same 1280x720 was offered at 1200k/1229k as the segmented
+#     stream. -S res,vbr asks for the highest resolution first and then the highest bitrate, which lands on
+#     the segmented stream. The old selector also required protocol^=https, which forced the 267k copy.
+#
+# The picture is blurred before it reaches us either way, and no output bitrate can bring that detail back.
+FORMAT_CAP = "[width<=1280][height<=1280]"
+FORMAT_SORT = "res,vbr"
+FORMAT_PRIMARY = "bv*%s+ba/b%s/b" % (FORMAT_CAP, FORMAT_CAP)
+# Same resolution as single files, used as the retry after a segmented download that came back truncated
+# (measured once: 137s of 270s). check_duration catches that and the next attempt takes over.
+FORMAT_SECOND = ("bv*%s[protocol^=https]+ba[protocol^=https]/b%s[protocol^=https]/b%s/b"
+                 % (FORMAT_CAP, FORMAT_CAP, FORMAT_CAP))
+DEFAULT_FMT = FORMAT_PRIMARY
 FALLBACK_FMT = "b[height<=360]/b"
 FALLBACK_CLIENT = "android"
 
@@ -274,7 +290,8 @@ def fetch_raw(seg, cookies, fmt, client=None):
         cmd += ["--cookies", cookies]
     if client:
         cmd += ["--extractor-args", "youtube:player_client=" + client]
-    cmd += ["-f", fmt, "--merge-output-format", "mp4", "--remux-video", "mp4",
+    cmd += ["-f", fmt or FORMAT_PRIMARY, "-S", FORMAT_SORT,
+            "--merge-output-format", "mp4", "--remux-video", "mp4",
             "-o", os.path.join(RAW_DIR, sid + ".%(ext)s"), url]
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=3600,
                        stdin=subprocess.DEVNULL)
@@ -501,7 +518,9 @@ def main():
     ap.add_argument("--status", action="store_true", help="only report what is missing, do not download")
     ap.add_argument("--force", action="store_true", help="re-download files that already exist")
     ap.add_argument("--limit", type=int, default=0, help="max videos to fetch this run (0 = no limit)")
-    ap.add_argument("--format", default=DEFAULT_FMT, help="yt-dlp format selector")
+    ap.add_argument("--format", default="",
+                    help="yt-dlp format selector (default: the best bitrate at 720p, then the same "
+                         "resolution as a single file)")
     ap.add_argument("--no-fallback-client", action="store_true",
                     help="disable the android client fallback")
     ap.add_argument("--no-normalize", action="store_true",
@@ -668,9 +687,13 @@ def main():
         sid = seg["id"]
         t0 = time.time()
         fmt = seg.get("format") if args.respect_playlist_format else args.format
-        attempts = [(fmt or DEFAULT_FMT, None), (fmt or DEFAULT_FMT, None)]
+        # The healthy-bitrate stream first, then the same resolution as a single file, and only then a
+        # low-quality progressive copy through another client.
+        attempts = [(fmt or FORMAT_PRIMARY, None)]
+        if not fmt:
+            attempts.append((FORMAT_SECOND, None))
         if not args.no_fallback_client:
-            attempts.insert(1, (FALLBACK_FMT, FALLBACK_CLIENT))
+            attempts.append((FALLBACK_FMT, FALLBACK_CLIENT))
         raw = err = bad = None
         kept = os.path.join(RAW_DIR, sid + ".mp4")
         if args.keep_raw and os.path.exists(kept):
