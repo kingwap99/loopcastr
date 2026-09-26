@@ -1018,6 +1018,25 @@ def start_service(label):
                     "/Library/LaunchDaemons/%s.plist" % label}
 
 
+def stop_service(label):
+    """停掉服務（bootout）。要再起來就按「啟動」或 launchctl bootstrap。
+
+    停 publish ＝ 停止推上 YouTube；停 playout ＝ 停止播出。兩個都是可逆的。
+    """
+    if os.geteuid() == 0:
+        rc, out = sh(["launchctl", "bootout", "system/" + label], timeout=15)
+        if rc == 0:
+            return {"ok": True, "how": "launchctl bootout system/" + label}
+    rc, out = sh(["launchctl", "bootout", "gui/%d/%s" % (os.getuid(), label)],
+                 timeout=15)
+    if rc == 0:
+        return {"ok": True, "how": "launchctl bootout gui/%d/%s" % (os.getuid(), label)}
+    rc2, out2 = sh(["sudo", "-n", "launchctl", "bootout", "system/" + label], timeout=15)
+    if rc2 == 0:
+        return {"ok": True, "how": "sudo launchctl bootout system/" + label}
+    return {"ok": False, "error": ((out or "") + (out2 or "")).strip()[-200:]}
+
+
 def restart_service(label):
     """先試 system domain（非互動 sudo），不行再試目前使用者的 gui domain。"""
     if not re.match(r"^[A-Za-z0-9_.-]+$", label or ""):
@@ -1189,6 +1208,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "不合法的服務名稱"})
             if (body.get("action") or "restart") == "start":
                 return self._send(200, start_service(label))
+            if (body.get("action") or "") == "stop":
+                return self._send(200, stop_service(label))
             return self._send(200, restart_service(label))
         if path == "/api/probe":
             return self._send(200, probe_sources(body.get("video_source") or "",
@@ -1453,6 +1474,9 @@ UI_TEXT = {
     "從 %s 安裝並啟動": "install and start from %s",
     "已啟動 %s（%s）": "started %s (%s)",
     "已重啟 %s（%s）": "restarted %s (%s)",
+    "已停止 %s（%s）": "stopped %s (%s)",
+    "重啟": "Restart",
+    "停止": "Stop",
     "%s：%s %s": "%s: %s %s",
     "%s（%s 秒後）": "%s (%s s later)",
     "已儲存 %s：%s": "saved %s: %s",
@@ -1915,6 +1939,10 @@ function renderServices(s){
     if (x.loaded) {
       btn.textContent = "重啟";
       btn.onclick = function(){ svcCall(x.label, "restart"); };
+      var off = document.createElement("button");
+      off.textContent = "停止";
+      off.onclick = function(){ svcCall(x.label, "stop"); };
+      wrap.appendChild(off);
     } else {
       btn.textContent = "啟動";
       btn.disabled = !x.plist;
@@ -1928,8 +1956,13 @@ function renderServices(s){
 
 function svcCall(label, action){
   var name = label.replace(/^com\.[a-z0-9]+\./, "");
+  if (action === "stop"
+      && !confirm("要停掉 " + name + " 嗎？\n直播／播出會中斷，之後可以按「啟動」恢復。")) {
+    return;
+  }
   post("/api/service", { label: label, action: action }).then(function(r){
-    msg(r.ok ? fmt(action === "start" ? "已啟動 %s（%s）" : "已重啟 %s（%s）", name, r.how)
+    msg(r.ok ? fmt(action === "start" ? "已啟動 %s（%s）"
+                      : (action === "stop" ? "已停止 %s（%s）" : "已重啟 %s（%s）"), name, r.how)
              : fmt("%s：%s %s", name, r.error || "", r.hint || ""));
     refresh();
   });
