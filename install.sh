@@ -16,9 +16,15 @@ PREFIX="$HOME/loopcastr"
 SCOPE="daemon"        # daemon | agents
 DO_SERVICES=1
 FORCE_SERVICES=0
+UNINSTALL=0
 DRY=0
 WEBUI_HOST=""         # non-empty exposes the console on that address (it then needs a token)
 WEBUI_TOKEN_FILE=""   # defaults to <prefix>/webui-token
+
+# The console is registered on every install; the chain around it only once there is something to play.
+CONSOLE_SERVICE="webui"
+CHAIN_SERVICES="mediamtx playout publish health refresh"
+ALL_SERVICES="$CHAIN_SERVICES $CONSOLE_SERVICE"
 
 usage() {
   cat <<'EOF'
@@ -30,6 +36,9 @@ Options
   --agents           install as LaunchAgents (no root, but they only run with a graphical login)
   --no-services      copy files only, leave launchd alone
   --force-services   register the services even when there is no broadcast content yet
+  --uninstall        boot out the services and delete their plists, then stop; the programs, settings,
+                     media and logs are left in place. Run this before you move or delete the install
+                     directory - a registered service whose program is gone restarts forever
   --webui-host HOST  expose the console on HOST (e.g. 0.0.0.0) instead of localhost only;
                      webui.py refuses to start without a token, so one is generated if needed
   --webui-token-file PATH   where the console reads its token (default <prefix>/webui-token)
@@ -46,6 +55,10 @@ After installing
   The chain around it (mediamtx playout publish health refresh) is registered only once a concat*.txt exists,
   so launchd does not keep restarting a process that is bound to fail. Build the content (the console can do
   it), then run this script again - or pass --force-services to register the chain before any content exists.
+
+After uninstalling
+  The opposite trip: ./install.sh --uninstall (add --agents if you installed with --agents). It only touches
+  launchd, so the programs, settings, media and logs stay where they are.
 EOF
   exit 0
 }
@@ -56,6 +69,7 @@ while [ $# -gt 0 ]; do
     --agents)         SCOPE="agents"; shift ;;
     --no-services)    DO_SERVICES=0; shift ;;
     --force-services) FORCE_SERVICES=1; shift ;;
+    --uninstall)      UNINSTALL=1; shift ;;
     --webui-host)     WEBUI_HOST="${2:-}"; shift 2 ;;
     --webui-token-file) WEBUI_TOKEN_FILE="${2:-}"; shift 2 ;;
     --dry-run)        DRY=1; shift ;;
@@ -78,6 +92,49 @@ run()  { if [ "$DRY" = 1 ]; then printf '   [dry-run] %s\n' "$*"; else "$@"; fi;
 # every service on a first install. The bootstrap right after is what loads it, so the line is noise - and an
 # install that ends with a line saying "failed" reads like a broken one.
 runq() { if [ "$DRY" = 1 ]; then printf '   [dry-run] %s\n' "$*"; else "$@" >/dev/null 2>&1; fi; }
+
+# ── Uninstall ───────────────────────────────────────────────────────
+# Handled before everything else on purpose: the usual reason to run it is that the install directory is
+# gone or is about to be, so it must not need the programs, the plists or the dependencies. That state is
+# not harmless - with the directory deleted and the plist still registered, launchd restarts the service
+# forever on a program that is not there (measured: com.loopcastr.webui looping on "can't open file
+# '/Users/yangneo/loopcastr/webui.py'" until it was booted out by hand).
+if [ "$UNINSTALL" = 1 ]; then
+  step "Uninstalling services (${SCOPE})"
+  if [ "$SCOPE" = "daemon" ]; then
+    say "  sudo is needed to write /Library/LaunchDaemons"
+    if [ "$DRY" = 0 ]; then
+      sudo -v || { say "  could not get sudo; use --uninstall --agents for the gui domain" >&2; exit 5; }
+    fi
+  fi
+  for s in $ALL_SERVICES; do
+    label="com.loopcastr.$s"
+    if [ "$SCOPE" = "daemon" ]; then
+      runq sudo launchctl bootout "system/$label" || true
+      if [ -f "/Library/LaunchDaemons/$label.plist" ]; then
+        run sudo rm -f "/Library/LaunchDaemons/$label.plist"
+        say "  removed /Library/LaunchDaemons/$label.plist"
+      else
+        say "  $label: not registered"
+      fi
+    else
+      runq launchctl bootout "gui/$UID/$label" || true
+      if [ -f "$HOME/Library/LaunchAgents/$label.plist" ]; then
+        run rm -f "$HOME/Library/LaunchAgents/$label.plist"
+        say "  removed $HOME/Library/LaunchAgents/$label.plist"
+      else
+        say "  $label: not registered"
+      fi
+    fi
+  done
+  say "  the programs, settings, media and logs are left in place"
+  step "Done"
+  say "  uninstalled, service scope: $SCOPE"
+  if [ "$SCOPE" = "daemon" ]; then
+    say "  (if this machine was installed with --agents, run ./install.sh --uninstall --agents as well)"
+  fi
+  exit 0
+fi
 
 # ── Dependencies ───────────────────────────────────────────────────
 step "Checking dependencies"
@@ -247,8 +304,6 @@ fi
 # with - so gating it behind "content exists" left a first install with no way in: install.sh printed the
 # plists, wrote no services, and the operator had no console and no pointer to one. The chain around it is
 # what a missing concat list actually breaks, so only that part waits for content.
-CONSOLE_SERVICE="webui"
-CHAIN_SERVICES="mediamtx playout publish health refresh"
 
 step "Installing services (${SCOPE})"
 SERVICES=""
