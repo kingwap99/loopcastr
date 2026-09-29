@@ -269,6 +269,14 @@ install:
 The first serves on `http://127.0.0.1:8787`, the second on another port, and the third keeps it running in
 the background.
 
+On a remote machine, forward the port instead of exposing the console - no token, no firewall change, and
+nothing extra listening on the LAN:
+
+    ssh -N -L 8787:127.0.0.1:8787 you@the-mac
+
+Then open `http://127.0.0.1:8787/` locally. (`-N` opens no shell; add `-f` to background it.) `--webui-host`
+is for when you want the console reachable without a tunnel.
+
 Blocks (top to bottom is also the order of operation):
 
 | Block | Contents |

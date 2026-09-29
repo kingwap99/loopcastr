@@ -316,8 +316,12 @@ fi
 case " $SERVICES " in
   *" webui "*)
     say "  console:  http://127.0.0.1:8787/"
-    [ -z "$WEBUI_HOST" ] \
-      || say "            (bound to $WEBUI_HOST, so it asks for the token in $WEBUI_TOKEN_FILE)"
+    if [ -n "$WEBUI_HOST" ]; then
+      say "            (bound to $WEBUI_HOST, so it asks for the token in $WEBUI_TOKEN_FILE)"
+    else
+      # Installs are usually run over ssh, where 127.0.0.1 is the remote machine and not the browser.
+      say "            (from another machine: ssh -N -L 8787:127.0.0.1:8787 $USER_NAME@$HOSTNAME)"
+    fi
     ;;
   *) say "  console:  not registered; start it with $PYTHON $PREFIX/webui.py" ;;
 esac
