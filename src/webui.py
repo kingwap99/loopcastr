@@ -21,6 +21,7 @@ import os
 import re
 import signal
 import shutil
+import socketserver
 import subprocess
 import sys
 import threading
@@ -1255,6 +1256,25 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not found"})
 
 
+class Server(ThreadingHTTPServer):
+    """ThreadingHTTPServer that does not reverse-resolve its own listen address.
+
+    http.server.HTTPServer.server_bind() sets server_name = socket.getfqdn(host) and runs *before*
+    listen(), so a slow reverse lookup for 127.0.0.1 keeps the console from accepting connections for
+    that whole time. Measured on a test machine with a slow resolver: socket.getfqdn("127.0.0.1")
+    took 35.0 s and the console took 36 s from service start to the first answered request - so a
+    browser opened right after an install ("the console is at http://127.0.0.1:8787/") got nothing.
+    server_name only ends up in the Server: header of error pages and in CGI variables, neither of
+    which this console uses, so the bind address is a fine value for it.
+    """
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)      # socket(), setsockopt(), bind()
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--prefix", default=HERE,
@@ -1285,7 +1305,7 @@ def main():
     Handler.api = a.api
     Handler.path_name = a.path_name
     Handler.token = token
-    srv = ThreadingHTTPServer((a.host, a.port), Handler)
+    srv = Server((a.host, a.port), Handler)
     print("%s 控制台：http://%s:%d/   （API %s，路徑 %s）"
           % (PROJECT, a.host, a.port, a.api, a.path_name), flush=True)
     if token:
