@@ -105,6 +105,10 @@ the console's "Build and switch (go live)", which runs the whole chain for you.
 that actually run (and that the service plists point at) are the copies `install.sh` puts in the install
 directory.
 
+The services outlive the install directory. Before you delete or move it, run `./install.sh --uninstall`
+(add `--agents` if you installed with `--agents`): a registered service whose program is gone restarts
+forever, and the only trace is a line in its log.
+
 ### Local console
 
 Day-to-day operation needs no shell commands. The installer registers the console as a launchd service
@@ -332,6 +336,10 @@ QR 與字樣，都是 `modes.json` ＋ 控制台「建置並切換（開始直�
 
 **升級**：`git pull` 之後要**再跑一次 `./install.sh`**。pull 只更新 `src/`；實際在跑、服務 plist
 指向的是安裝目錄裡那份被攤平的複本，那正是 `install.sh` 負責更新的。
+
+服務比安裝目錄活得久。要刪掉或搬走安裝目錄之前，先跑 `./install.sh --uninstall`（用 `--agents`
+安裝的話是 `--uninstall --agents`）：已經註冊的服務找不到程式只會一直重啟，而唯一的痕跡是它 log
+裡的一行字。
 
 ### 本機控制台
 

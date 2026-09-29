@@ -147,6 +147,11 @@ Safe to run repeatedly; an existing `mediamtx.yml` and `stream.key` are never ov
 **To upgrade**: `git pull` and then run `./install.sh` again. The pull only updates `src/`; what runs is
 the flattened copy in the install directory, and `install.sh` is what refreshes it.
 
+Services outlive the install directory, so `install.sh --uninstall` boots them out and deletes their plists
+without touching the programs, settings, media or logs. Run it before you delete or move the install
+directory: a registered service whose program is gone restarts forever, and the only trace is a line in its
+log. Add `--agents` for a LaunchAgent install.
+
 **The console is registered on every install; the playout chain only once there is content to play.**
 `com.loopcastr.webui` has no content dependency - it is what you build content with - so a first install
 already leaves you with `http://127.0.0.1:8787/`. The other five would only restart forever with nothing to
