@@ -52,11 +52,20 @@ Design points, each measured on the target machine:
 ### Quick start
 
 Requirements: macOS with Python 3, plus `ffmpeg`, `yt-dlp` and `mediamtx` on `PATH`
-(`brew install ffmpeg yt-dlp mediamtx`) and the Python packages `qrcode` and `pillow`
-(`python3 -m pip install --user qrcode pillow`). `install.sh` checks all of them and prints what is
-missing; `opencv` is optional and only used by `build_transitions.py --verify`.
-It also picks the interpreter that has `qrcode` (Homebrew python3 when it is installed) and writes that
-exact path into the service plists, so what the checks verify is what the services run.
+(`brew install ffmpeg yt-dlp mediamtx`). `install.sh` checks all of them and prints what is missing;
+`opencv` is optional and only used by `build_transitions.py --verify`.
+
+Then the Python packages `qrcode` and `pillow`, installed **for the interpreter the services will
+use** - `./install.sh --dry-run` prints it as `the services will run on: ...`, and on a Homebrew machine
+it is `/opt/homebrew/bin/python3`:
+
+    /opt/homebrew/bin/python3 -m pip install --user qrcode pillow
+    # Homebrew's Python is externally managed (PEP 668) and refuses --user: add --break-system-packages
+
+Installing them for a different `python3` does not count. On many Macs bare `python3` is
+`/usr/bin/python3`, which has neither package; the console then refuses to start a build, and every video
+it does build comes out without its QR code. `install.sh` picks the interpreter that has `qrcode` and
+writes that exact path into the service plists, so what the checks verify is what the services run.
 
     git clone https://github.com/kingwap99/loopcastr && cd loopcastr
     ./install.sh --dry-run
@@ -70,18 +79,20 @@ points. Installing into the clone itself works too - `src/` is flattened into th
 root gains copies of the programs, plus the settings and service plists, all as untracked files. `src/`
 itself is never modified, so a later `git pull` stays clean.)
 
-That second run deliberately does **not** register the launchd services: with no content to play they
-would only restart forever. Build the content, then run the installer again to register and start them:
+That second run registers the console but deliberately **not** the playout chain: with nothing to play,
+`playout` and `publish` would only restart forever. So the console is already there after the first
+install, and it is the easiest way to build the content - set the source in block ① and press "build and
+switch" in block ②. The same thing by hand, with the interpreter from the requirements above:
 
     cd ~/loopcastr
-    python3 build_playlist.py --url '<playlist or channel URL>' -o playlist.json
-    python3 build_local_content.py --playlist playlist.json --target 720
-    python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
+    /opt/homebrew/bin/python3 build_playlist.py --url '<playlist or channel URL>' -o playlist.json
+    /opt/homebrew/bin/python3 build_local_content.py --playlist playlist.json --target 720
+    /opt/homebrew/bin/python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
     printf %s '<YouTube stream key>' > stream.key && chmod 600 stream.key
     cd <the clone> && ./install.sh
 
-The last `./install.sh`, run from the clone, sees the content and registers and starts the services.
-Add `--force-services` to the first run if you would rather register them before any content exists.
+The last `./install.sh`, run from the clone, sees the content and registers and starts the whole chain.
+Add `--force-services` to the first run if you would rather register the chain before any content exists.
 
 This command-line path is the minimum that plays: it plays the videos without transitions. Per-mode
 sources, transitions, incremental builds and the on-screen QR/captions all come from `modes.json` and
@@ -97,15 +108,16 @@ directory.
 ### Local console
 
 Day-to-day operation needs no shell commands. The installer registers the console as a launchd service
-(`com.loopcastr.webui`), so once the services are running it is already there:
+(`com.loopcastr.webui`) on every run, whether or not there is any content yet, so it is there as soon as
+you have run the installer once:
 
     http://127.0.0.1:8787/
 
-(Before the services exist, start it by hand with the interpreter the services use - on a Homebrew
-machine that is `/opt/homebrew/bin/python3 ~/loopcastr/webui.py`. The console builds with **its own**
-interpreter, so starting it as `/usr/bin/python3` (which has no `qrcode`) makes every build it triggers
-write videos with no QR codes. When that is the case the console shows a red warning at the top and
-refuses to start a build.)
+(With `--no-services`, or for a second copy on another port, start it by hand with the interpreter the
+services use - on a Homebrew machine that is `/opt/homebrew/bin/python3 ~/loopcastr/webui.py`. The console
+builds with **its own** interpreter, so starting it as `/usr/bin/python3` (which has no `qrcode`) makes
+every build it triggers write videos with no QR codes. When that is the case the console shows a red
+warning at the top and refuses to start a build.)
 
 The console binds to localhost only. To reach it from another machine, install with
 `./install.sh --webui-host 0.0.0.0` (`webui.py` refuses to run exposed without a token, so the
@@ -265,11 +277,19 @@ This project does **not** redistribute any of the following; install them yourse
 ### 快速開始
 
 需求：macOS ＋ Python 3，`PATH` 上要有 `ffmpeg`、`yt-dlp`、`mediamtx`
-（`brew install ffmpeg yt-dlp mediamtx`），以及 Python 套件 `qrcode`、`pillow`
-（`python3 -m pip install --user qrcode pillow`）。`install.sh` 會逐項檢查並告訴你缺什麼；
+（`brew install ffmpeg yt-dlp mediamtx`）。`install.sh` 會逐項檢查並告訴你缺什麼；
 `opencv` 是選配，只有 `build_transitions.py --verify` 會用到。
-它也會挑一個能 `import qrcode` 的直譯器（有裝 Homebrew 就用它的 python3），並把該路徑寫進服務
-plist，所以「檢查的那顆」和「服務實際跑的那顆」是同一顆。
+
+再來是 Python 套件 `qrcode`、`pillow`，而且必須裝在**服務實際會用的那顆直譯器**上——
+`./install.sh --dry-run` 會印出「the services will run on: …」，Homebrew 機器上就是
+`/opt/homebrew/bin/python3`：
+
+    /opt/homebrew/bin/python3 -m pip install --user qrcode pillow
+    # Homebrew 的 Python 受 PEP 668 管理，會拒絕 --user：那就加 --break-system-packages
+
+裝在別的 `python3` 上不算數。很多 Mac 的 `python3` 其實是 `/usr/bin/python3`，兩個套件都沒有；
+這樣控制台會拒絕開始建置，就算建了，每支影片也不會有 QR code。`install.sh` 會挑一顆能
+`import qrcode` 的直譯器，並把該路徑寫進服務 plist，所以「檢查的那顆」和「服務實際跑的那顆」是同一顆。
 
     git clone https://github.com/kingwap99/loopcastr && cd loopcastr
     ./install.sh --dry-run
@@ -283,17 +303,18 @@ plist，所以「檢查的那顆」和「服務實際跑的那顆」是同一顆
 設定檔與服務 plist，全部都是未進版控的檔案；`src/` 本身不會被改動，之後 `git pull` 不會有
 本地修改的衝突。）
 
-第二行**刻意不註冊** launchd 服務：還沒有內容可播時，它們只會一直重啟。先建內容，再跑一次安裝
-讓服務註冊並啟動：
+第二行會註冊控制台，但**刻意不註冊**播出鏈：還沒有內容可播時，`playout` 與 `publish` 只會一直
+重啟。所以第一次安裝完就有控制台，建內容最省事的方式就是用它——① 設好來源，② 按「建置並切換
+（開始直播）」。想自己下指令，同一件事（直譯器請用上面那顆）：
 
     cd ~/loopcastr
-    python3 build_playlist.py --url '<播放清單或頻道網址>' -o playlist.json
-    python3 build_local_content.py --playlist playlist.json --target 720
-    python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
+    /opt/homebrew/bin/python3 build_playlist.py --url '<播放清單或頻道網址>' -o playlist.json
+    /opt/homebrew/bin/python3 build_local_content.py --playlist playlist.json --target 720
+    /opt/homebrew/bin/python3 make_concat_list.py playlist-local.json -o concat.txt --base-dir ~/loopcastr
     printf %s '<YouTube 串流金鑰>' > stream.key && chmod 600 stream.key
     cd <剛才 clone 的目錄> && ./install.sh
 
-最後那行（在 clone 目錄執行）看到內容存在，就會註冊並啟動服務。想在還沒有內容時就先註冊，
+最後那行（在 clone 目錄執行）看到內容存在，就會註冊並啟動整條鏈。想在還沒有內容時就先註冊，
 第一次執行加 `--force-services` 即可。
 
 上面這條命令列路徑是**最小可播**版本（沒有過場）；每個模式的來源、過場、分批建置、畫面上的
@@ -306,15 +327,15 @@ QR 與字樣，都是 `modes.json` ＋ 控制台「建置並切換（開始直�
 
 ### 本機控制台
 
-日常操作不必再背指令。安裝程式會把控制台也註冊成 launchd 服務（`com.loopcastr.webui`），所以
-服務跑起來之後它就在那裡：
+日常操作不必再背指令。每一次跑 `install.sh` 都會把控制台註冊成 launchd 服務
+（`com.loopcastr.webui`），不管有沒有內容，所以安裝跑完一次它就在那裡：
 
     http://127.0.0.1:8787/
 
-（服務還沒建立時，自己用「服務用的那一顆」啟動——Homebrew 機器上是
-`/opt/homebrew/bin/python3 ~/loopcastr/webui.py`。控制台建置用的是**它自己的**直譯器，所以用
-`/usr/bin/python3`（沒有 `qrcode`）啟動的話，它觸發的每一次建置都會產出沒有 QR code 的影片。
-發生這種情況時，控制台最上面會出現紅色警告，並且拒絕開始建置。）
+（用 `--no-services` 安裝、或想在別的埠再開一份時，才需要自己用「服務用的那一顆」啟動——
+Homebrew 機器上是 `/opt/homebrew/bin/python3 ~/loopcastr/webui.py`。控制台建置用的是**它自己的**
+直譯器，所以用 `/usr/bin/python3`（沒有 `qrcode`）啟動的話，它觸發的每一次建置都會產出沒有
+QR code 的影片。發生這種情況時，控制台最上面會出現紅色警告，並且拒絕開始建置。）
 
 控制台預設只綁 localhost。要從別台機器連，安裝時加 `./install.sh --webui-host 0.0.0.0`
 （`webui.py` 對外開放時沒有 token 會拒絕啟動，所以安裝程式會在沒有 token 檔時產生
