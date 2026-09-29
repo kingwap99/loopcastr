@@ -125,8 +125,12 @@ audible effect. If you need a perfectly clean timeline, splice offline into one 
 ## Deployment
 
 Requirements: macOS with Python 3, plus `ffmpeg`, `yt-dlp` and `mediamtx` on `PATH`
-(`brew install ffmpeg yt-dlp mediamtx`) and the Python packages `qrcode` and `pillow`
-(`python3 -m pip install --user qrcode pillow`). `install.sh` checks all of them and prints what is missing.
+(`brew install ffmpeg yt-dlp mediamtx`) and the Python packages `qrcode` and `pillow`, installed for the
+interpreter `install.sh` reports as `the services will run on` (on a Homebrew machine
+`/opt/homebrew/bin/python3`; add `--break-system-packages`, because Homebrew's Python is externally
+managed). Installing them for a different `python3` - on many Macs `python3` is `/usr/bin/python3`, which
+has neither - leaves the services unable to draw QR codes. `install.sh` checks all of them and prints what
+is missing.
 
 `install.sh` copies the programs to the install directory, substitutes the `__HOME__` / `__USER__`
 placeholders in the plists, generates `mediamtx.yml` and registers the launchd services:
@@ -143,10 +147,11 @@ Safe to run repeatedly; an existing `mediamtx.yml` and `stream.key` are never ov
 **To upgrade**: `git pull` and then run `./install.sh` again. The pull only updates `src/`; what runs is
 the flattened copy in the install directory, and `install.sh` is what refreshes it.
 
-**The services are registered only when there is content to play.** On a first install there is none, so that
-run just copies the files and generates the plists and nothing starts - otherwise launchd would restart a
-process that is bound to fail. Build the content (see "Adding new episodes"), then run `./install.sh` again:
-the second run registers and starts the services. `--force-services` skips the wait.
+**The console is registered on every install; the playout chain only once there is content to play.**
+`com.loopcastr.webui` has no content dependency - it is what you build content with - so a first install
+already leaves you with `http://127.0.0.1:8787/`. The other five would only restart forever with nothing to
+play, so they wait: build the content (see "Adding new episodes"), then run `./install.sh` again and the
+second run registers and starts them. `--force-services` skips the wait.
 
 The console can also start a not-loaded service, but only for a gui-domain (LaunchAgent) install; with
 LaunchDaemons the services have to be registered by `./install.sh` again, or started with `sudo launchctl`.
@@ -251,6 +256,10 @@ Restarting the playout starts again from the first segment and leaves a cold-sta
 
 An interface for people who would rather not ssh in and memorise commands. Standard library only, so nothing has
 to be installed.
+
+`install.sh` registers it as `com.loopcastr.webui` on every run, with or without content, so after an
+install the console is already up and these are only for a second copy, another port, or a `--no-services`
+install:
 
     cd ~/loopcastr
     python3 webui.py

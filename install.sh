@@ -41,8 +41,11 @@ Environment
                      Deliberately not a command-line flag: flags show up in ps and in the shell history.
 
 After installing
-  Services do not start when there is no broadcast content yet (it asks you to build playlist-local.json
-  and concat.txt first), so launchd does not keep restarting a process that is bound to fail.
+  The console (com.loopcastr.webui) is registered on every install: it needs no broadcast content, and it is
+  the thing you build content with. Open http://127.0.0.1:8787/
+  The chain around it (mediamtx playout publish health refresh) is registered only once a concat*.txt exists,
+  so launchd does not keep restarting a process that is bound to fail. Build the content (the console can do
+  it), then run this script again - or pass --force-services to register the chain before any content exists.
 EOF
   exit 0
 }
@@ -70,6 +73,11 @@ case "$PREFIX" in /*) ;; *) echo "--prefix must be an absolute path" >&2; exit 2
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
 run()  { if [ "$DRY" = 1 ]; then printf '   [dry-run] %s\n' "$*"; else "$@"; fi; }
+# run with the command's own output dropped. Used where the failure is expected and the status is ignored:
+# launchctl bootout says "Boot-out failed: 3: No such process" for a service that was never loaded, which is
+# every service on a first install. The bootstrap right after is what loads it, so the line is noise - and an
+# install that ends with a line saying "failed" reads like a broken one.
+runq() { if [ "$DRY" = 1 ]; then printf '   [dry-run] %s\n' "$*"; else "$@" >/dev/null 2>&1; fi; }
 
 # ── Dependencies ───────────────────────────────────────────────────
 step "Checking dependencies"
@@ -235,25 +243,37 @@ else
 fi
 
 # ── Services ────────────────────────────────────────────────────────
+# The console is registered on every install. It has no content dependency - it is what you build content
+# with - so gating it behind "content exists" left a first install with no way in: install.sh printed the
+# plists, wrote no services, and the operator had no console and no pointer to one. The chain around it is
+# what a missing concat list actually breaks, so only that part waits for content.
+CONSOLE_SERVICE="webui"
+CHAIN_SERVICES="mediamtx playout publish health refresh"
+
 step "Installing services (${SCOPE})"
+SERVICES=""
 if [ "$DO_SERVICES" = 0 ]; then
   say "  --no-services: skipped"
-elif ! ls "$PREFIX"/concat*.txt >/dev/null 2>&1; then
-  if [ "$FORCE_SERVICES" = 1 ]; then
-    say "  WARNING: no concat*.txt yet, but --force-services asked for installation"
+else
+  SERVICES="$CONSOLE_SERVICE"
+  if ls "$PREFIX"/concat*.txt >/dev/null 2>&1; then
+    SERVICES="$SERVICES $CHAIN_SERVICES"
+  elif [ "$FORCE_SERVICES" = 1 ]; then
+    say "  WARNING: no concat*.txt yet, but --force-services asked for the whole chain"
+    SERVICES="$SERVICES $CHAIN_SERVICES"
   else
-    say "  WARNING: no broadcast content yet (no concat*.txt in $PREFIX), not starting the services"
-    say "    otherwise launchd keeps restarting a process that is bound to fail. Build content first:"
+    say "  WARNING: no broadcast content yet (no concat*.txt in $PREFIX)"
+    say "    registering the console only; the chain (mediamtx playout publish health refresh) would keep"
+    say "    restarting with nothing to play. Build content first:"
     say "      cd $PREFIX"
     say "      $PYTHON build_playlist.py --url '<playlist or channel URL>' -o playlist.json"
     say "      $PYTHON build_local_content.py --playlist playlist.json --target 720"
     say "      $PYTHON make_concat_list.py playlist-local.json -o concat.txt --base-dir $PREFIX"
-    say "    then run this script again (or add --force-services to install now)."
-    DO_SERVICES=0
+    say "    then run this script again (or add --force-services to register the chain now)."
   fi
 fi
 
-if [ "$DO_SERVICES" = 1 ]; then
+if [ -n "$SERVICES" ]; then
   if [ "$SCOPE" = "daemon" ]; then
     say "  sudo is needed to write /Library/LaunchDaemons"
     if [ "$DRY" = 0 ]; then
@@ -261,18 +281,18 @@ if [ "$DO_SERVICES" = 1 ]; then
     fi
   fi
   # The webui console is installed too: it is the everyday entry point, and without it a remote machine is command line only.
-  for s in mediamtx playout publish health refresh webui; do
+  for s in $SERVICES; do
     label="com.loopcastr.$s"
     if [ "$SCOPE" = "daemon" ]; then
       run sudo cp -f "$PREFIX/$label.plist" "/Library/LaunchDaemons/$label.plist"
       run sudo chown root:wheel "/Library/LaunchDaemons/$label.plist"
       run sudo chmod 644 "/Library/LaunchDaemons/$label.plist"
-      run sudo launchctl bootout "system/$label" || true
+      runq sudo launchctl bootout "system/$label" || true
       run sudo launchctl bootstrap system "/Library/LaunchDaemons/$label.plist"
     else
       run mkdir -p "$HOME/Library/LaunchAgents"
       run cp -f "$PREFIX/$label.plist" "$HOME/Library/LaunchAgents/$label.plist"
-      run launchctl bootout "gui/$UID/$label" || true
+      runq launchctl bootout "gui/$UID/$label" || true
       run launchctl bootstrap "gui/$UID" "$HOME/Library/LaunchAgents/$label.plist"
     fi
     say "  $label"
@@ -286,10 +306,34 @@ fi
 step "Done"
 say "  install directory: $PREFIX"
 say "  service scope: $SCOPE"
-say "  status:  tail -3 $PREFIX/logs/health.log"
-say "  alerts:  tail -3 $PREFIX/logs/alerts.jsonl"
-if [ "$SCOPE" = "daemon" ]; then
-  say "  restart the playout: sudo launchctl kickstart -k system/com.loopcastr.playout"
+if [ "$DRY" = 1 ]; then
+  say "  services this run would register: ${SERVICES:-none}"
 else
-  say "  restart the playout: launchctl kickstart -k gui/$UID/com.loopcastr.playout"
+  say "  services registered: ${SERVICES:-none}"
 fi
+# Print the console address, because that is the one thing the operator needs next and it is not guessable
+# when the services did not register. The rest of the summary only applies to services that are actually there.
+case " $SERVICES " in
+  *" webui "*)
+    say "  console:  http://127.0.0.1:8787/"
+    [ -z "$WEBUI_HOST" ] \
+      || say "            (bound to $WEBUI_HOST, so it asks for the token in $WEBUI_TOKEN_FILE)"
+    ;;
+  *) say "  console:  not registered; start it with $PYTHON $PREFIX/webui.py" ;;
+esac
+case " $SERVICES " in
+  *" health "*)
+    say "  status:  tail -3 $PREFIX/logs/health.log"
+    say "  alerts:  tail -3 $PREFIX/logs/alerts.jsonl"
+    ;;
+esac
+case " $SERVICES " in
+  *" playout "*)
+    if [ "$SCOPE" = "daemon" ]; then
+      say "  restart the playout: sudo launchctl kickstart -k system/com.loopcastr.playout"
+    else
+      say "  restart the playout: launchctl kickstart -k gui/$UID/com.loopcastr.playout"
+    fi
+    ;;
+  *) say "  the playout chain is not registered yet: build the content, then run this script again" ;;
+esac
