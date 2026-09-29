@@ -125,6 +125,14 @@ installer generates `<prefix>/webui-token` when there is none; change the path w
 `--webui-token-file`). Those two settings live in the service plist, so pass them on every upgrade -
 `install.sh` warns when it is about to regenerate a console plist that had extra arguments.
 
+Reaching it from another machine does not have to mean exposing it. If you already ssh in, forward the
+port - no token, no firewall change, and nothing extra listening on the LAN:
+
+    ssh -N -L 8787:127.0.0.1:8787 you@the-mac
+
+then open `http://127.0.0.1:8787/` on your own machine. (`-N` opens no shell; add `-f` to put it in the
+background.) `--webui-host` is for the case where you want the console reachable without a tunnel.
+
 It is one page of blocks, top to bottom in the order you use them:
 
 | Block | Contents |
@@ -341,6 +349,14 @@ QR code 的影片。發生這種情況時，控制台最上面會出現紅色警
 （`webui.py` 對外開放時沒有 token 會拒絕啟動，所以安裝程式會在沒有 token 檔時產生
 `<prefix>/webui-token`；路徑可用 `--webui-token-file` 改）。這兩個設定是寫在服務 plist 裡的，
 所以每次升級都要帶著；`install.sh` 要覆蓋一個帶有額外參數的控制台 plist 之前會先警告。
+
+要從別台機器連，不一定得對外開放。你本來就是用 ssh 進去的話，把埠轉送出來就好——不用 token、
+不用動防火牆、LAN 上也不會多一個監聽：
+
+    ssh -N -L 8787:127.0.0.1:8787 you@那台Mac
+
+然後在自己電腦的瀏覽器開 `http://127.0.0.1:8787/`。（`-N` 不開 shell，加 `-f` 丟到背景。）
+`--webui-host` 是「不想靠通道、要讓控制台自己對外」時才用的。
 
 它是一頁由上而下的區塊，順序就是你操作的順序：
 
